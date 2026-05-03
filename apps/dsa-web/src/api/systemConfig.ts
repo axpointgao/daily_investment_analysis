@@ -10,6 +10,8 @@ import type {
   SystemConfigResponse,
   SystemConfigSchemaResponse,
   SystemConfigValidationErrorResponse,
+  TestDataSourceRequest,
+  TestDataSourceResponse,
   TestLLMChannelRequest,
   TestLLMChannelResponse,
   UpdateSystemConfigRequest,
@@ -95,6 +97,13 @@ function toSnakeTestChannelPayload(payload: TestLLMChannelRequest): Record<strin
   };
 }
 
+function toSnakeTestDataSourcePayload(payload: TestDataSourceRequest): Record<string, unknown> {
+  return {
+    source: payload.source,
+    timeout_seconds: payload.timeoutSeconds ?? 8,
+  };
+}
+
 function toSnakeDiscoverModelsPayload(payload: DiscoverLLMChannelModelsRequest): Record<string, unknown> {
   return {
     name: payload.name,
@@ -146,6 +155,14 @@ export const systemConfigApi = {
       toSnakeTestChannelPayload(payload),
     );
     return toCamelCase<TestLLMChannelResponse>(response.data);
+  },
+
+  async testDataSource(payload: TestDataSourceRequest): Promise<TestDataSourceResponse> {
+    const response = await apiClient.post<Record<string, unknown>>(
+      '/api/v1/system/config/data-source/test',
+      toSnakeTestDataSourcePayload(payload),
+    );
+    return toCamelCase<TestDataSourceResponse>(response.data);
   },
 
   async discoverLLMChannelModels(

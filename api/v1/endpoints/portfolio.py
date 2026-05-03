@@ -15,6 +15,8 @@ from api.v1.schemas.portfolio import (
     PortfolioAccountItem,
     PortfolioAccountListResponse,
     PortfolioAccountUpdateRequest,
+    PortfolioBankLedgerCreateRequest,
+    PortfolioBankLedgerListResponse,
     PortfolioCashLedgerListResponse,
     PortfolioCashLedgerCreateRequest,
     PortfolioCorporateActionListResponse,
@@ -26,6 +28,8 @@ from api.v1.schemas.portfolio import (
     PortfolioImportCommitResponse,
     PortfolioImportParseResponse,
     PortfolioImportTradeItem,
+    PortfolioManualPriceItem,
+    PortfolioManualPriceUpsertRequest,
     PortfolioRiskResponse,
     PortfolioSnapshotResponse,
     PortfolioTradeListResponse,
@@ -287,6 +291,116 @@ def create_cash_ledger(request: PortfolioCashLedgerCreateRequest) -> PortfolioEv
         raise _bad_request(exc)
     except Exception as exc:
         raise _internal_error("Create cash ledger event failed", exc)
+
+
+@router.post(
+    "/manual-prices",
+    response_model=PortfolioManualPriceItem,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Upsert manual latest price fallback",
+)
+def upsert_manual_price(request: PortfolioManualPriceUpsertRequest) -> PortfolioManualPriceItem:
+    service = PortfolioService()
+    try:
+        data = service.upsert_manual_price(
+            account_id=request.account_id,
+            symbol=request.symbol,
+            market=request.market,
+            price_date=request.price_date,
+            price=request.price,
+            currency=request.currency,
+            note=request.note,
+        )
+        return PortfolioManualPriceItem(**data)
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Upsert manual price failed", exc)
+
+
+@router.post(
+    "/bank-ledger",
+    response_model=PortfolioEventCreatedResponse,
+    responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Record bank demand or term ledger event",
+)
+def create_bank_ledger(request: PortfolioBankLedgerCreateRequest) -> PortfolioEventCreatedResponse:
+    service = PortfolioService()
+    try:
+        data = service.record_bank_ledger(
+            account_id=request.account_id,
+            event_date=request.event_date,
+            asset_kind=request.asset_kind,
+            direction=request.direction,
+            amount=request.amount,
+            currency=request.currency,
+            bank_name=request.bank_name,
+            product_name=request.product_name,
+            maturity_date=request.maturity_date,
+            note=request.note,
+        )
+        return PortfolioEventCreatedResponse(**data)
+    except PortfolioBusyError as exc:
+        raise _conflict_error(error="portfolio_busy", message=str(exc))
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Create bank ledger event failed", exc)
+
+
+@router.get(
+    "/bank-ledger",
+    response_model=PortfolioBankLedgerListResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="List bank ledger events",
+)
+def list_bank_ledger(
+    account_id: Optional[int] = Query(None, description="Optional account id"),
+    date_from: Optional[date] = Query(None, description="Bank event date from"),
+    date_to: Optional[date] = Query(None, description="Bank event date to"),
+    asset_kind: Optional[str] = Query(None, description="Optional kind: demand/term"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> PortfolioBankLedgerListResponse:
+    service = PortfolioService()
+    try:
+        data = service.list_bank_ledger_events(
+            account_id=account_id,
+            date_from=date_from,
+            date_to=date_to,
+            asset_kind=asset_kind,
+            page=page,
+            page_size=page_size,
+        )
+        return PortfolioBankLedgerListResponse(**data)
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("List bank ledger events failed", exc)
+
+
+@router.delete(
+    "/bank-ledger/{entry_id}",
+    response_model=PortfolioDeleteResponse,
+    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Delete bank ledger event",
+)
+def delete_bank_ledger(entry_id: int) -> PortfolioDeleteResponse:
+    service = PortfolioService()
+    try:
+        ok = service.delete_bank_ledger_event(entry_id)
+        if not ok:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "not_found", "message": f"Bank ledger entry not found: {entry_id}"},
+            )
+        return PortfolioDeleteResponse(deleted=1)
+    except PortfolioBusyError as exc:
+        raise _conflict_error(error="portfolio_busy", message=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _internal_error("Delete bank ledger event failed", exc)
 
 
 @router.get(

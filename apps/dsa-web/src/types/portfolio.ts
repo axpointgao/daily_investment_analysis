@@ -2,13 +2,15 @@ export type PortfolioCostMethod = 'fifo' | 'avg';
 export type PortfolioSide = 'buy' | 'sell';
 export type PortfolioCashDirection = 'in' | 'out';
 export type PortfolioCorporateActionType = 'cash_dividend' | 'split_adjustment';
+export type PortfolioMarket = 'cn' | 'hk' | 'us' | 'fund' | 'crypto' | 'bank';
+export type PortfolioBankAssetKind = 'demand' | 'term';
 
 export interface PortfolioAccountItem {
   id: number;
   ownerId?: string | null;
   name: string;
   broker?: string | null;
-  market: 'cn' | 'hk' | 'us';
+  market: PortfolioMarket;
   baseCurrency: string;
   isActive: boolean;
   createdAt?: string | null;
@@ -22,7 +24,7 @@ export interface PortfolioAccountListResponse {
 export interface PortfolioAccountCreateRequest {
   name: string;
   broker?: string;
-  market: 'cn' | 'hk' | 'us';
+  market: PortfolioMarket;
   baseCurrency: string;
   ownerId?: string;
 }
@@ -44,6 +46,9 @@ export interface PortfolioPositionItem {
   priceDate?: string | null;
   priceStale?: boolean;
   priceAvailable?: boolean;
+  bankName?: string | null;
+  productName?: string | null;
+  maturityDate?: string | null;
 }
 
 export interface PortfolioAccountSnapshot {
@@ -55,13 +60,13 @@ export interface PortfolioAccountSnapshot {
   baseCurrency: string;
   asOf: string;
   costMethod: PortfolioCostMethod;
-  totalCash: number;
-  totalMarketValue: number;
-  totalEquity: number;
-  realizedPnl: number;
-  unrealizedPnl: number;
-  feeTotal: number;
-  taxTotal: number;
+  totalCash: number | null;
+  totalMarketValue: number | null;
+  totalEquity: number | null;
+  realizedPnl: number | null;
+  unrealizedPnl: number | null;
+  feeTotal: number | null;
+  taxTotal: number | null;
   fxStale: boolean;
   positions: PortfolioPositionItem[];
 }
@@ -79,6 +84,12 @@ export interface PortfolioSnapshotResponse {
   feeTotal: number;
   taxTotal: number;
   fxStale: boolean;
+  fxMissing?: boolean;
+  missingFxPairs?: Array<{
+    fromCurrency: string;
+    toCurrency: string;
+  }>;
+  assetBreakdown: Record<string, number>;
   accounts: PortfolioAccountSnapshot[];
 }
 
@@ -153,7 +164,7 @@ export interface PortfolioTradeCreateRequest {
   price: number;
   fee?: number;
   tax?: number;
-  market?: 'cn' | 'hk' | 'us';
+  market?: PortfolioMarket;
   currency?: string;
   tradeUid?: string;
   note?: string;
@@ -173,7 +184,7 @@ export interface PortfolioCorporateActionCreateRequest {
   symbol: string;
   effectiveDate: string;
   actionType: PortfolioCorporateActionType;
-  market?: 'cn' | 'hk' | 'us';
+  market?: PortfolioMarket;
   currency?: string;
   cashDividendPerShare?: number;
   splitRatio?: number;
@@ -182,6 +193,40 @@ export interface PortfolioCorporateActionCreateRequest {
 
 export interface PortfolioEventCreatedResponse {
   id: number;
+}
+
+export interface PortfolioManualPriceUpsertRequest {
+  accountId: number;
+  symbol: string;
+  market: PortfolioMarket;
+  priceDate: string;
+  price: number;
+  currency?: string;
+  note?: string;
+}
+
+export interface PortfolioManualPriceItem {
+  id: number;
+  accountId: number;
+  symbol: string;
+  market: string;
+  currency: string;
+  priceDate: string;
+  price: number;
+  note?: string | null;
+}
+
+export interface PortfolioBankLedgerCreateRequest {
+  accountId: number;
+  eventDate: string;
+  assetKind: PortfolioBankAssetKind;
+  direction: PortfolioCashDirection;
+  amount: number;
+  currency?: string;
+  bankName: string;
+  productName?: string;
+  maturityDate?: string;
+  note?: string;
 }
 
 export interface PortfolioDeleteResponse {
@@ -225,6 +270,28 @@ export interface PortfolioCashLedgerListItem {
 
 export interface PortfolioCashLedgerListResponse {
   items: PortfolioCashLedgerListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface PortfolioBankLedgerListItem {
+  id: number;
+  accountId: number;
+  eventDate: string;
+  assetKind: PortfolioBankAssetKind;
+  direction: PortfolioCashDirection;
+  amount: number;
+  currency: string;
+  bankName: string;
+  productName?: string | null;
+  maturityDate?: string | null;
+  note?: string | null;
+  createdAt?: string | null;
+}
+
+export interface PortfolioBankLedgerListResponse {
+  items: PortfolioBankLedgerListItem[];
   total: number;
   page: number;
   pageSize: number;

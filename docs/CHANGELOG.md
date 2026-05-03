@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 <!-- 新条目格式：- [类型] 描述（类型取值：新功能/改进/修复/文档/测试/chore）-->
 <!-- 每条独立一行追加到本段末尾，无需分类标题，合并时冲突最小 -->
+- [新功能] 持仓管理扩展场外基金、数字货币和银行账户，支持分类录入交易/资金/银行流水、手工价格兜底和全账户资产分布汇总。
+- [新功能] 设置页数据源新增三方 Tushare、TiantianFundApi 与数字货币行情连通性测试，Tushare 行情优先三方代理并保留官方 Token 兜底，数字货币行情使用 Binance 优先、OKX 兜底。
 - [新功能] 自定义 Webhook 支持 `CUSTOM_WEBHOOK_BODY_TEMPLATE` JSON body 模板，便于适配 AstrBot、NapCat 和自建推送服务。
 - [新功能] 大盘复盘结构化区块新增大盘红绿灯结论，基于盘面温度输出 green/yellow/red、核心原因和操作建议。
 - [修复] 统一持仓快照输出现价/市值/浮盈亏/收益率与价格元信息，并为 LLM 渠道测试补充结构化诊断与设置页排障提示。

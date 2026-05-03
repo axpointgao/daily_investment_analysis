@@ -178,6 +178,8 @@ class PortfolioRiskService:
                     to_currency="CNY",
                     as_of_date=as_of_date,
                 )
+                if converted is None:
+                    continue
                 exposure_by_symbol[symbol] = exposure_by_symbol.get(symbol, 0.0) + converted
 
         rows = []
@@ -234,6 +236,10 @@ class PortfolioRiskService:
                     to_currency="CNY",
                     as_of_date=as_of_date,
                 )
+                if converted is None:
+                    coverage["failed_count"] += 1
+                    errors.append(f"Missing FX rate for {valuation_currency}/CNY")
+                    continue
 
                 sector = self._resolve_primary_sector(
                     symbol=symbol,
@@ -380,6 +386,9 @@ class PortfolioRiskService:
                 to_currency="CNY",
                 as_of_date=row.snapshot_date,
             )
+            if converted is None:
+                stale_flag = True
+                continue
             grouped[key] = grouped.get(key, 0.0) + converted
             stale_flag = stale_flag or stale or bool(row.fx_stale)
 

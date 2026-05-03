@@ -8,11 +8,13 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+PortfolioMarket = Literal["cn", "hk", "us", "fund", "crypto", "bank"]
+
 
 class PortfolioAccountCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
     broker: Optional[str] = Field(None, max_length=64)
-    market: Literal["cn", "hk", "us"] = "cn"
+    market: PortfolioMarket = "cn"
     base_currency: str = Field("CNY", min_length=3, max_length=8)
     owner_id: Optional[str] = Field(None, max_length=64)
 
@@ -20,7 +22,7 @@ class PortfolioAccountCreateRequest(BaseModel):
 class PortfolioAccountUpdateRequest(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=64)
     broker: Optional[str] = Field(None, max_length=64)
-    market: Optional[Literal["cn", "hk", "us"]] = None
+    market: Optional[PortfolioMarket] = None
     base_currency: Optional[str] = Field(None, min_length=3, max_length=8)
     owner_id: Optional[str] = Field(None, max_length=64)
     is_active: Optional[bool] = None
@@ -44,14 +46,14 @@ class PortfolioAccountListResponse(BaseModel):
 
 class PortfolioTradeCreateRequest(BaseModel):
     account_id: int
-    symbol: str = Field(..., min_length=1, max_length=16)
+    symbol: str = Field(..., min_length=1, max_length=32)
     trade_date: date
     side: Literal["buy", "sell"]
     quantity: float = Field(..., gt=0)
     price: float = Field(..., gt=0)
     fee: float = Field(0.0, ge=0)
     tax: float = Field(0.0, ge=0)
-    market: Optional[Literal["cn", "hk", "us"]] = None
+    market: Optional[PortfolioMarket] = None
     currency: Optional[str] = Field(None, min_length=3, max_length=8)
     trade_uid: Optional[str] = Field(None, max_length=128)
     note: Optional[str] = Field(None, max_length=255)
@@ -71,7 +73,7 @@ class PortfolioCorporateActionCreateRequest(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=16)
     effective_date: date
     action_type: Literal["cash_dividend", "split_adjustment"]
-    market: Optional[Literal["cn", "hk", "us"]] = None
+    market: Optional[PortfolioMarket] = None
     currency: Optional[str] = Field(None, min_length=3, max_length=8)
     cash_dividend_per_share: Optional[float] = Field(None, ge=0)
     split_ratio: Optional[float] = Field(None, gt=0)
@@ -80,6 +82,62 @@ class PortfolioCorporateActionCreateRequest(BaseModel):
 
 class PortfolioEventCreatedResponse(BaseModel):
     id: int
+
+
+class PortfolioManualPriceUpsertRequest(BaseModel):
+    account_id: int
+    symbol: str = Field(..., min_length=1, max_length=32)
+    market: PortfolioMarket
+    price_date: date
+    price: float = Field(..., gt=0)
+    currency: Optional[str] = Field(None, min_length=3, max_length=8)
+    note: Optional[str] = Field(None, max_length=255)
+
+
+class PortfolioManualPriceItem(BaseModel):
+    id: int
+    account_id: int
+    symbol: str
+    market: str
+    currency: str
+    price_date: str
+    price: float
+    note: Optional[str] = None
+
+
+class PortfolioBankLedgerCreateRequest(BaseModel):
+    account_id: int
+    event_date: date
+    asset_kind: Literal["demand", "term"]
+    direction: Literal["in", "out"]
+    amount: float = Field(..., gt=0)
+    currency: Optional[str] = Field(None, min_length=3, max_length=8)
+    bank_name: str = Field(..., min_length=1, max_length=64)
+    product_name: Optional[str] = Field(None, max_length=128)
+    maturity_date: Optional[date] = None
+    note: Optional[str] = Field(None, max_length=255)
+
+
+class PortfolioBankLedgerListItem(BaseModel):
+    id: int
+    account_id: int
+    event_date: str
+    asset_kind: str
+    direction: str
+    amount: float
+    currency: str
+    bank_name: str
+    product_name: Optional[str] = None
+    maturity_date: Optional[str] = None
+    note: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class PortfolioBankLedgerListResponse(BaseModel):
+    items: List[PortfolioBankLedgerListItem] = Field(default_factory=list)
+    total: int
+    page: int
+    page_size: int
 
 
 class PortfolioDeleteResponse(BaseModel):
@@ -166,6 +224,9 @@ class PortfolioPositionItem(BaseModel):
     price_date: Optional[str] = None
     price_stale: bool = False
     price_available: bool = True
+    bank_name: Optional[str] = None
+    product_name: Optional[str] = None
+    maturity_date: Optional[str] = None
 
 
 class PortfolioAccountSnapshot(BaseModel):
@@ -177,13 +238,13 @@ class PortfolioAccountSnapshot(BaseModel):
     base_currency: str
     as_of: str
     cost_method: str
-    total_cash: float
-    total_market_value: float
-    total_equity: float
-    realized_pnl: float
-    unrealized_pnl: float
-    fee_total: float
-    tax_total: float
+    total_cash: Optional[float] = None
+    total_market_value: Optional[float] = None
+    total_equity: Optional[float] = None
+    realized_pnl: Optional[float] = None
+    unrealized_pnl: Optional[float] = None
+    fee_total: Optional[float] = None
+    tax_total: Optional[float] = None
     fx_stale: bool
     positions: List[PortfolioPositionItem] = Field(default_factory=list)
 
@@ -193,14 +254,17 @@ class PortfolioSnapshotResponse(BaseModel):
     cost_method: str
     currency: str
     account_count: int
-    total_cash: float
-    total_market_value: float
-    total_equity: float
-    realized_pnl: float
-    unrealized_pnl: float
-    fee_total: float
-    tax_total: float
+    total_cash: Optional[float] = None
+    total_market_value: Optional[float] = None
+    total_equity: Optional[float] = None
+    realized_pnl: Optional[float] = None
+    unrealized_pnl: Optional[float] = None
+    fee_total: Optional[float] = None
+    tax_total: Optional[float] = None
     fx_stale: bool
+    fx_missing: bool = False
+    missing_fx_pairs: List[Dict[str, str]] = Field(default_factory=list)
+    asset_breakdown: Dict[str, float] = Field(default_factory=dict)
     accounts: List[PortfolioAccountSnapshot] = Field(default_factory=list)
 
 

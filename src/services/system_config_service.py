@@ -11,7 +11,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import urlencode, urljoin, urlparse, urlunparse
 
 import requests
 
@@ -557,6 +557,24 @@ class SystemConfigService:
                 resolved_model=resolved_model,
                 latency_ms=None,
             )
+
+    def test_data_source(
+        self,
+        *,
+        source: str,
+        timeout_seconds: float = 8.0,
+    ) -> Dict[str, Any]:
+        """Run a lightweight connectivity check for newly added portfolio data sources."""
+        source_norm = (source or "").strip().lower()
+        config_map = self._manager.read_config_map()
+        timeout = max(3.0, float(timeout_seconds or 8.0))
+        if source_norm == "tushare_third_party":
+            return self._test_tushare_third_party(config_map=config_map, timeout=timeout)
+        if source_norm == "tiantian_fund":
+            return self._test_tiantian_fund(config_map=config_map, timeout=timeout)
+        if source_norm == "crypto_quote":
+            return self._test_crypto_quote(timeout=timeout)
+        raise ValueError("Unsupported data source")
 
     def update(
         self,
@@ -1682,6 +1700,164 @@ class SystemConfigService:
         if text:
             return text[:200]
         return f"HTTP {response.status_code}"
+
+    @staticmethod
+    def _build_data_source_result(
+        *,
+        success: bool,
+        source: str,
+        message: str,
+        error: Optional[str] = None,
+        latency_ms: Optional[int] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        return {
+            "success": success,
+            "source": source,
+            "message": message,
+            "error": error,
+            "latency_ms": latency_ms,
+            "details": details or {},
+        }
+
+    def _test_tushare_third_party(self, *, config_map: Dict[str, str], timeout: float) -> Dict[str, Any]:
+        url = (config_map.get("TUSHARE_THIRD_PARTY_API_URL") or "").strip()
+        token = (config_map.get("TUSHARE_THIRD_PARTY_TOKEN") or "").strip()
+        source = "tushare_third_party"
+        if not url or not token:
+            return self._build_data_source_result(
+                success=False,
+                source=source,
+                message="未连接",
+                error="请先填写第三方 Tushare URL 和 Token。",
+            )
+        payload = {
+            "api_name": "daily",
+            "token": token,
+            "params": {"trade_date": "20260423"},
+            "fields": "",
+        }
+        try:
+            started_at = time.perf_counter()
+            response = requests.post(url, json=payload, timeout=timeout)
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            response.raise_for_status()
+            data = response.json()
+        except Exception as exc:
+            return self._build_data_source_result(
+                success=False,
+                source=source,
+                message="未连接",
+                error=str(exc),
+            )
+        if data.get("code") not in (0, "0"):
+            return self._build_data_source_result(
+                success=False,
+                source=source,
+                message="未连接",
+                error=str(data.get("msg") or data)[:300],
+                latency_ms=latency_ms,
+            )
+        result_data = data.get("data") or {}
+        return self._build_data_source_result(
+            success=True,
+            source=source,
+            message="已连接",
+            latency_ms=latency_ms,
+            details={
+                "columns": result_data.get("fields") or [],
+                "rows": len(result_data.get("items") or []),
+            },
+        )
+
+    def _test_tiantian_fund(self, *, config_map: Dict[str, str], timeout: float) -> Dict[str, Any]:
+        base_url = (config_map.get("TIANTIAN_FUND_API_BASE_URL") or "").strip().rstrip("/")
+        source = "tiantian_fund"
+        if not base_url:
+            return self._build_data_source_result(
+                success=False,
+                source=source,
+                message="未连接",
+                error="请先填写 TiantianFundApi Base URL。",
+            )
+        query = urlencode({"FCODE": "000001", "pageIndex": 1, "pagesize": 1})
+        url = f"{base_url}/fundMNHisNetList?{query}"
+        try:
+            started_at = time.perf_counter()
+            response = requests.get(url, timeout=timeout)
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            return self._build_data_source_result(
+                success=False,
+                source=source,
+                message="未连接",
+                error=str(exc),
+            )
+        datas = payload.get("Datas") if isinstance(payload, dict) else None
+        if not isinstance(datas, list) or not datas:
+            return self._build_data_source_result(
+                success=False,
+                source=source,
+                message="未连接",
+                error="TiantianFundApi 未返回基金净值数据。",
+                latency_ms=latency_ms,
+                details={"endpoint": url},
+            )
+        sample = datas[0] if isinstance(datas[0], dict) else {}
+        nav = sample.get("DWJZ")
+        nav_date = sample.get("FSRQ")
+        return self._build_data_source_result(
+            success=True,
+            source=source,
+            message="已连接",
+            latency_ms=latency_ms,
+            details={"endpoint": url, "fund_code": "000001", "nav": nav, "nav_date": nav_date},
+        )
+
+    def _test_crypto_quote(self, *, timeout: float) -> Dict[str, Any]:
+        source = "crypto_quote"
+        checks = [
+            (
+                "binance",
+                "https://api.binance.com/api/v3/ticker/price",
+                {"symbol": "BTCUSDT"},
+                lambda payload: float(payload["price"]),
+            ),
+            (
+                "okx",
+                "https://www.okx.com/api/v5/market/ticker",
+                {"instId": "BTC-USDT"},
+                lambda payload: float((payload.get("data") or [{}])[0]["last"]),
+            ),
+        ]
+        errors: List[str] = []
+        for provider, url, params, parser in checks:
+            try:
+                started_at = time.perf_counter()
+                response = requests.get(url, params=params, timeout=timeout)
+                latency_ms = int((time.perf_counter() - started_at) * 1000)
+                response.raise_for_status()
+                payload = response.json()
+                price = parser(payload)
+                if price <= 0:
+                    raise ValueError("price must be positive")
+                return self._build_data_source_result(
+                    success=True,
+                    source=source,
+                    message="已连接",
+                    latency_ms=latency_ms,
+                    details={"provider": provider, "symbol": "BTCUSDT", "price": price},
+                )
+            except Exception as exc:
+                errors.append(f"{provider}: {exc}")
+        return self._build_data_source_result(
+            success=False,
+            source=source,
+            message="未连接",
+            error="; ".join(errors),
+        )
 
     @staticmethod
     def _extract_discovered_llm_models(payload: Any) -> List[str]:

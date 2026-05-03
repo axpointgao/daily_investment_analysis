@@ -150,6 +150,22 @@ export interface TestLLMChannelResponse {
   latencyMs?: number | null;
 }
 
+export type TestDataSourceSource = 'tushare_third_party' | 'tiantian_fund' | 'crypto_quote';
+
+export interface TestDataSourceRequest {
+  source: TestDataSourceSource;
+  timeoutSeconds?: number;
+}
+
+export interface TestDataSourceResponse {
+  success: boolean;
+  source: string;
+  message: string;
+  error?: string | null;
+  latencyMs?: number | null;
+  details?: Record<string, unknown>;
+}
+
 export interface DiscoverLLMChannelModelsRequest {
   name: string;
   protocol: string;

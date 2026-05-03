@@ -214,6 +214,24 @@ class DiscoverLLMChannelModelsResponse(BaseModel):
     latency_ms: Optional[int] = None
 
 
+class TestDataSourceRequest(BaseModel):
+    """Request payload for testing one newly added data source."""
+
+    source: Literal["tushare_third_party", "tiantian_fund", "crypto_quote"]
+    timeout_seconds: float = 8.0
+
+
+class TestDataSourceResponse(BaseModel):
+    """Response payload for one data source connectivity test."""
+
+    success: bool
+    source: str
+    message: str
+    error: Optional[str] = None
+    latency_ms: Optional[int] = None
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
 class SystemConfigValidationErrorResponse(BaseModel):
     """Error payload for failed update validation."""
 

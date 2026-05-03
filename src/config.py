@@ -592,6 +592,9 @@ class Config:
 
     # === 数据源 API Token ===
     tushare_token: Optional[str] = None
+    tushare_third_party_api_url: Optional[str] = None
+    tushare_third_party_token: Optional[str] = None
+    tiantian_fund_api_base_url: Optional[str] = None
     tickflow_api_key: Optional[str] = None
     longbridge_app_key: Optional[str] = None
     longbridge_app_secret: Optional[str] = None
@@ -1279,6 +1282,9 @@ class Config:
             feishu_app_secret=os.getenv('FEISHU_APP_SECRET'),
             feishu_folder_token=os.getenv('FEISHU_FOLDER_TOKEN'),
             tushare_token=os.getenv('TUSHARE_TOKEN'),
+            tushare_third_party_api_url=os.getenv('TUSHARE_THIRD_PARTY_API_URL') or None,
+            tushare_third_party_token=os.getenv('TUSHARE_THIRD_PARTY_TOKEN') or None,
+            tiantian_fund_api_base_url=os.getenv('TIANTIAN_FUND_API_BASE_URL') or None,
             tickflow_api_key=os.getenv('TICKFLOW_API_KEY'),
             longbridge_app_key=os.getenv('LONGBRIDGE_APP_KEY') or None,
             longbridge_app_secret=os.getenv('LONGBRIDGE_APP_SECRET') or None,

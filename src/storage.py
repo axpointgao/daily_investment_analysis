@@ -595,6 +595,50 @@ class PortfolioFxRate(Base):
     )
 
 
+class PortfolioManualPrice(Base):
+    """Manual latest price fallback for non-stock portfolio assets."""
+
+    __tablename__ = 'portfolio_manual_prices'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
+    symbol = Column(String(32), nullable=False, index=True)
+    market = Column(String(16), nullable=False, index=True)
+    currency = Column(String(8), nullable=False, default='CNY')
+    price_date = Column(Date, nullable=False, index=True)
+    price = Column(Float, nullable=False)
+    note = Column(String(255))
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
+
+    __table_args__ = (
+        Index('ix_portfolio_manual_price_lookup', 'account_id', 'symbol', 'market', 'price_date'),
+    )
+
+
+class PortfolioBankLedger(Base):
+    """Bank demand deposit and simple fixed-term asset ledger."""
+
+    __tablename__ = 'portfolio_bank_ledger'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
+    event_date = Column(Date, nullable=False, index=True)
+    asset_kind = Column(String(16), nullable=False, default='demand')  # demand/term
+    direction = Column(String(8), nullable=False)  # in/out
+    amount = Column(Float, nullable=False)
+    currency = Column(String(8), nullable=False, default='CNY')
+    bank_name = Column(String(64), nullable=False)
+    product_name = Column(String(128))
+    maturity_date = Column(Date)
+    note = Column(String(255))
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+    __table_args__ = (
+        Index('ix_portfolio_bank_account_date', 'account_id', 'event_date'),
+        Index('ix_portfolio_bank_account_kind', 'account_id', 'asset_kind'),
+    )
+
+
 class ConversationMessage(Base):
     """
     Agent 对话历史记录表

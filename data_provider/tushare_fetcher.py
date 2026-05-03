@@ -110,6 +110,36 @@ class _TushareHttpClient:
         return caller
 
 
+class _FallbackTushareClient:
+    """Try a primary Tushare-compatible client first, then fall back to official Tushare."""
+
+    def __init__(self, primary: _TushareHttpClient, fallback: Optional[_TushareHttpClient] = None) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    def query(self, api_name: str, fields: str = "", **kwargs) -> pd.DataFrame:
+        try:
+            return self._primary.query(api_name, fields=fields, **kwargs)
+        except Exception as primary_exc:
+            if self._fallback is None:
+                raise
+            logger.warning(
+                "Third-party Tushare API failed for %s, falling back to official Tushare: %s",
+                api_name,
+                primary_exc,
+            )
+            return self._fallback.query(api_name, fields=fields, **kwargs)
+
+    def __getattr__(self, api_name: str):
+        if api_name.startswith("_"):
+            raise AttributeError(api_name)
+
+        def caller(**kwargs) -> pd.DataFrame:
+            return self.query(api_name, **kwargs)
+
+        return caller
+
+
 class TushareFetcher(BaseFetcher):
     """
     Tushare Pro 数据源实现
@@ -160,26 +190,48 @@ class TushareFetcher(BaseFetcher):
         """
         config = get_config()
 
-        if not config.tushare_token:
+        official_token = (config.tushare_token or "").strip()
+        third_party_url = (getattr(config, "tushare_third_party_api_url", None) or "").strip()
+        third_party_token = (getattr(config, "tushare_third_party_token", None) or "").strip()
+
+        if not official_token and not (third_party_url and third_party_token):
             logger.warning("Tushare Token 未配置，此数据源不可用")
             return
 
         try:
-            self._api = self._build_api_client(config.tushare_token)
+            self._api = self._build_api_client(
+                token=official_token,
+                third_party_api_url=third_party_url,
+                third_party_token=third_party_token,
+            )
             logger.info("Tushare API 初始化成功")
         except Exception as e:
             logger.error(f"Tushare API 初始化失败: {e}")
             self._api = None
 
-    def _build_api_client(self, token: str) -> _TushareHttpClient:
+    def _build_api_client(
+        self,
+        token: str,
+        *,
+        third_party_api_url: str = "",
+        third_party_token: str = "",
+    ) -> object:
         """
         Build a lightweight Tushare Pro client over direct HTTP requests.
 
         The project already normalizes all Pro calls through the same request
         contract, so we do not need the official tushare SDK during runtime.
         """
-        client = _TushareHttpClient(token=token)
-        logger.debug("Tushare API client configured for direct HTTP calls")
+        official_client = _TushareHttpClient(token=token) if token else None
+        if third_party_api_url and third_party_token:
+            third_party_client = _TushareHttpClient(token=third_party_token, api_url=third_party_api_url)
+            client = _FallbackTushareClient(primary=third_party_client, fallback=official_client)
+            logger.info("Tushare API client configured with third-party primary and official fallback")
+            return client
+        if official_client is None:
+            raise DataFetchError("Tushare Token 未配置，请检查官方或第三方 Token 配置")
+        client = official_client
+        logger.debug("Tushare API client configured for official direct HTTP calls")
         return client
 
     def _determine_priority(self) -> int:
@@ -195,9 +247,14 @@ class TushareFetcher(BaseFetcher):
         """
         config = get_config()
 
-        if config.tushare_token and self._api is not None:
+        has_official = bool((config.tushare_token or "").strip())
+        has_third_party = bool(
+            (getattr(config, "tushare_third_party_api_url", None) or "").strip()
+            and (getattr(config, "tushare_third_party_token", None) or "").strip()
+        )
+        if (has_official or has_third_party) and self._api is not None:
             # Token 配置且 API 初始化成功，提升为最高优先级
-            logger.info("✅ 检测到 TUSHARE_TOKEN 且 API 初始化成功，Tushare 数据源优先级提升为最高 (Priority -1)")
+            logger.info("检测到 Tushare 配置且 API 初始化成功，Tushare 数据源优先级提升为最高 (Priority -1)")
             return -1
 
         # Token 未配置或 API 初始化失败，保持默认优先级

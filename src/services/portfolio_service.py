@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import json
 import logging
+import requests
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from urllib.parse import urlencode
 
 from data_provider.base import canonical_stock_code, normalize_stock_code
 from src.config import get_config
@@ -29,10 +31,11 @@ except Exception:  # pragma: no cover - optional dependency path
     yf = None
 
 EPS = 1e-8
-VALID_MARKETS = {"cn", "hk", "us"}
+VALID_MARKETS = {"cn", "hk", "us", "fund", "crypto", "bank"}
 VALID_COST_METHODS = {"fifo", "avg"}
 VALID_SIDES = {"buy", "sell"}
 VALID_CASH_DIRECTIONS = {"in", "out"}
+VALID_BANK_ASSET_KINDS = {"demand", "term"}
 VALID_CORPORATE_ACTIONS = {"cash_dividend", "split_adjustment"}
 PORTFOLIO_FX_REFRESH_DISABLED_REASON = "portfolio_fx_update_disabled"
 
@@ -78,6 +81,14 @@ class _ResolvedPositionPrice:
     is_stale: bool
     is_available: bool
     provider: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class _ConvertedAmount:
+    amount: Optional[float]
+    is_stale: bool
+    source: str
+    missing_pair: Optional[Tuple[str, str]] = None
 
 
 class PortfolioService:
@@ -191,6 +202,8 @@ class PortfolioService:
                 account = self._require_active_account_in_session(session=session, account_id=account_id)
                 market_norm = self._normalize_market(market or account.market)
                 currency_norm = self._normalize_currency(currency or self._default_currency_for_market(market_norm))
+                if market_norm == "bank":
+                    raise ValueError("bank accounts do not support trade events")
                 self._validate_trade_identity(
                     account_id=account_id,
                     trade_uid=trade_uid_norm,
@@ -226,6 +239,90 @@ class PortfolioService:
                 return {"id": int(row.id)}
         except (DuplicateTradeUidError, DuplicateTradeDedupHashError) as exc:
             raise PortfolioConflictError(str(exc)) from exc
+
+    def upsert_manual_price(
+        self,
+        *,
+        account_id: int,
+        symbol: str,
+        market: str,
+        price_date: date,
+        price: float,
+        currency: Optional[str] = None,
+        note: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        if price <= 0:
+            raise ValueError("price must be > 0")
+        account = self._require_active_account(account_id)
+        market_norm = self._normalize_market(market or account.market)
+        symbol_norm = self._normalize_symbol_for_position(symbol)
+        if not symbol_norm:
+            raise ValueError("symbol is required")
+        currency_norm = self._normalize_currency(currency or self._default_currency_for_market(market_norm))
+        row = self.repo.upsert_manual_price(
+            account_id=account_id,
+            symbol=symbol_norm,
+            market=market_norm,
+            currency=currency_norm,
+            price_date=price_date,
+            price=float(price),
+            note=(note or "").strip() or None,
+        )
+        return {
+            "id": int(row.id),
+            "account_id": int(row.account_id),
+            "symbol": row.symbol,
+            "market": row.market,
+            "currency": row.currency,
+            "price_date": row.price_date.isoformat(),
+            "price": float(row.price),
+            "note": row.note,
+        }
+
+    def record_bank_ledger(
+        self,
+        *,
+        account_id: int,
+        event_date: date,
+        asset_kind: str,
+        direction: str,
+        amount: float,
+        bank_name: str,
+        currency: Optional[str] = None,
+        product_name: Optional[str] = None,
+        maturity_date: Optional[date] = None,
+        note: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        account = self._require_active_account(account_id)
+        if account.market != "bank":
+            raise ValueError("bank ledger can only be recorded in bank accounts")
+        asset_kind_norm = (asset_kind or "").strip().lower()
+        if asset_kind_norm not in VALID_BANK_ASSET_KINDS:
+            raise ValueError("asset_kind must be demand or term")
+        direction_norm = (direction or "").strip().lower()
+        if direction_norm not in VALID_CASH_DIRECTIONS:
+            raise ValueError("direction must be in or out")
+        if amount <= 0:
+            raise ValueError("amount must be > 0")
+        bank_name_norm = (bank_name or "").strip()
+        if not bank_name_norm:
+            raise ValueError("bank_name is required")
+        if asset_kind_norm == "term" and not (product_name or "").strip():
+            raise ValueError("product_name is required for term assets")
+        currency_norm = self._normalize_currency(currency or account.base_currency)
+        row = self.repo.add_bank_ledger(
+            account_id=account_id,
+            event_date=event_date,
+            asset_kind=asset_kind_norm,
+            direction=direction_norm,
+            amount=float(amount),
+            currency=currency_norm,
+            bank_name=bank_name_norm,
+            product_name=(product_name or "").strip() or None,
+            maturity_date=maturity_date,
+            note=(note or "").strip() or None,
+        )
+        return {"id": int(row.id)}
 
     def record_cash_ledger(
         self,
@@ -311,6 +408,9 @@ class PortfolioService:
     def delete_corporate_action_event(self, action_id: int) -> bool:
         with self.repo.portfolio_write_session() as session:
             return self.repo.delete_corporate_action_in_session(session=session, action_id=action_id)
+
+    def delete_bank_ledger_event(self, entry_id: int) -> bool:
+        return self.repo.delete_bank_ledger(entry_id)
 
     def list_trade_events(
         self,
@@ -439,6 +539,41 @@ class PortfolioService:
             "page_size": page_size,
         }
 
+    def list_bank_ledger_events(
+        self,
+        *,
+        account_id: Optional[int] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        asset_kind: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        if account_id is not None:
+            self._require_active_account(account_id)
+        page, page_size = self._validate_paging(page=page, page_size=page_size)
+        if date_from is not None and date_to is not None and date_from > date_to:
+            raise ValueError("date_from must be <= date_to")
+        asset_kind_norm: Optional[str] = None
+        if asset_kind is not None and asset_kind.strip():
+            asset_kind_norm = asset_kind.strip().lower()
+            if asset_kind_norm not in VALID_BANK_ASSET_KINDS:
+                raise ValueError("asset_kind must be demand or term")
+        rows, total = self.repo.query_bank_ledger(
+            account_id=account_id,
+            date_from=date_from,
+            date_to=date_to,
+            asset_kind=asset_kind_norm,
+            page=page,
+            page_size=page_size,
+        )
+        return {
+            "items": [self._bank_ledger_row_to_dict(row) for row in rows],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
     # ------------------------------------------------------------------
     # Snapshot replay
     # ------------------------------------------------------------------
@@ -469,7 +604,9 @@ class PortfolioService:
             "fee_total": 0.0,
             "tax_total": 0.0,
             "fx_stale": False,
+            "fx_missing": False,
         }
+        missing_fx_pairs: Set[Tuple[str, str]] = set()
 
         for account in account_rows:
             account_snapshot = self._replay_account(account=account, as_of_date=as_of_date, cost_method=method)
@@ -495,81 +632,104 @@ class PortfolioService:
 
             accounts_payload.append(account_snapshot["public"])
 
-            cash_cny, stale_cash, _ = self._convert_amount(
-                amount=account_snapshot["total_cash"],
-                from_currency=account.base_currency,
-                to_currency=aggregate_currency,
-                as_of_date=as_of_date,
-            )
-            mv_cny, stale_mv, _ = self._convert_amount(
-                amount=account_snapshot["total_market_value"],
-                from_currency=account.base_currency,
-                to_currency=aggregate_currency,
-                as_of_date=as_of_date,
-            )
-            eq_cny, stale_eq, _ = self._convert_amount(
-                amount=account_snapshot["total_equity"],
-                from_currency=account.base_currency,
-                to_currency=aggregate_currency,
-                as_of_date=as_of_date,
-            )
-            realized_cny, stale_realized, _ = self._convert_amount(
-                amount=account_snapshot["realized_pnl"],
-                from_currency=account.base_currency,
-                to_currency=aggregate_currency,
-                as_of_date=as_of_date,
-            )
-            unrealized_cny, stale_unrealized, _ = self._convert_amount(
-                amount=account_snapshot["unrealized_pnl"],
-                from_currency=account.base_currency,
-                to_currency=aggregate_currency,
-                as_of_date=as_of_date,
-            )
-            fee_cny, stale_fee, _ = self._convert_amount(
-                amount=account_snapshot["fee_total"],
-                from_currency=account.base_currency,
-                to_currency=aggregate_currency,
-                as_of_date=as_of_date,
-            )
-            tax_cny, stale_tax, _ = self._convert_amount(
-                amount=account_snapshot["tax_total"],
-                from_currency=account.base_currency,
-                to_currency=aggregate_currency,
-                as_of_date=as_of_date,
-            )
+            conversions = {
+                "total_cash": self._convert_amount(
+                    amount=account_snapshot["total_cash"],
+                    from_currency=account.base_currency,
+                    to_currency=aggregate_currency,
+                    as_of_date=as_of_date,
+                ),
+                "total_market_value": self._convert_amount(
+                    amount=account_snapshot["total_market_value"],
+                    from_currency=account.base_currency,
+                    to_currency=aggregate_currency,
+                    as_of_date=as_of_date,
+                ),
+                "total_equity": self._convert_amount(
+                    amount=account_snapshot["total_equity"],
+                    from_currency=account.base_currency,
+                    to_currency=aggregate_currency,
+                    as_of_date=as_of_date,
+                ),
+                "realized_pnl": self._convert_amount(
+                    amount=account_snapshot["realized_pnl"],
+                    from_currency=account.base_currency,
+                    to_currency=aggregate_currency,
+                    as_of_date=as_of_date,
+                ),
+                "unrealized_pnl": self._convert_amount(
+                    amount=account_snapshot["unrealized_pnl"],
+                    from_currency=account.base_currency,
+                    to_currency=aggregate_currency,
+                    as_of_date=as_of_date,
+                ),
+                "fee_total": self._convert_amount(
+                    amount=account_snapshot["fee_total"],
+                    from_currency=account.base_currency,
+                    to_currency=aggregate_currency,
+                    as_of_date=as_of_date,
+                ),
+                "tax_total": self._convert_amount(
+                    amount=account_snapshot["tax_total"],
+                    from_currency=account.base_currency,
+                    to_currency=aggregate_currency,
+                    as_of_date=as_of_date,
+                ),
+            }
 
-            aggregate["total_cash"] += cash_cny
-            aggregate["total_market_value"] += mv_cny
-            aggregate["total_equity"] += eq_cny
-            aggregate["realized_pnl"] += realized_cny
-            aggregate["unrealized_pnl"] += unrealized_cny
-            aggregate["fee_total"] += fee_cny
-            aggregate["tax_total"] += tax_cny
-            aggregate["fx_stale"] = aggregate["fx_stale"] or any(
-                [
-                    stale_cash,
-                    stale_mv,
-                    stale_eq,
-                    stale_realized,
-                    stale_unrealized,
-                    stale_fee,
-                    stale_tax,
-                ]
-            )
+            for key, conversion in conversions.items():
+                if conversion.amount is not None:
+                    aggregate[key] += conversion.amount
+                if conversion.missing_pair is not None:
+                    aggregate["fx_missing"] = True
+                    missing_fx_pairs.add(conversion.missing_pair)
+                aggregate["fx_stale"] = aggregate["fx_stale"] or conversion.is_stale
+
+        has_missing_fx = bool(aggregate["fx_missing"])
+        asset_breakdown = {
+            "stock": 0.0,
+            "fund": 0.0,
+            "crypto": 0.0,
+            "bank": 0.0,
+            "cash": 0.0,
+        }
+        if not has_missing_fx:
+            asset_breakdown["cash"] = round(aggregate["total_cash"], 6)
+            for account, account_snapshot in zip(account_rows, accounts_payload):
+                converted_mv = self._convert_amount(
+                    amount=account_snapshot["total_market_value"],
+                    from_currency=account.base_currency,
+                    to_currency=aggregate_currency,
+                    as_of_date=as_of_date,
+                )
+                key = account.market if account.market in {"fund", "crypto", "bank"} else "stock"
+                asset_breakdown[key] += float(converted_mv.amount or 0.0)
+            asset_breakdown = {key: round(value, 6) for key, value in asset_breakdown.items()}
+
+        def _aggregate_value(key: str) -> Optional[float]:
+            if has_missing_fx:
+                return None
+            return round(aggregate[key], 6)
 
         return {
             "as_of": as_of_date.isoformat(),
             "cost_method": method,
             "currency": aggregate_currency,
             "account_count": len(account_rows),
-            "total_cash": round(aggregate["total_cash"], 6),
-            "total_market_value": round(aggregate["total_market_value"], 6),
-            "total_equity": round(aggregate["total_equity"], 6),
-            "realized_pnl": round(aggregate["realized_pnl"], 6),
-            "unrealized_pnl": round(aggregate["unrealized_pnl"], 6),
-            "fee_total": round(aggregate["fee_total"], 6),
-            "tax_total": round(aggregate["tax_total"], 6),
+            "total_cash": _aggregate_value("total_cash"),
+            "total_market_value": _aggregate_value("total_market_value"),
+            "total_equity": _aggregate_value("total_equity"),
+            "realized_pnl": _aggregate_value("realized_pnl"),
+            "unrealized_pnl": _aggregate_value("unrealized_pnl"),
+            "fee_total": _aggregate_value("fee_total"),
+            "tax_total": _aggregate_value("tax_total"),
             "fx_stale": aggregate["fx_stale"],
+            "fx_missing": aggregate["fx_missing"],
+            "missing_fx_pairs": [
+                {"from_currency": from_currency, "to_currency": to_currency}
+                for from_currency, to_currency in sorted(missing_fx_pairs)
+            ],
+            "asset_breakdown": {} if has_missing_fx else asset_breakdown,
             "accounts": accounts_payload,
         }
 
@@ -603,6 +763,7 @@ class PortfolioService:
                 account=account,
                 as_of_date=as_of_date,
                 refresh_enabled=refresh_enabled,
+                aggregate_currency="CNY" if account_id is None else None,
             )
             summary["pair_count"] += item["pair_count"]
             summary["updated_count"] += item["updated_count"]
@@ -739,6 +900,7 @@ class PortfolioService:
         trades = self.repo.list_trades(account.id, as_of=as_of_date)
         cash_ledger = self.repo.list_cash_ledger(account.id, as_of=as_of_date)
         corporate_actions = self.repo.list_corporate_actions(account.id, as_of=as_of_date)
+        bank_ledger = self.repo.list_bank_ledger(account.id, as_of=as_of_date) if account.market == "bank" else []
 
         events = []
         for row in cash_ledger:
@@ -747,9 +909,11 @@ class PortfolioService:
             events.append(("trade", row.trade_date, row.id, row))
         for row in corporate_actions:
             events.append(("corp", row.effective_date, row.id, row))
+        for row in bank_ledger:
+            events.append(("bank", row.event_date, row.id, row))
 
         # Same-day deterministic ordering: cash -> corporate action -> trade.
-        event_priority = {"cash": 0, "corp": 1, "trade": 2}
+        event_priority = {"cash": 0, "bank": 0, "corp": 1, "trade": 2}
         events.sort(key=lambda item: (item[1], event_priority[item[0]], item[2]))
 
         cash_balances: Dict[str, float] = defaultdict(float)
@@ -760,8 +924,54 @@ class PortfolioService:
 
         fifo_lots: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
         avg_state: Dict[Tuple[str, str, str], _AvgState] = defaultdict(_AvgState)
+        bank_assets: Dict[Tuple[str, str, str, Optional[str], Optional[date]], Dict[str, Any]] = {}
 
         for event_type, event_date, _, event in events:
+            if event_type == "bank":
+                currency = self._normalize_currency(event.currency)
+                amount = float(event.amount or 0.0)
+                signed_amount = amount if event.direction == "in" else -amount
+                if event.direction not in VALID_CASH_DIRECTIONS:
+                    raise ValueError(f"Unsupported bank ledger direction: {event.direction}")
+                if event.asset_kind == "demand":
+                    cash_balances[currency] += signed_amount
+                    continue
+                if event.asset_kind != "term":
+                    raise ValueError(f"Unsupported bank asset_kind: {event.asset_kind}")
+                key = (
+                    str(event.bank_name or "").strip(),
+                    str(event.product_name or "").strip(),
+                    currency,
+                    str(event.note or "").strip() or None,
+                    event.maturity_date,
+                )
+                item = bank_assets.setdefault(
+                    key,
+                    {
+                        "symbol": f"BANK:{len(bank_assets) + 1}",
+                        "market": "bank",
+                        "currency": currency,
+                        "bank_name": key[0],
+                        "product_name": key[1],
+                        "maturity_date": key[4].isoformat() if key[4] else None,
+                        "quantity": 1.0,
+                        "avg_cost": 0.0,
+                        "total_cost": 0.0,
+                        "last_price": 0.0,
+                        "market_value_base": 0.0,
+                        "unrealized_pnl_base": 0.0,
+                        "unrealized_pnl_pct": None,
+                        "valuation_currency": account.base_currency,
+                        "price_source": "manual_amount",
+                        "price_provider": "bank_ledger",
+                        "price_date": event_date.isoformat(),
+                        "price_stale": False,
+                        "price_available": True,
+                    },
+                )
+                item["last_price"] += signed_amount
+                continue
+
             if event_type == "cash":
                 currency = self._normalize_currency(event.currency)
                 amount = float(event.amount or 0.0)
@@ -825,32 +1035,35 @@ class PortfolioService:
                             event_date,
                         )
                     realized_local = proceeds_net - cost_basis
-                    realized_base, stale_realized, _ = self._convert_amount(
+                    realized_conversion = self._convert_amount(
                         amount=realized_local,
                         from_currency=key[2],
                         to_currency=account.base_currency,
                         as_of_date=event_date,
                     )
-                    realized_pnl_base += realized_base
-                    fx_stale = fx_stale or stale_realized
+                    if realized_conversion.amount is not None:
+                        realized_pnl_base += realized_conversion.amount
+                    fx_stale = fx_stale or realized_conversion.is_stale
                 else:
                     raise ValueError(f"Unsupported trade side: {event.side}")
 
-                fee_base, stale_fee, _ = self._convert_amount(
+                fee_conversion = self._convert_amount(
                     amount=fee,
                     from_currency=key[2],
                     to_currency=account.base_currency,
                     as_of_date=event_date,
                 )
-                tax_base, stale_tax, _ = self._convert_amount(
+                tax_conversion = self._convert_amount(
                     amount=tax,
                     from_currency=key[2],
                     to_currency=account.base_currency,
                     as_of_date=event_date,
                 )
-                fees_total_base += fee_base
-                taxes_total_base += tax_base
-                fx_stale = fx_stale or stale_fee or stale_tax
+                if fee_conversion.amount is not None:
+                    fees_total_base += fee_conversion.amount
+                if tax_conversion.amount is not None:
+                    taxes_total_base += tax_conversion.amount
+                fx_stale = fx_stale or fee_conversion.is_stale or tax_conversion.is_stale
                 continue
 
             if event_type == "corp":
@@ -897,16 +1110,38 @@ class PortfolioService:
         )
         fx_stale = fx_stale or stale_pos
 
+        bank_position_rows: List[Dict[str, Any]] = []
+        for item in bank_assets.values():
+            amount_local = float(item["last_price"] or 0.0)
+            market_conversion = self._convert_amount(
+                amount=amount_local,
+                from_currency=item["currency"],
+                to_currency=account.base_currency,
+                as_of_date=as_of_date,
+            )
+            market_base = market_conversion.amount
+            fx_stale = fx_stale or market_conversion.is_stale
+            item["total_cost"] = round(amount_local, 8)
+            item["avg_cost"] = round(amount_local, 8)
+            item["market_value_base"] = round(market_base or 0.0, 8)
+            item["last_price"] = round(amount_local, 8)
+            bank_position_rows.append(item)
+            if market_base is not None:
+                market_value_base += market_base
+                total_cost_base += market_base
+        position_rows.extend(bank_position_rows)
+
         total_cash_base = 0.0
         for currency, amount in cash_balances.items():
-            converted, stale, _ = self._convert_amount(
+            cash_conversion = self._convert_amount(
                 amount=amount,
                 from_currency=currency,
                 to_currency=account.base_currency,
                 as_of_date=as_of_date,
             )
-            total_cash_base += converted
-            fx_stale = fx_stale or stale
+            if cash_conversion.amount is not None:
+                total_cash_base += cash_conversion.amount
+            fx_stale = fx_stale or cash_conversion.is_stale
 
         unrealized_pnl_base = market_value_base - total_cost_base
         total_equity_base = total_cash_base + market_value_base
@@ -997,25 +1232,32 @@ class PortfolioService:
                     }
                 )
 
-            price_info = self._resolve_position_price(symbol=symbol, as_of_date=as_of_date)
+            price_info = self._resolve_position_price(
+                account_id=int(account.id),
+                symbol=symbol,
+                market=market,
+                as_of_date=as_of_date,
+            )
             last_price = price_info.price
 
             if price_info.is_available:
                 local_market_value = qty * float(last_price)
-                market_base, stale_market, _ = self._convert_amount(
+                market_conversion = self._convert_amount(
                     amount=local_market_value,
                     from_currency=currency,
                     to_currency=account.base_currency,
                     as_of_date=as_of_date,
                 )
-                cost_base, stale_cost, _ = self._convert_amount(
+                cost_conversion = self._convert_amount(
                     amount=total_cost,
                     from_currency=currency,
                     to_currency=account.base_currency,
                     as_of_date=as_of_date,
                 )
-                unrealized_base = market_base - cost_base
-                fx_stale = fx_stale or stale_market or stale_cost
+                market_base = market_conversion.amount or 0.0
+                cost_base = cost_conversion.amount or 0.0
+                unrealized_base = market_base - cost_base if market_conversion.amount is not None and cost_conversion.amount is not None else 0.0
+                fx_stale = fx_stale or market_conversion.is_stale or cost_conversion.is_stale
             else:
                 market_base = 0.0
                 cost_base = 0.0
@@ -1051,8 +1293,55 @@ class PortfolioService:
 
         return position_rows, lot_rows, market_value_base, total_cost_base, fx_stale
 
-    def _resolve_position_price(self, *, symbol: str, as_of_date: date) -> _ResolvedPositionPrice:
+    def _resolve_position_price(
+        self,
+        *,
+        account_id: int,
+        symbol: str,
+        market: str,
+        as_of_date: date,
+    ) -> _ResolvedPositionPrice:
         today = date.today()
+
+        if market == "fund":
+            fund_price = self._fetch_fund_nav(symbol=symbol, as_of_date=as_of_date)
+            if fund_price is not None:
+                return fund_price
+            manual = self._get_manual_position_price(
+                account_id=account_id,
+                symbol=symbol,
+                market=market,
+                as_of_date=as_of_date,
+            )
+            if manual is not None:
+                return manual
+            return _ResolvedPositionPrice(
+                price=0.0,
+                source="missing",
+                price_date=None,
+                is_stale=True,
+                is_available=False,
+            )
+
+        if market == "crypto":
+            crypto_price = self._fetch_crypto_price(symbol=symbol, as_of_date=as_of_date)
+            if crypto_price is not None:
+                return crypto_price
+            manual = self._get_manual_position_price(
+                account_id=account_id,
+                symbol=symbol,
+                market=market,
+                as_of_date=as_of_date,
+            )
+            if manual is not None:
+                return manual
+            return _ResolvedPositionPrice(
+                price=0.0,
+                source="missing",
+                price_date=None,
+                is_stale=True,
+                is_available=False,
+            )
 
         close = self.repo.get_latest_close_with_date(symbol=symbol, as_of=as_of_date)
         if close is not None:
@@ -1085,6 +1374,154 @@ class PortfolioService:
             is_stale=True,
             is_available=False,
         )
+
+    def _get_manual_position_price(
+        self,
+        *,
+        account_id: int,
+        symbol: str,
+        market: str,
+        as_of_date: date,
+    ) -> Optional[_ResolvedPositionPrice]:
+        row = self.repo.get_latest_manual_price(
+            account_id=account_id,
+            symbol=symbol,
+            market=market,
+            as_of=as_of_date,
+        )
+        if row is None or float(row.price or 0.0) <= 0:
+            return None
+        return _ResolvedPositionPrice(
+            price=float(row.price),
+            source="manual_price",
+            price_date=row.price_date,
+            is_stale=row.price_date < as_of_date,
+            is_available=True,
+            provider="manual",
+        )
+
+    @staticmethod
+    def _fetch_fund_nav(*, symbol: str, as_of_date: date) -> Optional[_ResolvedPositionPrice]:
+        base_url = (getattr(get_config(), "tiantian_fund_api_base_url", "") or "").strip().rstrip("/")
+        if not base_url:
+            return None
+        query = urlencode({"FCODE": symbol.strip(), "pageIndex": 1, "pagesize": 1})
+        candidates = [f"{base_url}/fundMNHisNetList?{query}"]
+        for url in candidates:
+            try:
+                response = requests.get(url, timeout=5)
+                if response.status_code >= 400:
+                    continue
+                payload = response.json()
+            except Exception:
+                continue
+            price, price_date = PortfolioService._extract_fund_nav_payload(payload)
+            if price is not None and price > 0:
+                return _ResolvedPositionPrice(
+                    price=price,
+                    source="fund_nav",
+                    price_date=price_date,
+                    is_stale=bool(price_date and price_date < as_of_date),
+                    is_available=True,
+                    provider="tiantianfund",
+                )
+        return None
+
+    @staticmethod
+    def _extract_fund_nav_payload(payload: Any) -> Tuple[Optional[float], Optional[date]]:
+        stack = [payload]
+        while stack:
+            item = stack.pop(0)
+            if isinstance(item, list):
+                stack.extend(item[:5])
+                continue
+            if not isinstance(item, dict):
+                continue
+            price = None
+            for key in ("nav", "dwjz", "DWJZ", "netWorth", "net_worth", "unit_nav", "jz"):
+                value = item.get(key)
+                try:
+                    price = float(value)
+                    break
+                except (TypeError, ValueError):
+                    continue
+            price_date = None
+            for key in ("date", "jzrq", "JZRQ", "FSRQ", "navDate", "netWorthDate", "price_date"):
+                raw = item.get(key)
+                if not raw:
+                    continue
+                text = str(raw).strip()[:10]
+                for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y%m%d"):
+                    try:
+                        price_date = datetime.strptime(text.replace("/", "-") if fmt == "%Y-%m-%d" else text, fmt).date()
+                        break
+                    except ValueError:
+                        continue
+                if price_date is not None:
+                    break
+            if price is not None:
+                return price, price_date
+            stack.extend(value for value in item.values() if isinstance(value, (dict, list)))
+        return None, None
+
+    @staticmethod
+    def _fetch_crypto_price(*, symbol: str, as_of_date: date) -> Optional[_ResolvedPositionPrice]:
+        normalized_symbol = symbol.strip().upper()
+        if not normalized_symbol:
+            return None
+
+        fetchers = (
+            ("binance", PortfolioService._fetch_binance_crypto_price),
+            ("okx", PortfolioService._fetch_okx_crypto_price),
+        )
+        for provider, fetcher in fetchers:
+            price = fetcher(normalized_symbol)
+            if price is None or price <= 0:
+                continue
+            return _ResolvedPositionPrice(
+                price=price,
+                source="crypto_price",
+                price_date=as_of_date,
+                is_stale=False,
+                is_available=True,
+                provider=provider,
+            )
+        return None
+
+    @staticmethod
+    def _fetch_binance_crypto_price(symbol: str) -> Optional[float]:
+        pair = f"{symbol}USDT"
+        try:
+            response = requests.get(
+                "https://api.binance.com/api/v3/ticker/price",
+                params={"symbol": pair},
+                timeout=5,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            return float(payload["price"])
+        except Exception:
+            return None
+
+    @staticmethod
+    def _fetch_okx_crypto_price(symbol: str) -> Optional[float]:
+        inst_id = f"{symbol}-USDT"
+        try:
+            response = requests.get(
+                "https://www.okx.com/api/v5/market/ticker",
+                params={"instId": inst_id},
+                timeout=5,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if payload.get("code") not in (0, "0"):
+                return None
+            rows = payload.get("data") or []
+            if not rows:
+                return None
+            return float(rows[0]["last"])
+        except Exception:
+            return None
 
     @staticmethod
     def _fetch_realtime_position_price(symbol: str) -> Tuple[Optional[float], Optional[str]]:
@@ -1298,13 +1735,13 @@ class PortfolioService:
         from_currency: str,
         to_currency: str,
         as_of_date: date,
-    ) -> Tuple[float, bool, str]:
+    ) -> _ConvertedAmount:
         from_norm = self._normalize_currency(from_currency)
         to_norm = self._normalize_currency(to_currency)
         if abs(amount) <= EPS:
-            return 0.0, False, "zero"
+            return _ConvertedAmount(amount=0.0, is_stale=False, source="zero")
         if from_norm == to_norm:
-            return float(amount), False, "identity"
+            return _ConvertedAmount(amount=float(amount), is_stale=False, source="identity")
 
         direct = self.repo.get_latest_fx_rate(
             from_currency=from_norm,
@@ -1312,7 +1749,11 @@ class PortfolioService:
             as_of=as_of_date,
         )
         if direct is not None and direct.rate > 0:
-            return float(amount) * float(direct.rate), bool(direct.is_stale), "direct_rate"
+            return _ConvertedAmount(
+                amount=float(amount) * float(direct.rate),
+                is_stale=bool(direct.is_stale),
+                source="direct_rate",
+            )
 
         inverse = self.repo.get_latest_fx_rate(
             from_currency=to_norm,
@@ -1320,10 +1761,18 @@ class PortfolioService:
             as_of=as_of_date,
         )
         if inverse is not None and inverse.rate > 0:
-            return float(amount) / float(inverse.rate), bool(inverse.is_stale), "inverse_rate"
+            return _ConvertedAmount(
+                amount=float(amount) / float(inverse.rate),
+                is_stale=bool(inverse.is_stale),
+                source="inverse_rate",
+            )
 
-        # P0 fallback: keep pipeline available even when FX cache is missing.
-        return float(amount), True, "fallback_1_to_1"
+        return _ConvertedAmount(
+            amount=None,
+            is_stale=True,
+            source="missing_rate",
+            missing_pair=(from_norm, to_norm),
+        )
 
     def convert_amount(
         self,
@@ -1332,14 +1781,15 @@ class PortfolioService:
         from_currency: str,
         to_currency: str,
         as_of_date: date,
-    ) -> Tuple[float, bool, str]:
+    ) -> Tuple[Optional[float], bool, str]:
         """Public conversion entry for cross-service consumers."""
-        return self._convert_amount(
+        converted = self._convert_amount(
             amount=amount,
             from_currency=from_currency,
             to_currency=to_currency,
             as_of_date=as_of_date,
         )
+        return converted.amount, converted.is_stale, converted.source
 
     def _list_account_refresh_fx_currencies(
         self,
@@ -1376,6 +1826,7 @@ class PortfolioService:
         account: Any,
         as_of_date: date,
         refresh_enabled: bool,
+        aggregate_currency: Optional[str] = None,
     ) -> Dict[str, int]:
         """Refresh FX pairs for one account and keep stale fallback on failures."""
         refresh_currencies = self._list_account_refresh_fx_currencies(
@@ -1383,6 +1834,10 @@ class PortfolioService:
             as_of_date=as_of_date,
             strict=refresh_enabled,
         )
+        base_currency = self._normalize_currency(account.base_currency)
+        aggregate_currency_norm = self._normalize_currency(aggregate_currency) if aggregate_currency else None
+        if aggregate_currency_norm and base_currency != aggregate_currency_norm:
+            refresh_currencies = sorted(set(refresh_currencies) | {base_currency})
         if not refresh_enabled:
             return {
                 "pair_count": len(refresh_currencies),
@@ -1391,7 +1846,6 @@ class PortfolioService:
                 "error_count": 0,
             }
 
-        base_currency = self._normalize_currency(account.base_currency)
         summary = {
             "pair_count": len(refresh_currencies),
             "updated_count": 0,
@@ -1399,16 +1853,17 @@ class PortfolioService:
             "error_count": 0,
         }
         for from_currency in refresh_currencies:
+            to_currency = aggregate_currency_norm if aggregate_currency_norm and from_currency == base_currency else base_currency
             try:
                 rate = self._fetch_fx_rate_from_yfinance(
                     from_currency=from_currency,
-                    to_currency=base_currency,
+                    to_currency=to_currency,
                     as_of_date=as_of_date,
                 )
                 if rate is not None and rate > 0:
                     self.repo.save_fx_rate(
                         from_currency=from_currency,
-                        to_currency=base_currency,
+                        to_currency=to_currency,
                         rate_date=as_of_date,
                         rate=rate,
                         source="yfinance",
@@ -1420,20 +1875,20 @@ class PortfolioService:
                 logger.warning(
                     "FX online fetch failed for %s/%s on %s: %s",
                     from_currency,
-                    base_currency,
+                    to_currency,
                     as_of_date.isoformat(),
                     exc,
                 )
 
             fallback = self.repo.get_latest_fx_rate(
                 from_currency=from_currency,
-                to_currency=base_currency,
+                to_currency=to_currency,
                 as_of=as_of_date,
             )
             if fallback is not None and float(fallback.rate or 0.0) > 0:
                 self.repo.save_fx_rate(
                     from_currency=from_currency,
-                    to_currency=base_currency,
+                    to_currency=to_currency,
                     rate_date=as_of_date,
                     rate=float(fallback.rate),
                     source=(fallback.source or "cache_fallback"),
@@ -1573,6 +2028,39 @@ class PortfolioService:
         }
 
     @staticmethod
+    def _bank_ledger_row_to_dict(row: Any) -> Dict[str, Any]:
+        return {
+            "id": int(row.id),
+            "account_id": int(row.account_id),
+            "event_date": row.event_date.isoformat() if row.event_date else "",
+            "asset_kind": row.asset_kind,
+            "direction": row.direction,
+            "amount": float(row.amount or 0.0),
+            "currency": row.currency,
+            "bank_name": row.bank_name,
+            "product_name": row.product_name,
+            "maturity_date": row.maturity_date.isoformat() if row.maturity_date else None,
+            "note": row.note,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+
+    @staticmethod
+    def _build_asset_breakdown(accounts: List[Dict[str, Any]]) -> Dict[str, float]:
+        breakdown: Dict[str, float] = {
+            "stock": 0.0,
+            "fund": 0.0,
+            "crypto": 0.0,
+            "bank": 0.0,
+            "cash": 0.0,
+        }
+        for account in accounts:
+            market = str(account.get("market") or "").lower()
+            key = market if market in {"fund", "crypto", "bank"} else "stock"
+            breakdown[key] += float(account.get("total_market_value") or 0.0)
+            breakdown["cash"] += float(account.get("total_cash") or 0.0)
+        return {key: round(value, 6) for key, value in breakdown.items()}
+
+    @staticmethod
     def _validate_paging(*, page: int, page_size: int) -> Tuple[int, int]:
         if page < 1:
             raise ValueError("page must be >= 1")
@@ -1584,7 +2072,7 @@ class PortfolioService:
     def _normalize_market(value: str) -> str:
         market = (value or "").strip().lower()
         if market not in VALID_MARKETS:
-            raise ValueError("market must be one of: cn, hk, us")
+            raise ValueError("market must be one of: cn, hk, us, fund, crypto, bank")
         return market
 
     @staticmethod
@@ -1606,5 +2094,7 @@ class PortfolioService:
         if market == "hk":
             return "HKD"
         if market == "us":
+            return "USD"
+        if market == "crypto":
             return "USD"
         return "CNY"
