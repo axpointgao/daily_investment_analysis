@@ -9,6 +9,7 @@ export interface ChatStreamOptions {
 export interface ChatRequest {
   message: string;
   skills?: string[];
+  asset_type?: 'stock' | 'fund';
 }
 
 export interface ChatStreamRequest extends ChatRequest {
@@ -56,12 +57,16 @@ export const agentApi = {
     });
     return response.data;
   },
-  async getSkills(): Promise<SkillsResponse> {
-    const response = await apiClient.get<SkillsResponse>('/api/v1/agent/skills');
+  async getSkills(assetType: 'stock' | 'fund' = 'stock'): Promise<SkillsResponse> {
+    const response = await apiClient.get<SkillsResponse>('/api/v1/agent/skills', {
+      params: { asset_type: assetType },
+    });
     return response.data;
   },
-  async getChatSessions(limit = 50): Promise<ChatSessionItem[]> {
-    const response = await apiClient.get<{ sessions: ChatSessionItem[] }>('/api/v1/agent/chat/sessions', { params: { limit } });
+  async getChatSessions(limit = 50, assetType: 'stock' | 'fund' = 'stock'): Promise<ChatSessionItem[]> {
+    const response = await apiClient.get<{ sessions: ChatSessionItem[] }>('/api/v1/agent/chat/sessions', {
+      params: { limit, asset_type: assetType },
+    });
     return response.data.sessions;
   },
   async getChatSessionMessages(sessionId: string): Promise<ChatSessionMessage[]> {

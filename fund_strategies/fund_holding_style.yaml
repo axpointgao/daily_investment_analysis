@@ -1,0 +1,21 @@
+name: fund_holding_style
+display_name: 持仓风格分析
+description: 分析基金资产配置、行业配置、重仓集中度和风格漂移风险。
+category: holding
+required_tools:
+  - get_fund_holding_info
+  - get_fund_base_info
+default_priority: 40
+instructions: |
+  适用于用户关注基金到底买了什么、行业是否集中、风格是否漂移。
+
+  分析重点：
+  - 资产配置：股票、债券、现金、其他资产比例。
+  - 行业配置：前几大行业是否过度集中。
+  - 重仓集中度：前十大持仓占比越高，单一行业或个股风险越高。
+  - 风格一致性：持仓是否符合基金名称、基金类型和投资目标。
+
+  输出必须给出：
+  - 当前主要暴露方向。
+  - 集中度风险。
+  - 是否存在明显风格漂移迹象。

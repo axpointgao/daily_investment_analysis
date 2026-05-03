@@ -10,6 +10,7 @@ import type { SkillInfo } from '../api/agent';
 import { DashboardStateBlock } from '../components/dashboard';
 import {
   useAgentChatStore,
+  type AgentAssetType,
   type Message,
   type ProgressStep,
 } from '../stores/agentChatStore';
@@ -35,6 +36,23 @@ const QUICK_QUESTIONS = [
   { label: '用情绪周期分析东方财富', skill: 'emotion_cycle' },
 ];
 
+const FUND_QUICK_QUESTIONS = [
+  { label: '诊断 000001 这只基金', skill: 'fund_general' },
+  { label: '易方达蓝筹适合定投吗', skill: 'fund_dca' },
+  { label: '帮我筛选稳健型基金', skill: 'fund_risk_return' },
+  { label: '分析一只基金的持仓风格', skill: 'fund_holding_style' },
+  { label: '这只基金适合做核心仓位吗', skill: 'fund_core_satellite' },
+];
+
+type QuickQuestion = {
+  label: string;
+  skill: string;
+};
+
+type ChatPageProps = {
+  assetType?: AgentAssetType;
+};
+
 const MAX_SELECTED_SKILLS = 3;
 
 const getMessageSkillNames = (msg: Message): string[] => {
@@ -47,8 +65,20 @@ const getMessageSkillNames = (msg: Message): string[] => {
 
 const getMessageSkillLabel = (msg: Message): string => getMessageSkillNames(msg).join('、');
 
-const ChatPage: React.FC = () => {
+const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const isFundMode = assetType === 'fund';
+  const pageTitle = isFundMode ? '诊基' : '问股';
+  const pageDescription = isFundMode
+    ? '向 AI 询问基金诊断，获取基于基金策略视角的风险收益与配置建议。'
+    : '向 AI 询问个股分析，获取基于技能视角的交易建议与实时决策报告。';
+  const emptyTitle = isFundMode ? '开始诊基' : '开始问股';
+  const emptyDescription = isFundMode
+    ? '输入「诊断 000001」或「易方达蓝筹适合定投吗」，AI 将调用基金数据工具生成诊断建议。'
+    : '输入「分析 600519」或「茅台现在能买吗」，AI 将调用实时数据工具为您生成决策报告。';
+  const inputPlaceholder = isFundMode
+    ? '例如：诊断 000001 / 易方达蓝筹适合定投吗？ (Enter 发送, Shift+Enter 换行)'
+    : '例如：分析 600519 / 茅台现在适合买入吗？ (Enter 发送, Shift+Enter 换行)';
   const [input, setInput] = useState('');
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
@@ -94,8 +124,8 @@ const ChatPage: React.FC = () => {
 
   // Set page title
   useEffect(() => {
-    document.title = '问股 - DSA';
-  }, []);
+    document.title = `${pageTitle} - DSA`;
+  }, [pageTitle]);
 
   useEffect(() => () => {
     isMountedRef.current = false;
@@ -171,15 +201,15 @@ const ChatPage: React.FC = () => {
   }, [loading]);
 
   useEffect(() => {
-    clearCompletionBadge();
-  }, [clearCompletionBadge]);
+    clearCompletionBadge(assetType);
+  }, [assetType, clearCompletionBadge]);
 
   useEffect(() => {
-    loadInitialSession();
-  }, [loadInitialSession]);
+    loadInitialSession(assetType);
+  }, [assetType, loadInitialSession]);
 
   useEffect(() => {
-    agentApi.getSkills()
+    agentApi.getSkills(assetType)
       .then((res) => {
         setSkills(res.skills);
         const defaultId =
@@ -191,10 +221,11 @@ const ChatPage: React.FC = () => {
       .catch((error) => {
         console.error('Failed to load chat skills:', error);
       });
-  }, []);
+  }, [assetType]);
 
   const availableSkillIds = new Set(skills.map((skill) => skill.id));
-  const quickQuestions = QUICK_QUESTIONS.filter((question) => availableSkillIds.size === 0 || availableSkillIds.has(question.skill));
+  const quickQuestionSource = isFundMode ? FUND_QUICK_QUESTIONS : QUICK_QUESTIONS;
+  const quickQuestions = quickQuestionSource.filter((question) => availableSkillIds.size === 0 || availableSkillIds.has(question.skill));
   const selectedSkillIdSet = new Set(selectedSkillIds);
   const skillLimitReached = selectedSkillIds.length >= MAX_SELECTED_SKILLS;
 
@@ -229,33 +260,40 @@ const ChatPage: React.FC = () => {
   const handleStartNewChat = useCallback(() => {
     followUpContextRef.current = null;
     requestScrollToBottom('auto');
-    useAgentChatStore.getState().startNewChat();
+    useAgentChatStore.getState().startNewChat(assetType);
     setSidebarOpen(false);
-  }, [requestScrollToBottom]);
+  }, [assetType, requestScrollToBottom]);
 
   const handleSwitchSession = useCallback((targetSessionId: string) => {
     requestScrollToBottom('auto');
-    switchSession(targetSessionId);
+    switchSession(targetSessionId, assetType);
     setSidebarOpen(false);
-  }, [requestScrollToBottom, switchSession]);
+  }, [assetType, requestScrollToBottom, switchSession]);
 
   const confirmDelete = useCallback(() => {
     if (!deleteConfirmId) return;
     agentApi.deleteChatSession(deleteConfirmId)
       .then(() => {
-        loadSessions();
+        loadSessions(assetType);
         if (deleteConfirmId === sessionId) {
           handleStartNewChat();
         }
       })
       .catch((error) => {
         console.error('Failed to delete chat session:', error);
-      });
+    });
     setDeleteConfirmId(null);
-  }, [deleteConfirmId, sessionId, loadSessions, handleStartNewChat]);
+  }, [assetType, deleteConfirmId, sessionId, loadSessions, handleStartNewChat]);
 
   // Handle follow-up from report page: ?stock=600519&name=贵州茅台&recordId=xxx
   useEffect(() => {
+    if (isFundMode) {
+      if (searchParams.toString()) {
+        setSearchParams({}, { replace: true });
+      }
+      return;
+    }
+
     const stock = sanitizeFollowUpStockCode(searchParams.get('stock'));
     const name = sanitizeFollowUpStockName(searchParams.get('name'));
     const recordId = parseFollowUpRecordId(searchParams.get('recordId'));
@@ -289,7 +327,7 @@ const ChatPage: React.FC = () => {
       }
     });
     setSearchParams({}, { replace: true });
-  }, [searchParams, setSearchParams]);
+  }, [isFundMode, searchParams, setSearchParams]);
 
   const handleSend = useCallback(
     async (overrideMessage?: string, overrideSkillIds?: string[]) => {
@@ -301,8 +339,9 @@ const ChatPage: React.FC = () => {
       const payload = {
         message: msgText,
         session_id: sessionId,
+        asset_type: assetType,
         ...(usedSkillIds.length > 0 ? { skills: usedSkillIds } : {}),
-        context: followUpContextRef.current ?? undefined,
+        context: !isFundMode ? followUpContextRef.current ?? undefined : undefined,
       };
       followUpHydrationTokenRef.current += 1;
       followUpContextRef.current = null;
@@ -315,7 +354,7 @@ const ChatPage: React.FC = () => {
         skillName: usedSkillNames.join('、'),
       });
     },
-    [getSkillNames, input, loading, normalizeSelectedSkillIds, requestScrollToBottom, selectedSkillIds, sessionId, startStream],
+    [assetType, getSkillNames, input, isFundMode, loading, normalizeSelectedSkillIds, requestScrollToBottom, selectedSkillIds, sessionId, startStream],
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -325,7 +364,7 @@ const ChatPage: React.FC = () => {
     }
   };
 
-  const handleQuickQuestion = (q: (typeof QUICK_QUESTIONS)[0]) => {
+  const handleQuickQuestion = (q: QuickQuestion) => {
     setSelectedSkillIds([q.skill]);
     handleSend(q.label, [q.skill]);
   };
@@ -650,7 +689,7 @@ const ChatPage: React.FC = () => {
                   d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
                 />
               </svg>
-              问股
+              {pageTitle}
             </h1>
             {messages.length > 0 && (
               <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
@@ -748,7 +787,7 @@ const ChatPage: React.FC = () => {
             )}
           </div>
           <p className="text-secondary-text text-sm">
-            向 AI 询问个股分析，获取基于技能视角的交易建议与实时决策报告。
+            {pageDescription}
           </p>
           {sendToast ? (
             <InlineAlert
@@ -772,8 +811,8 @@ const ChatPage: React.FC = () => {
             {messages.length === 0 && !loading ? (
               <div className="flex h-full items-center justify-center">
                 <EmptyState
-                  title="开始问股"
-                  description="输入「分析 600519」或「茅台现在能买吗」，AI 将调用实时数据工具为您生成决策报告。"
+                  title={emptyTitle}
+                  description={emptyDescription}
                   className="max-w-2xl border-dashed bg-card/55"
                   icon={(
                     <svg
@@ -1020,7 +1059,7 @@ const ChatPage: React.FC = () => {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder="例如：分析 600519 / 茅台现在适合买入吗？ (Enter 发送, Shift+Enter 换行)"
+                  placeholder={inputPlaceholder}
                   disabled={loading}
                   rows={1}
                   className="input-surface input-focus-glow flex-1 min-h-[44px] max-h-[200px] rounded-xl border bg-transparent px-4 py-2.5 text-sm transition-all focus:outline-none resize-none disabled:cursor-not-allowed disabled:opacity-60"

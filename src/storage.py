@@ -2117,6 +2117,7 @@ class DatabaseManager:
         limit: int = 50,
         session_prefix: Optional[str] = None,
         extra_session_ids: Optional[List[str]] = None,
+        asset_type: str = "stock",
     ) -> List[Dict[str, Any]]:
         """
         获取聊天会话列表（从 conversation_messages 聚合）
@@ -2128,6 +2129,9 @@ class DatabaseManager:
                 ``"telegram_12345"``).
             extra_session_ids: Optional exact session ids to include in
                 addition to the scoped prefix.
+            asset_type: Web chat asset type filter. When no user prefix is
+                supplied, fund sessions use the ``fund_`` session prefix and
+                stock sessions exclude that prefix for backward compatibility.
 
         Returns:
             按最近活跃时间倒序的会话列表，每条包含 session_id, title, message_count, last_active
@@ -2156,6 +2160,10 @@ class DatabaseManager:
                 conditions.append(ConversationMessage.session_id.in_(exact_ids))
             if conditions:
                 base = base.where(or_(*conditions))
+            elif asset_type == "fund":
+                base = base.where(ConversationMessage.session_id.startswith("fund_"))
+            elif asset_type == "stock":
+                base = base.where(~ConversationMessage.session_id.startswith("fund_"))
             stmt = (
                 base
                 .group_by(ConversationMessage.session_id)

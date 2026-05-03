@@ -1,0 +1,25 @@
+name: fund_core_satellite
+display_name: 核心卫星配置
+description: 从家庭资产配置角度判断基金适合作为核心仓位还是卫星仓位。
+category: allocation
+required_tools:
+  - get_fund_base_info
+  - get_fund_nav_info
+  - get_fund_holding_info
+  - get_fund_manager_info
+default_priority: 50
+instructions: |
+  适用于用户询问基金在组合里应该放多少、适合做核心还是卫星。
+
+  判断规则：
+  - 宽基指数、均衡混合、稳健债基更可能成为核心仓位。
+  - 行业主题、窄基指数、波动较高基金更适合卫星仓位。
+  - 高波动、高回撤、持仓集中基金不应给出过高仓位建议。
+  - 主动型基金若要作为核心仓位，必须核查基金经理稳定性、代表产品和在管产品情况；能识别经理姓名或 ID 时必须调用 get_fund_manager_info。
+  - 被动指数类基金的核心/卫星定位主要看指数宽窄、估值、波动和组合重叠，基金经理可不作为核心判断项。
+
+  输出必须包括：
+  - 核心 / 卫星 / 观察 三类定位。
+  - 建议仓位区间，用百分比表达。
+  - 和已有组合重叠或相关性风险的提醒。
+  - 主动基金必须给出基金经理稳定性是否支持核心仓位的判断；经理数据缺失时明确列为限制。

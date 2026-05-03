@@ -8,7 +8,7 @@ const mockThemeToggle = vi.fn(({ collapsed }: { collapsed?: boolean }) => (
   <button type="button">{collapsed ? '切换主题(折叠)' : '切换主题'}</button>
 ));
 
-const completionBadgeState = { value: true };
+const completionBadgeState = { stock: true, fund: false };
 
 vi.mock('../../../contexts/AuthContext', () => ({
   useAuth: () => ({
@@ -18,8 +18,11 @@ vi.mock('../../../contexts/AuthContext', () => ({
 }));
 
 vi.mock('../../../stores/agentChatStore', () => ({
-  useAgentChatStore: (selector: (state: { completionBadge: boolean }) => unknown) =>
-    selector({ completionBadge: completionBadgeState.value }),
+  useAgentChatStore: (selector: (state: { stockCompletionBadge: boolean; fundCompletionBadge: boolean }) => unknown) =>
+    selector({
+      stockCompletionBadge: completionBadgeState.stock,
+      fundCompletionBadge: completionBadgeState.fund,
+    }),
 }));
 
 vi.mock('../../theme/ThemeToggle', () => ({
@@ -28,7 +31,8 @@ vi.mock('../../theme/ThemeToggle', () => ({
 
 describe('SidebarNav', () => {
   it('shows the shared completion badge only when chat completion is pending', () => {
-    completionBadgeState.value = true;
+    completionBadgeState.stock = true;
+    completionBadgeState.fund = false;
 
     const { rerender } = render(
       <MemoryRouter initialEntries={['/chat']}>
@@ -38,8 +42,11 @@ describe('SidebarNav', () => {
 
     expect(screen.getByTestId('chat-completion-badge')).toBeInTheDocument();
     expect(screen.getByLabelText('问股有新消息')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '诊基' })).toBeInTheDocument();
+    expect(screen.queryByTestId('fund-chat-completion-badge')).not.toBeInTheDocument();
 
-    completionBadgeState.value = false;
+    completionBadgeState.stock = false;
+    completionBadgeState.fund = true;
     rerender(
       <MemoryRouter initialEntries={['/chat']}>
         <SidebarNav />
@@ -47,6 +54,8 @@ describe('SidebarNav', () => {
     );
 
     expect(screen.queryByTestId('chat-completion-badge')).not.toBeInTheDocument();
+    expect(screen.getByTestId('fund-chat-completion-badge')).toBeInTheDocument();
+    expect(screen.getByLabelText('诊基有新消息')).toBeInTheDocument();
   });
 
   it('renders the collapsed theme toggle variant when the sidebar is collapsed', () => {

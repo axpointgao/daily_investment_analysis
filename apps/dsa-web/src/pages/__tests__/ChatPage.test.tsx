@@ -162,8 +162,8 @@ describe('ChatPage', () => {
     expect(await screen.findByTestId('chat-workspace')).toBeInTheDocument();
     expect(screen.getByTestId('chat-session-list-scroll')).toBeInTheDocument();
     expect(screen.getByTestId('chat-message-scroll')).toBeInTheDocument();
-    expect(mockLoadInitialSession).toHaveBeenCalled();
-    expect(mockClearCompletionBadge).toHaveBeenCalled();
+    expect(mockLoadInitialSession).toHaveBeenCalledWith('stock');
+    expect(mockClearCompletionBadge).toHaveBeenCalledWith('stock');
   });
 
   it('switches session when clicking anywhere on the session card', async () => {
@@ -178,7 +178,7 @@ describe('ChatPage', () => {
     });
 
     fireEvent.click(sessionCard);
-    expect(mockSwitchSession).toHaveBeenCalledWith('session-1');
+    expect(mockSwitchSession).toHaveBeenCalledWith('session-1', 'stock');
     expect(sessionCard).toHaveAttribute('aria-current', 'page');
   });
 
@@ -304,6 +304,7 @@ describe('ChatPage', () => {
       expect(mockStartStream).toHaveBeenCalledWith(
         expect.objectContaining({
           message: '分析 600519',
+          asset_type: 'stock',
           skills: ['bull_trend', 'ma_golden_cross'],
         }),
         expect.objectContaining({
@@ -334,6 +335,7 @@ describe('ChatPage', () => {
     });
     const lastCall = mockStartStream.mock.calls[mockStartStream.mock.calls.length - 1];
     expect(lastCall[0]).toEqual(expect.objectContaining({ message: '分析 AAPL' }));
+    expect(lastCall[0]).toEqual(expect.objectContaining({ asset_type: 'stock' }));
     expect(lastCall[0]).not.toHaveProperty('skills');
     expect(lastCall[1]).toEqual(expect.objectContaining({
       skillNames: ['通用'],
@@ -391,11 +393,87 @@ describe('ChatPage', () => {
       expect(mockStartStream).toHaveBeenCalledWith(
         expect.objectContaining({
           message: '用缠论分析茅台',
+          asset_type: 'stock',
           skills: ['chan_theory'],
         }),
         expect.objectContaining({
           skillNames: ['缠论'],
           skillName: '缠论',
+        }),
+      );
+    });
+  });
+
+  it('renders fund mode with independent copy, skills, and asset_type payload', async () => {
+    mockGetSkills.mockResolvedValue({
+      skills: [
+        { id: 'fund_general', name: '通用基金诊断', description: '基金诊断' },
+        { id: 'fund_dca', name: '定投策略', description: '定投判断' },
+      ],
+      default_skill_id: 'fund_general',
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/fund-chat?stock=600519&recordId=1']}>
+        <ChatPage assetType="fund" />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole('heading', { name: '诊基' })).toBeInTheDocument();
+    expect(screen.getByText('向 AI 询问基金诊断，获取基于基金策略视角的风险收益与配置建议。')).toBeInTheDocument();
+    expect(screen.getByText('开始诊基')).toBeInTheDocument();
+    expect(mockLoadInitialSession).toHaveBeenCalledWith('fund');
+    expect(mockClearCompletionBadge).toHaveBeenCalledWith('fund');
+    expect(mockGetSkills).toHaveBeenCalledWith('fund');
+    expect(historyApi.getDetail).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByPlaceholderText(/诊断 000001/), {
+      target: { value: '诊断 000001' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => {
+      expect(mockStartStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '诊断 000001',
+          asset_type: 'fund',
+          skills: ['fund_general'],
+          context: undefined,
+        }),
+        expect.objectContaining({
+          skillNames: ['通用基金诊断'],
+          skillName: '通用基金诊断',
+        }),
+      );
+    });
+  });
+
+  it('uses fund quick questions when fund mode is active', async () => {
+    mockGetSkills.mockResolvedValue({
+      skills: [
+        { id: 'fund_general', name: '通用基金诊断', description: '基金诊断' },
+      ],
+      default_skill_id: 'fund_general',
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/fund-chat']}>
+        <ChatPage assetType="fund" />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '诊断 000001 这只基金' }));
+
+    await waitFor(() => {
+      expect(mockStartStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '诊断 000001 这只基金',
+          asset_type: 'fund',
+          skills: ['fund_general'],
+        }),
+        expect.objectContaining({
+          skillNames: ['通用基金诊断'],
+          skillName: '通用基金诊断',
         }),
       );
     });

@@ -41,7 +41,10 @@ describe('agentChatStore.startStream', () => {
       chatError: null,
       currentRoute: '/chat',
       completionBadge: false,
+      stockCompletionBadge: false,
+      fundCompletionBadge: false,
       hasInitialLoad: true,
+      activeAssetType: 'stock',
       abortController: null,
     });
     vi.clearAllMocks();
@@ -181,5 +184,68 @@ describe('agentChatStore.startStream', () => {
       category: 'unknown',
       rawMessage: '分析出错',
     });
+  });
+
+  it('loads fund sessions independently and prefixes new fund session ids', async () => {
+    vi.mocked(agentApi.getChatSessions).mockResolvedValue([
+      {
+        session_id: 'fund_existing',
+        title: '诊断基金',
+        message_count: 2,
+        created_at: '2026-05-01T00:00:00Z',
+        last_active: '2026-05-01T00:00:00Z',
+      },
+    ]);
+    vi.mocked(agentApi.getChatSessionMessages).mockResolvedValue([
+      {
+        id: 'm1',
+        role: 'user',
+        content: '诊断 000001',
+        created_at: '2026-05-01T00:00:00Z',
+      },
+    ]);
+    localStorage.setItem('dsa_fund_chat_session_id', 'existing');
+    useAgentChatStore.setState({
+      hasInitialLoad: true,
+      activeAssetType: 'stock',
+      sessionId: 'stock-session',
+      messages: [{ id: 'stock-msg', role: 'user', content: '分析茅台' }],
+    });
+
+    await useAgentChatStore.getState().loadInitialSession('fund');
+
+    const state = useAgentChatStore.getState();
+    expect(agentApi.getChatSessions).toHaveBeenCalledWith(50, 'fund');
+    expect(agentApi.getChatSessionMessages).toHaveBeenCalledWith('fund_existing');
+    expect(state.activeAssetType).toBe('fund');
+    expect(state.sessionId).toBe('fund_existing');
+    expect(state.messages).toEqual([{ id: 'm1', role: 'user', content: '诊断 000001' }]);
+  });
+
+  it('marks the fund completion badge separately when a fund stream finishes off route', async () => {
+    useAgentChatStore.setState({
+      currentRoute: '/chat',
+      completionBadge: false,
+      stockCompletionBadge: false,
+      fundCompletionBadge: false,
+    });
+    vi.mocked(agentApi.chatStream).mockResolvedValue(
+      createStreamResponse([
+        'data: {"type":"done","success":true,"content":"基金诊断结果"}',
+      ]),
+    );
+
+    await useAgentChatStore
+      .getState()
+      .startStream({ message: '诊断 000001', session_id: 'fund-test', asset_type: 'fund' }, { skillName: '通用基金诊断' });
+
+    const state = useAgentChatStore.getState();
+    expect(state.completionBadge).toBe(true);
+    expect(state.stockCompletionBadge).toBe(false);
+    expect(state.fundCompletionBadge).toBe(true);
+
+    useAgentChatStore.getState().clearCompletionBadge('fund');
+    expect(useAgentChatStore.getState().completionBadge).toBe(false);
+    expect(useAgentChatStore.getState().fundCompletionBadge).toBe(false);
   });
 });

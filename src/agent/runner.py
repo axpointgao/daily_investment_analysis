@@ -48,6 +48,14 @@ _THINKING_TOOL_LABELS: Dict[str, str] = {
     "get_skill_backtest_summary": "技能回测概览",
     "get_strategy_backtest_summary": "策略回测概览",
     "get_stock_backtest_summary": "个股回测数据",
+    "search_funds": "基金搜索",
+    "get_fund_base_info": "基金基础信息",
+    "get_fund_nav_info": "基金净值查询",
+    "get_fund_holding_info": "基金持仓查询",
+    "get_fund_manager_info": "基金经理查询",
+    "select_funds": "条件选基",
+    "get_fund_index_info": "指数信息查询",
+    "get_bond_market": "债市晴雨表",
 }
 
 

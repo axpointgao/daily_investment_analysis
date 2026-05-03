@@ -62,6 +62,36 @@ class SystemConfigApiTestCase(unittest.TestCase):
         item_map = {item["key"]: item for item in payload["items"]}
         self.assertEqual(item_map["GEMINI_API_KEY"]["value"], "secret-key-value")
         self.assertFalse(item_map["GEMINI_API_KEY"]["is_masked"])
+        self.assertIn("TTFUND_APIKEY", item_map)
+        ttfund_schema = item_map["TTFUND_APIKEY"]["schema"]
+        self.assertEqual(ttfund_schema["category"], "agent")
+        self.assertTrue(ttfund_schema["is_sensitive"])
+
+    def test_test_ttfund_skills_data_source_uses_agent_api_key(self) -> None:
+        self.env_path.write_text(
+            "\n".join(
+                [
+                    "STOCK_LIST=600519,000001",
+                    "TTFUND_APIKEY=ttf-test-key",
+                    "ADMIN_AUTH_ENABLED=false",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        self.manager = ConfigManager(env_path=self.env_path)
+        self.service = SystemConfigService(manager=self.manager)
+
+        with patch(
+            "src.services.ttfund_skills_client.test_ttfund_skills_connection",
+            return_value=({"fund_code": "000001"}, 123),
+        ) as mock_test:
+            payload = self.service.test_data_source(source="ttfund_skills")
+
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["source"], "ttfund_skills")
+        self.assertEqual(payload["message"], "已连接")
+        mock_test.assert_called_once()
 
     def test_get_setup_status_returns_readiness_payload(self) -> None:
         self.env_path.write_text(

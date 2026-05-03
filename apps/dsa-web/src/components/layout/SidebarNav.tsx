@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { BarChart3, BriefcaseBusiness, Home, LogOut, MessageSquareQuote, Settings2 } from 'lucide-react';
+import { BarChart3, BriefcaseBusiness, FileSearch, Home, LogOut, MessageSquareQuote, Settings2 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAgentChatStore } from '../../stores/agentChatStore';
@@ -20,12 +20,13 @@ type NavItem = {
   to: string;
   icon: React.ComponentType<{ className?: string }>;
   exact?: boolean;
-  badge?: 'completion';
+  badge?: 'stock-completion' | 'fund-completion';
 };
 
 const NAV_ITEMS: NavItem[] = [
   { key: 'home', label: '首页', to: '/', icon: Home, exact: true },
-  { key: 'chat', label: '问股', to: '/chat', icon: MessageSquareQuote, badge: 'completion' },
+  { key: 'chat', label: '问股', to: '/chat', icon: MessageSquareQuote, badge: 'stock-completion' },
+  { key: 'fund-chat', label: '诊基', to: '/fund-chat', icon: FileSearch, badge: 'fund-completion' },
   { key: 'portfolio', label: '持仓', to: '/portfolio', icon: BriefcaseBusiness },
   { key: 'backtest', label: '回测', to: '/backtest', icon: BarChart3 },
   { key: 'settings', label: '设置', to: '/settings', icon: Settings2 },
@@ -33,7 +34,8 @@ const NAV_ITEMS: NavItem[] = [
 
 export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNavigate }) => {
   const { authEnabled, logout } = useAuth();
-  const completionBadge = useAgentChatStore((state) => state.completionBadge);
+  const stockCompletionBadge = useAgentChatStore((state) => state.stockCompletionBadge);
+  const fundCompletionBadge = useAgentChatStore((state) => state.fundCompletionBadge);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   return (
@@ -79,15 +81,16 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
                 )}
                 <Icon className={cn('ml-1 h-5 w-5 shrink-0', isActive ? 'text-[var(--nav-icon-active)]' : 'text-current')} />
                 {!collapsed ? <span className="truncate">{label}</span> : null}
-                {badge === 'completion' && completionBadge ? (
+                {((badge === 'stock-completion' && stockCompletionBadge) ||
+                  (badge === 'fund-completion' && fundCompletionBadge)) ? (
                   <StatusDot
                     tone="info"
-                    data-testid="chat-completion-badge"
+                    data-testid={badge === 'fund-completion' ? 'fund-chat-completion-badge' : 'chat-completion-badge'}
                     className={cn(
                       'absolute right-3 border-2 border-background shadow-[0_0_10px_var(--nav-indicator-shadow)]',
                       collapsed ? 'right-2 top-2' : ''
                     )}
-                    aria-label="问股有新消息"
+                    aria-label={badge === 'fund-completion' ? '诊基有新消息' : '问股有新消息'}
                   />
                 ) : null}
               </>

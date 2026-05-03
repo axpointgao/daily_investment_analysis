@@ -78,6 +78,14 @@ const PORTFOLIO_DATA_SOURCE_TESTS: Array<{ source: TestDataSourceSource; label: 
   },
 ];
 
+const AGENT_DATA_SOURCE_TESTS: Array<{ source: TestDataSourceSource; label: string; description: string }> = [
+  {
+    source: 'ttfund_skills',
+    label: '天天基金 Skills',
+    description: '验证 TTFUND_APIKEY 是否可调用官方基金 Skills 网关。',
+  },
+];
+
 function trimDesktopRuntimeString(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -176,6 +184,7 @@ const SettingsPage: React.FC = () => {
     tushare_third_party: { loading: false },
     tiantian_fund: { loading: false },
     crypto_quote: { loading: false },
+    ttfund_skills: { loading: false },
   });
   const desktopImportRef = useRef<HTMLInputElement | null>(null);
   const desktopRuntimeApi = getDesktopRuntimeApi();
@@ -715,12 +724,66 @@ const SettingsPage: React.FC = () => {
                     return (
                       <div key={item.source} className="rounded-2xl border settings-border bg-background/35 px-4 py-4">
                         <div className="flex items-start justify-between gap-3">
-                          <div>
+                          <div className="min-w-0">
                             <p className="text-sm font-medium text-foreground">{item.label}</p>
                             <p className="mt-1 text-xs leading-5 text-muted-text">{item.description}</p>
                           </div>
                           <span
-                            className={`rounded-full border px-2 py-0.5 text-xs ${
+                            className={`inline-flex min-w-[4rem] shrink-0 items-center justify-center rounded-full border px-2.5 py-0.5 text-xs leading-5 whitespace-nowrap ${
+                              result
+                                ? connected
+                                  ? 'border-success/20 bg-success/10 text-success'
+                                  : 'border-danger/20 bg-danger/10 text-danger'
+                                : 'border-border/50 bg-background/40 text-muted-text'
+                            }`}
+                          >
+                            {result ? (connected ? '已连接' : '未连接') : '未测试'}
+                          </span>
+                        </div>
+                        {result || state.error ? (
+                          <p className={`mt-3 text-xs leading-5 ${connected ? 'text-success' : 'text-danger'}`}>
+                            {result?.message || state.error?.message}
+                            {result?.latencyMs != null ? ` · ${result.latencyMs}ms` : ''}
+                          </p>
+                        ) : null}
+                        {result?.error ? <p className="mt-1 break-all text-xs leading-5 text-muted-text">{result.error}</p> : null}
+                        <Button
+                          type="button"
+                          variant="settings-secondary"
+                          size="sm"
+                          className="mt-4 w-full"
+                          onClick={() => void testDataSource(item.source)}
+                          disabled={isSaving || isLoading}
+                          isLoading={state.loading}
+                          loadingText="测试中..."
+                        >
+                          测试连接
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </SettingsSectionCard>
+            ) : null}
+            {activeCategory === 'agent' ? (
+              <SettingsSectionCard
+                title="Agent 数据能力连通性"
+                description="使用当前已保存配置检查 Agent 外部工具是否可用；未保存的草稿需先保存后再测试。"
+              >
+                <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
+                  {AGENT_DATA_SOURCE_TESTS.map((item) => {
+                    const state = dataSourceTestState[item.source];
+                    const result = state.result;
+                    const connected = Boolean(result?.success);
+                    return (
+                      <div key={item.source} className="rounded-2xl border settings-border bg-background/35 px-4 py-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-foreground">{item.label}</p>
+                            <p className="mt-1 text-xs leading-5 text-muted-text">{item.description}</p>
+                          </div>
+                          <span
+                            className={`inline-flex min-w-[4rem] shrink-0 items-center justify-center rounded-full border px-2.5 py-0.5 text-xs leading-5 whitespace-nowrap ${
                               result
                                 ? connected
                                   ? 'border-success/20 bg-success/10 text-success'

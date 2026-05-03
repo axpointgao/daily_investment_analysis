@@ -37,7 +37,9 @@ logger = logging.getLogger(__name__)
 # Module-level caches
 # ---------------------------------------------------------------------------
 _TOOL_REGISTRY = None
+_FUND_TOOL_REGISTRY = None
 _SKILL_MANAGER_PROTOTYPE = None
+_FUND_SKILL_MANAGER_PROTOTYPE = None
 # Sentinel used as initial value so None (i.e. no custom dir) compares as "changed"
 # on the very first call, forcing a build rather than accidentally skipping it.
 _SENTINEL = object()
@@ -57,6 +59,17 @@ class SkillPromptState:
     skill_instructions: str
     default_skill_policy: str
     technical_skill_policy: str
+
+
+def reset_agent_factory_caches() -> None:
+    """Clear cached registries and skill managers after runtime config reload."""
+    global _TOOL_REGISTRY, _FUND_TOOL_REGISTRY, _SKILL_MANAGER_PROTOTYPE, _FUND_SKILL_MANAGER_PROTOTYPE
+    global _SKILL_MANAGER_CUSTOM_DIR
+    _TOOL_REGISTRY = None
+    _FUND_TOOL_REGISTRY = None
+    _SKILL_MANAGER_PROTOTYPE = None
+    _FUND_SKILL_MANAGER_PROTOTYPE = None
+    _SKILL_MANAGER_CUSTOM_DIR = _SENTINEL
 
 
 def _normalize_skill_ids(
@@ -172,6 +185,24 @@ def get_tool_registry():
     return _TOOL_REGISTRY
 
 
+def get_fund_tool_registry():
+    """Return a cached fund-only ToolRegistry."""
+    global _FUND_TOOL_REGISTRY
+    if _FUND_TOOL_REGISTRY is not None:
+        return _FUND_TOOL_REGISTRY
+
+    from src.agent.tools.fund_tools import ALL_FUND_TOOLS
+    from src.agent.tools.registry import ToolRegistry
+
+    registry = ToolRegistry()
+    for tool_fn in ALL_FUND_TOOLS:
+        registry.register(tool_fn)
+
+    _FUND_TOOL_REGISTRY = registry
+    logger.info("[AgentFactory] Fund ToolRegistry cached (%d tools)", len(registry._tools) if hasattr(registry, "_tools") else -1)
+    return _FUND_TOOL_REGISTRY
+
+
 def get_skill_manager(config=None):
     """Return a deepcopy-clone of the cached SkillManager prototype.
 
@@ -212,6 +243,28 @@ def get_skill_manager(config=None):
     _SKILL_MANAGER_CUSTOM_DIR = current_custom_dir
     logger.info("[AgentFactory] SkillManager prototype cached (%d skills)", len(skill_manager._skills))
     return copy.deepcopy(_SKILL_MANAGER_PROTOTYPE)
+
+
+def get_fund_skill_manager(config=None):
+    """Return a deepcopy-clone of the cached fund SkillManager prototype."""
+    global _FUND_SKILL_MANAGER_PROTOTYPE
+    if _FUND_SKILL_MANAGER_PROTOTYPE is not None:
+        return copy.deepcopy(_FUND_SKILL_MANAGER_PROTOTYPE)
+
+    from pathlib import Path
+
+    from src.agent.skills.base import SkillManager
+
+    skill_manager = SkillManager()
+    fund_skill_dir = Path(__file__).resolve().parent.parent.parent / "fund_strategies"
+    try:
+        skill_manager.load_custom_skills(fund_skill_dir)
+    except Exception as exc:
+        logger.warning("[AgentFactory] Failed to load fund skills from %s: %s", fund_skill_dir, exc)
+
+    _FUND_SKILL_MANAGER_PROTOTYPE = skill_manager
+    logger.info("[AgentFactory] Fund SkillManager prototype cached (%d skills)", len(skill_manager._skills))
+    return copy.deepcopy(_FUND_SKILL_MANAGER_PROTOTYPE)
 
 
 def resolve_skill_prompt_state(config=None, skills: Optional[List[str]] = None) -> SkillPromptState:
@@ -355,3 +408,42 @@ def _build_orchestrator(config, registry, llm_adapter, skill_manager, *, technic
 
 # Keep legacy alias so any external callers using the old name still work.
 build_executor = build_agent_executor
+
+
+def build_fund_agent_executor(config=None, skills: Optional[List[str]] = None):
+    """Build and return a fund-only Agent executor."""
+    if config is None:
+        from src.config import get_config
+        config = get_config()
+
+    from src.agent.fund_executor import FundAgentExecutor
+    from src.agent.llm_adapter import LLMToolAdapter
+    from src.agent.skills.defaults import get_default_active_skill_ids
+
+    registry = get_fund_tool_registry()
+    skill_manager = get_fund_skill_manager(config)
+    skill_catalog = list(skill_manager.list_skills())
+    available_skill_ids = {
+        str(getattr(skill, "name", "")).strip()
+        for skill in skill_catalog
+        if str(getattr(skill, "name", "")).strip()
+    }
+    default_skills = get_default_active_skill_ids(
+        skill_catalog,
+        available_skill_ids=available_skill_ids or None,
+    )
+    selected_skills, _unknown = _normalize_skill_ids(
+        skills if skills is not None else default_skills,
+        available_skill_ids=available_skill_ids,
+    )
+    if not selected_skills:
+        selected_skills = default_skills
+    skill_manager.activate(selected_skills)
+
+    return FundAgentExecutor(
+        tool_registry=registry,
+        llm_adapter=LLMToolAdapter(config),
+        skill_instructions=skill_manager.get_skill_instructions(),
+        max_steps=getattr(config, "agent_max_steps", AGENT_MAX_STEPS_DEFAULT),
+        timeout_seconds=getattr(config, "agent_orchestrator_timeout_s", 0),
+    )

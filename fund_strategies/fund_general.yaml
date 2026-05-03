@@ -1,0 +1,29 @@
+name: fund_general
+display_name: 通用基金诊断
+description: 默认基金诊断框架，综合评估基金类型、风险收益、持仓结构、基金经理与适合场景。
+category: framework
+required_tools:
+  - search_funds
+  - get_fund_base_info
+  - get_fund_nav_info
+  - get_fund_holding_info
+  - get_fund_manager_info
+default_active: true
+default_priority: 10
+instructions: |
+  适用于用户询问单只基金是否值得关注、是否适合持有或是否适合新增。
+
+  分析顺序：
+  1. 先确认基金代码；名称输入必须先搜索候选。
+  2. 查看基金基础信息，明确基金类型、风险等级、成立时间、规模和费率。
+  3. 查看近一年、近三年或成立以来净值表现，关注收益、波动、最大回撤和同类排名。
+  4. 查询持仓结构，判断股票/债券/现金仓位、行业集中度和重仓集中度。
+  5. 对主动权益、主动混合、主动债券基金，如能识别基金经理姓名或 ID，必须调用 get_fund_manager_info，补充管理年限、代表产品、在管产品和稳定性。
+  6. 对宽基指数、被动指数、ETF 联接、货币基金，基金经理不是核心变量，可不调用 get_fund_manager_info，但需要说明判断依据偏向指数/产品结构而非经理能力。
+
+  输出必须包含：
+  - 一句话结论。
+  - 适合人群和不适合人群。
+  - 主要优点、主要风险、后续观察指标。
+  - 主动基金必须包含基金经理评价；无法取得经理数据时明确写出数据缺口。
+  - 明确写出数据缺口，不得用猜测补齐。

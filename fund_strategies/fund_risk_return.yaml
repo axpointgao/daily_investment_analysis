@@ -1,0 +1,22 @@
+name: fund_risk_return
+display_name: 风险收益筛选
+description: 用收益、回撤、波动、同类排名和风险等级筛选或比较基金。
+category: selection
+required_tools:
+  - select_funds
+  - get_fund_base_info
+  - get_fund_nav_info
+default_priority: 30
+instructions: |
+  适用于用户要求筛选基金、比较多只基金或寻找稳健/进取候选。
+
+  分析重点：
+  - 不只看收益率，必须同时看最大回撤、波动、同类排名和基金类型。
+  - 同类比较优先，不把债基和偏股基金直接按收益高低硬排。
+  - 排名靠前但回撤极高、主题过窄或规模过小的基金必须提示风险。
+
+  输出必须说明：
+  - 使用了什么筛选条件。
+  - 候选基金为什么入选。
+  - 每个候选的主要风险。
+  - 数据源没有返回的维度要明确标注。

@@ -217,7 +217,7 @@ class DiscoverLLMChannelModelsResponse(BaseModel):
 class TestDataSourceRequest(BaseModel):
     """Request payload for testing one newly added data source."""
 
-    source: Literal["tushare_third_party", "tiantian_fund", "crypto_quote"]
+    source: Literal["tushare_third_party", "tiantian_fund", "crypto_quote", "ttfund_skills"]
     timeout_seconds: float = 8.0
 
 

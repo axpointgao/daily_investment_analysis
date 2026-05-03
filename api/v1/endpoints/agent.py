@@ -7,7 +7,7 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -34,6 +34,14 @@ TOOL_DISPLAY_NAMES: Dict[str, str] = {
     "get_skill_backtest_summary": "获取技能回测概览",
     "get_strategy_backtest_summary": "获取策略回测概览",
     "get_stock_backtest_summary": "获取个股回测数据",
+    "search_funds":              "基金搜索",
+    "get_fund_base_info":        "基金基础信息",
+    "get_fund_nav_info":         "基金净值查询",
+    "get_fund_holding_info":     "基金持仓查询",
+    "get_fund_manager_info":     "基金经理查询",
+    "select_funds":              "条件选基",
+    "get_fund_index_info":       "指数信息查询",
+    "get_bond_market":           "债市晴雨表",
 }
 
 logger = logging.getLogger(__name__)
@@ -50,6 +58,7 @@ class ChatRequest(BaseModel):
         validation_alias=AliasChoices("skills", "strategies"),
     )
     context: Optional[Dict[str, Any]] = None  # Previous analysis context for data reuse
+    asset_type: Literal["stock", "fund"] = "stock"
 
     @property
     def effective_skills(self) -> Optional[List[str]]:
@@ -101,7 +110,7 @@ async def get_agent_models():
     )
 
 
-def _build_skills_response(config) -> SkillsResponse:
+def _build_stock_skills_response(config) -> SkillsResponse:
     from src.agent.factory import get_skill_manager
     from src.agent.skills.defaults import get_primary_default_skill_id
 
@@ -128,18 +137,51 @@ def _build_skills_response(config) -> SkillsResponse:
     )
 
 
+def _build_fund_skills_response(config) -> SkillsResponse:
+    from src.agent.factory import get_fund_skill_manager
+    from src.agent.skills.defaults import get_primary_default_skill_id
+
+    skill_manager = get_fund_skill_manager(config)
+    available_skills = sorted(
+        [
+            skill
+            for skill in skill_manager.list_skills()
+            if getattr(skill, "user_invocable", True)
+        ],
+        key=lambda skill: (
+            int(getattr(skill, "default_priority", 100)),
+            skill.display_name,
+            skill.name,
+        ),
+    )
+    skills = [
+        SkillInfo(id=skill.name, name=skill.display_name, description=skill.description)
+        for skill in available_skills
+    ]
+    return SkillsResponse(
+        skills=skills,
+        default_skill_id=get_primary_default_skill_id(available_skills),
+    )
+
+
+def _build_skills_response(config, asset_type: str = "stock") -> SkillsResponse:
+    if asset_type == "fund":
+        return _build_fund_skills_response(config)
+    return _build_stock_skills_response(config)
+
+
 @router.get("/skills", response_model=SkillsResponse)
-async def get_skills():
+async def get_skills(asset_type: Literal["stock", "fund"] = "stock"):
     """
     Get available agent strategy skills.
     """
-    return _build_skills_response(get_config())
+    return _build_skills_response(get_config(), asset_type=asset_type)
 
 
 @router.get("/strategies", response_model=StrategiesResponse, include_in_schema=False)
 async def get_strategies():
     """Compatibility alias for legacy clients."""
-    payload = _build_skills_response(get_config())
+    payload = _build_skills_response(get_config(), asset_type="stock")
     return StrategiesResponse(
         strategies=payload.skills,
         default_strategy_id=payload.default_skill_id,
@@ -159,7 +201,7 @@ async def agent_chat(request: ChatRequest):
     
     try:
         skills = request.effective_skills
-        executor = _build_executor(config, skills or None)
+        executor = _build_executor(config, skills or None, asset_type=request.asset_type)
 
         # Pass explicit skills into context for the orchestrator.
         # Direct assignment so caller-provided skills always take precedence
@@ -167,6 +209,7 @@ async def agent_chat(request: ChatRequest):
         ctx = dict(request.context or {})
         if skills is not None:
             ctx["skills"] = skills
+        ctx["asset_type"] = request.asset_type
 
         # Offload the blocking call to a thread to avoid blocking the event loop.
         loop = asyncio.get_running_loop()
@@ -205,7 +248,11 @@ class SessionMessagesResponse(BaseModel):
 
 
 @router.get("/chat/sessions", response_model=SessionsResponse)
-async def list_chat_sessions(limit: int = 50, user_id: Optional[str] = None):
+async def list_chat_sessions(
+    limit: int = 50,
+    user_id: Optional[str] = None,
+    asset_type: Literal["stock", "fund"] = "stock",
+):
     """获取聊天会话列表
 
     Args:
@@ -217,11 +264,14 @@ async def list_chat_sessions(limit: int = 50, user_id: Optional[str] = None):
             ``feishu_ou_abc``.
     """
     from src.storage import get_db
-    sessions = get_db().get_chat_sessions(
-        limit=limit,
-        session_prefix=user_id,
-        extra_session_ids=[user_id] if user_id else None,
-    )
+    if user_id:
+        sessions = get_db().get_chat_sessions(
+            limit=limit,
+            session_prefix=user_id,
+            extra_session_ids=[user_id] if user_id else None,
+        )
+    else:
+        sessions = get_db().get_chat_sessions(limit=limit, asset_type=asset_type)
     return SessionsResponse(sessions=sessions)
 
 
@@ -270,9 +320,11 @@ async def send_chat_to_notification(request: SendChatRequest):
     return {"success": True}
 
 
-def _build_executor(config, skills: Optional[List[str]] = None):
+def _build_executor(config, skills: Optional[List[str]] = None, asset_type: str = "stock"):
     """Build and return a configured AgentExecutor (sync helper)."""
-    from src.agent.factory import build_agent_executor
+    from src.agent.factory import build_agent_executor, build_fund_agent_executor
+    if asset_type == "fund":
+        return build_fund_agent_executor(config, skills=skills)
     return build_agent_executor(config, skills=skills)
 
 
@@ -396,6 +448,7 @@ async def agent_chat_stream(request: ChatRequest):
     stream_ctx = dict(request.context or {})
     if skills is not None:
         stream_ctx["skills"] = skills
+    stream_ctx["asset_type"] = request.asset_type
 
     def progress_callback(event: dict):
         # Enrich tool events with display names
@@ -406,7 +459,7 @@ async def agent_chat_stream(request: ChatRequest):
 
     def run_sync():
         try:
-            executor = _build_executor(config, skills or None)
+            executor = _build_executor(config, skills or None, asset_type=request.asset_type)
             result = executor.chat(
                 message=request.message,
                 session_id=session_id,

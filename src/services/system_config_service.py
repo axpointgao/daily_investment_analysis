@@ -92,9 +92,11 @@ class SystemConfigService:
     @staticmethod
     def _reload_runtime_singletons() -> None:
         """Reset runtime singleton services after config reload."""
+        from src.agent.factory import reset_agent_factory_caches
         from src.agent.tools.data_tools import reset_fetcher_manager
         from src.search_service import reset_search_service
 
+        reset_agent_factory_caches()
         reset_fetcher_manager()
         reset_search_service()
 
@@ -572,6 +574,8 @@ class SystemConfigService:
             return self._test_tushare_third_party(config_map=config_map, timeout=timeout)
         if source_norm == "tiantian_fund":
             return self._test_tiantian_fund(config_map=config_map, timeout=timeout)
+        if source_norm == "ttfund_skills":
+            return self._test_ttfund_skills(config_map=config_map, timeout=timeout)
         if source_norm == "crypto_quote":
             return self._test_crypto_quote(timeout=timeout)
         raise ValueError("Unsupported data source")
@@ -1814,6 +1818,40 @@ class SystemConfigService:
             message="已连接",
             latency_ms=latency_ms,
             details={"endpoint": url, "fund_code": "000001", "nav": nav, "nav_date": nav_date},
+        )
+
+    def _test_ttfund_skills(self, *, config_map: Dict[str, str], timeout: float) -> Dict[str, Any]:
+        source = "ttfund_skills"
+        api_key = (config_map.get("TTFUND_APIKEY") or "").strip()
+        if not api_key:
+            return self._build_data_source_result(
+                success=False,
+                source=source,
+                message="未连接",
+                error="请先在 Agent 设置中填写 TTFUND_APIKEY。",
+            )
+        try:
+            from src.services.ttfund_skills_client import test_ttfund_skills_connection
+
+            payload, latency_ms = test_ttfund_skills_connection(api_key=api_key, timeout=timeout)
+        except Exception as exc:
+            return self._build_data_source_result(
+                success=False,
+                source=source,
+                message="未连接",
+                error=str(exc),
+            )
+
+        return self._build_data_source_result(
+            success=True,
+            source=source,
+            message="已连接",
+            latency_ms=latency_ms,
+            details={
+                "skill_id": "FUND_BASE_INFOS",
+                "fund_code": "000001",
+                "response_keys": list(payload.keys())[:10] if isinstance(payload, dict) else [],
+            },
         )
 
     def _test_crypto_quote(self, *, timeout: float) -> Dict[str, Any]:

@@ -150,7 +150,7 @@ export interface TestLLMChannelResponse {
   latencyMs?: number | null;
 }
 
-export type TestDataSourceSource = 'tushare_third_party' | 'tiantian_fund' | 'crypto_quote';
+export type TestDataSourceSource = 'tushare_third_party' | 'tiantian_fund' | 'crypto_quote' | 'ttfund_skills';
 
 export interface TestDataSourceRequest {
   source: TestDataSourceSource;

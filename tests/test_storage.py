@@ -100,6 +100,21 @@ class TestStorage(unittest.TestCase):
 
         DatabaseManager.reset_instance()
 
+    def test_get_chat_sessions_separates_stock_and_fund_web_sessions(self):
+        DatabaseManager.reset_instance()
+        db = DatabaseManager(db_url="sqlite:///:memory:")
+
+        db.save_conversation_message("stock_web_session", "user", "分析 600519")
+        db.save_conversation_message("fund_web_session", "user", "诊断 000001")
+
+        stock_sessions = db.get_chat_sessions(asset_type="stock")
+        fund_sessions = db.get_chat_sessions(asset_type="fund")
+
+        self.assertEqual([item["session_id"] for item in stock_sessions], ["stock_web_session"])
+        self.assertEqual([item["session_id"] for item in fund_sessions], ["fund_web_session"])
+
+        DatabaseManager.reset_instance()
+
     def test_file_sqlite_enables_wal_and_busy_timeout(self):
         temp_dir = tempfile.TemporaryDirectory()
         db_path = os.path.join(temp_dir.name, "sqlite_pragmas.db")
