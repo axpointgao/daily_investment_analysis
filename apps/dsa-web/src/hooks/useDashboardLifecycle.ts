@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { TaskInfo } from '../types/analysis';
+import { fundAnalysisApi } from '../api/fundAnalysis';
 import { useTaskStream } from './useTaskStream';
 
 type UseDashboardLifecycleOptions = {
@@ -89,6 +90,26 @@ export function useDashboardLifecycle({
     },
     onError: () => {
       console.warn('SSE connection disconnected, reconnecting...');
+    },
+    enabled,
+  });
+
+  useTaskStream({
+    streamUrl: fundAnalysisApi.getTaskStreamUrl(),
+    onTaskCreated: syncTaskCreated,
+    onTaskStarted: syncTaskUpdated,
+    onTaskProgress: syncTaskUpdated,
+    onTaskCompleted: (task) => {
+      syncTaskUpdated(task);
+      void refreshHistory(true);
+      scheduleTaskRemoval(task.taskId, 2_000);
+    },
+    onTaskFailed: (task) => {
+      syncTaskFailed(task);
+      scheduleTaskRemoval(task.taskId, 5_000);
+    },
+    onError: () => {
+      console.warn('Fund SSE connection disconnected, reconnecting...');
     },
     enabled,
   });

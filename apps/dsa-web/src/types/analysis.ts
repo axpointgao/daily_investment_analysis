@@ -17,6 +17,17 @@ export interface AnalysisRequest {
   notify?: boolean;
 }
 
+export type AnalysisEntryType = 'stock' | 'fund';
+
+export interface FundAnalysisRequest {
+  fundCode: string;
+  fundName?: string;
+  reportType?: 'simple' | 'detailed' | 'full' | 'brief';
+  forceRefresh?: boolean;
+  asyncMode?: boolean;
+  notify?: boolean;
+}
+
 // ============ Report Types ============
 
 export type ReportLanguage = 'zh' | 'en';
@@ -24,15 +35,22 @@ export type ReportLanguage = 'zh' | 'en';
 /** Report metadata */
 export interface ReportMeta {
   id?: number;  // Analysis history record ID, present for persisted reports
+  assetType?: AnalysisEntryType;
   queryId: string;
-  stockCode: string;
-  stockName: string;
+  stockCode?: string;
+  stockName?: string;
+  fundCode?: string;
+  fundName?: string;
   reportType: 'simple' | 'detailed' | 'full' | 'brief';
   reportLanguage?: ReportLanguage;
   createdAt: string;
   currentPrice?: number;
   changePct?: number;
   modelUsed?: string;  // LLM model used for analysis
+  latestNav?: number;
+  navDate?: string;
+  dailyReturnPct?: number;
+  fundType?: string;
 }
 
 /** Sentiment label */
@@ -51,10 +69,15 @@ export type SentimentLabel =
 /** Report summary section */
 export interface ReportSummary {
   analysisSummary: string;
-  operationAdvice: string;
-  trendPrediction: string;
-  sentimentScore: number;
+  operationAdvice?: string;
+  trendPrediction?: string;
+  sentimentScore?: number;
   sentimentLabel?: SentimentLabel;
+  allocationRating?: string;
+  suitabilityScore?: number;
+  riskSummary?: string;
+  holdingAdvice?: string;
+  suitableFor?: string;
 }
 
 /** Strategy section */
@@ -90,6 +113,44 @@ export interface ReportDetails {
   dividendMetrics?: Record<string, unknown>;
   belongBoards?: RelatedBoard[];
   sectorRankings?: SectorRankings;
+  advantages?: string[];
+  risks?: string[];
+  watchItems?: string[];
+  dataCoverage?: Record<string, boolean>;
+  rawText?: string;
+}
+
+export interface FundPerformanceItem {
+  period?: string;
+  returnPct?: number;
+  peerAvgPct?: number;
+  hs300Pct?: number;
+  rank?: number;
+  peerCount?: number;
+}
+
+export interface FundRiskMetrics {
+  dataSufficient?: boolean;
+  sampleCount?: number;
+  startDate?: string;
+  endDate?: string;
+  totalReturnPct?: number;
+  annualReturnPct?: number;
+  annualVolatilityPct?: number;
+  maxDrawdownPct?: number;
+  currentDrawdownPct?: number;
+  sharpe?: number;
+  calmar?: number;
+  reason?: string;
+}
+
+export interface FundReportMetrics {
+  profile?: Record<string, unknown>;
+  performance?: FundPerformanceItem[];
+  risk?: FundRiskMetrics;
+  ranking?: Record<string, unknown>[];
+  manager?: Record<string, unknown>[];
+  grade?: Record<string, unknown>[];
 }
 
 /** Full analysis report */
@@ -98,6 +159,7 @@ export interface AnalysisReport {
   summary: ReportSummary;
   strategy?: ReportStrategy;
   details?: ReportDetails;
+  metrics?: FundReportMetrics;
 }
 
 // ============ Analysis Result Types ============
@@ -117,6 +179,8 @@ export interface TaskAccepted {
   status: 'pending' | 'processing';
   message?: string;
 }
+
+export type FundAnalyzeAsyncResponse = TaskAccepted;
 
 export interface BatchTaskAcceptedItem {
   taskId: string;
@@ -156,8 +220,11 @@ export interface TaskStatus {
 /** Task details used by task list and SSE events */
 export interface TaskInfo {
   taskId: string;
-  stockCode: string;
+  type?: AnalysisEntryType;
+  stockCode?: string;
   stockName?: string;
+  fundCode?: string;
+  fundName?: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   progress: number;
   message?: string;
@@ -186,14 +253,26 @@ export interface DuplicateTaskError {
   existingTaskId: string;
 }
 
+export interface DuplicateFundTaskError {
+  error: 'duplicate_task';
+  message: string;
+  fundCode: string;
+  existingTaskId: string;
+}
+
 // ============ History Types ============
 
 /** History item summary */
 export interface HistoryItem {
   id: number;  // Record primary key ID, always present for persisted history items
+  type?: AnalysisEntryType;
   queryId: string;  // Linked analysis query ID
-  stockCode: string;
+  displayCode?: string;
+  displayName?: string;
+  stockCode?: string;
   stockName?: string;
+  fundCode?: string;
+  fundName?: string;
   reportType?: string;
   sentimentScore?: number;
   operationAdvice?: string;

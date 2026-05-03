@@ -20,6 +20,8 @@ const TaskItem: React.FC<TaskItemProps> = ({ task }) => {
   const statusVariant = isProcessing ? 'info' : 'default';
   const statusTone = isProcessing ? 'info' : 'neutral';
   const progress = Math.max(0, Math.min(100, task.progress || 0));
+  const displayCode = task.type === 'fund' ? task.fundCode : task.stockCode;
+  const displayName = task.type === 'fund' ? task.fundName : task.stockName;
 
   return (
     <div className="home-subpanel flex items-center gap-3 px-3 py-2.5">
@@ -36,10 +38,10 @@ const TaskItem: React.FC<TaskItemProps> = ({ task }) => {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-foreground truncate">
-            {task.stockName || task.stockCode}
+            {displayName || displayCode}
           </span>
           <span className="text-xs text-muted-text">
-            {task.stockCode}
+            {displayCode}
           </span>
         </div>
         {task.message && (

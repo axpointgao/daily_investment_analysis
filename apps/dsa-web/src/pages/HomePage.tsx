@@ -17,6 +17,7 @@ const HomePage: React.FC = () => {
 
   const {
     query,
+    entryType,
     inputError,
     duplicateError,
     error,
@@ -32,6 +33,7 @@ const HomePage: React.FC = () => {
     activeTasks,
     markdownDrawerOpen,
     setQuery,
+    setEntryType,
     clearError,
     loadInitialHistory,
     refreshHistory,
@@ -57,6 +59,7 @@ const HomePage: React.FC = () => {
   }, []);
   const reportLanguage = normalizeReportLanguage(selectedReport?.meta.reportLanguage);
   const reportText = getReportText(reportLanguage);
+  const selectedReportType = selectedReport?.meta.assetType === 'fund' ? 'fund' : 'stock';
 
   useDashboardLifecycle({
     loadInitialHistory,
@@ -81,11 +84,12 @@ const HomePage: React.FC = () => {
       void submitAnalysis({
         stockCode,
         stockName,
+        fundCode: entryType === 'fund' ? query : undefined,
         originalQuery: query,
         selectionSource: selectionSource ?? 'manual',
       });
     },
-    [query, submitAnalysis],
+    [entryType, query, submitAnalysis],
   );
 
   const handleAskFollowUp = useCallback(() => {
@@ -93,8 +97,12 @@ const HomePage: React.FC = () => {
       return;
     }
 
-    const code = selectedReport.meta.stockCode;
-    const name = selectedReport.meta.stockName;
+    if (selectedReport.meta.assetType === 'fund') {
+      return;
+    }
+
+    const code = selectedReport.meta.stockCode || '';
+    const name = selectedReport.meta.stockName || '';
     const rid = selectedReport.meta.id;
     navigate(`/chat?stock=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&recordId=${rid}`);
   }, [navigate, selectedReport]);
@@ -107,7 +115,9 @@ const HomePage: React.FC = () => {
     void submitAnalysis({
       stockCode: selectedReport.meta.stockCode,
       stockName: selectedReport.meta.stockName,
-      originalQuery: selectedReport.meta.stockCode,
+      fundCode: selectedReport.meta.assetType === 'fund' ? selectedReport.meta.fundCode : undefined,
+      fundName: selectedReport.meta.assetType === 'fund' ? selectedReport.meta.fundName : undefined,
+      originalQuery: selectedReport.meta.stockCode || selectedReport.meta.fundCode,
       selectionSource: 'manual',
       forceRefresh: true,
     });
@@ -172,17 +182,42 @@ const HomePage: React.FC = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
+            <select
+              value={entryType}
+              onChange={(event) => setEntryType(event.target.value as 'stock' | 'fund')}
+              disabled={isAnalyzing}
+              className="input-surface input-focus-glow h-10 w-28 shrink-0 appearance-none rounded-xl border bg-transparent px-3 pr-8 text-sm font-medium text-foreground outline-none transition-all disabled:cursor-not-allowed disabled:opacity-60"
+              aria-label="分析类型"
+            >
+              <option value="stock">股票</option>
+              <option value="fund">场外基金</option>
+            </select>
             <div className="relative min-w-0 flex-1">
-              <StockAutocomplete
-                value={query}
-                onChange={setQuery}
-                onSubmit={(stockCode, stockName, selectionSource) => {
-                  handleSubmitAnalysis(stockCode, stockName, selectionSource);
-                }}
-                placeholder="输入股票代码或名称，如 600519、贵州茅台、AAPL"
-                disabled={isAnalyzing}
-                className={inputError ? 'border-danger/50' : undefined}
-              />
+              {entryType === 'stock' ? (
+                <StockAutocomplete
+                  value={query}
+                  onChange={setQuery}
+                  onSubmit={(stockCode, stockName, selectionSource) => {
+                    handleSubmitAnalysis(stockCode, stockName, selectionSource);
+                  }}
+                  placeholder="输入股票代码或名称，如 600519、贵州茅台、AAPL"
+                  disabled={isAnalyzing}
+                  className={`!h-10 ${inputError ? 'border-danger/50' : ''}`}
+                />
+              ) : (
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      handleSubmitAnalysis();
+                    }
+                  }}
+                  placeholder="输入基金代码，如 000001"
+                  disabled={isAnalyzing}
+                  className={`input-surface input-focus-glow h-10 w-full rounded-xl border bg-transparent px-4 text-sm outline-none transition-all disabled:cursor-not-allowed disabled:opacity-60 ${inputError ? 'border-danger/50' : ''}`}
+                />
+              )}
             </div>
             <label className="flex h-10 flex-shrink-0 cursor-pointer items-center gap-1.5 rounded-xl border border-subtle bg-surface/60 px-3 text-xs text-secondary-text select-none transition-colors hover:border-subtle-hover hover:text-foreground">
               <input
@@ -281,7 +316,7 @@ const HomePage: React.FC = () => {
                   <Button
                     variant="home-action-ai"
                     size="sm"
-                    disabled={selectedReport.meta.id === undefined}
+                    disabled={selectedReport.meta.id === undefined || selectedReportType === 'fund'}
                     onClick={handleAskFollowUp}
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -292,7 +327,7 @@ const HomePage: React.FC = () => {
                   <Button
                     variant="home-action-ai"
                     size="sm"
-                    disabled={selectedReport.meta.id === undefined}
+                    disabled={selectedReport.meta.id === undefined || selectedReportType === 'fund'}
                     onClick={openMarkdownDrawer}
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -307,7 +342,7 @@ const HomePage: React.FC = () => {
               <div className="flex h-full items-center justify-center">
                 <EmptyState
                   title="开始分析"
-                  description="输入股票代码进行分析，或从左侧选择历史报告查看。"
+                  description="输入股票或场外基金代码进行分析，或从左侧选择历史报告查看。"
                   className="max-w-xl border-dashed"
                   icon={(
                     <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -325,7 +360,7 @@ const HomePage: React.FC = () => {
         <ReportMarkdown
           recordId={selectedReport.meta.id}
           stockName={selectedReport.meta.stockName || ''}
-          stockCode={selectedReport.meta.stockCode}
+          stockCode={selectedReport.meta.stockCode || ''}
           reportLanguage={reportLanguage}
           onClose={closeMarkdownDrawer}
         />

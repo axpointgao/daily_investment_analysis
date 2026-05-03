@@ -10,6 +10,7 @@ export function useHomeDashboardState() {
   const dashboardState = useStockPoolStore(
     useShallow((state) => ({
       query: state.query,
+      entryType: state.entryType,
       inputError: state.inputError,
       duplicateError: state.duplicateError,
       error: state.error,
@@ -25,6 +26,7 @@ export function useHomeDashboardState() {
       activeTasks: state.activeTasks,
       markdownDrawerOpen: state.markdownDrawerOpen,
       notify: state.notify,
+      setEntryType: state.setEntryType,
       setQuery: state.setQuery,
       setNotify: state.setNotify,
       clearError: state.clearError,

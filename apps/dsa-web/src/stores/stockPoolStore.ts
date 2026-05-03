@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import { analysisApi, DuplicateTaskError } from '../api/analysis';
+import { fundAnalysisApi, DuplicateFundTaskError } from '../api/fundAnalysis';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
 import { historyApi } from '../api/history';
-import type { AnalysisReport, HistoryItem, HistoryListResponse, TaskInfo } from '../types/analysis';
+import type { AnalysisEntryType, AnalysisReport, HistoryItem, HistoryListResponse, TaskInfo } from '../types/analysis';
 import { getRecentStartDate, getTodayInShanghai } from '../utils/format';
 import { isObviouslyInvalidStockQuery, looksLikeStockCode, validateStockCode } from '../utils/validation';
 
@@ -20,6 +21,8 @@ type FetchHistoryOptions = {
 type SubmitAnalysisOptions = {
   stockCode?: string;
   stockName?: string;
+  fundCode?: string;
+  fundName?: string;
   originalQuery?: string;
   selectionSource?: SelectionSource;
   notify?: boolean;
@@ -32,6 +35,7 @@ let historyRequestSeq = 0;
 const dismissedTaskIds = new Set<string>();
 
 export interface StockPoolState {
+  entryType: AnalysisEntryType;
   query: string;
   selectionSource: SelectionSource;
   notify: boolean;
@@ -50,6 +54,7 @@ export interface StockPoolState {
   isLoadingReport: boolean;
   activeTasks: TaskInfo[];
   markdownDrawerOpen: boolean;
+  setEntryType: (entryType: AnalysisEntryType) => void;
   setQuery: (query: string) => void;
   clearError: () => void;
   clearInlineMessages: () => void;
@@ -72,6 +77,7 @@ export interface StockPoolState {
 }
 
 const initialState = {
+  entryType: 'stock' as AnalysisEntryType,
   query: '',
   selectionSource: 'manual' as SelectionSource,
   notify: true,
@@ -118,9 +124,8 @@ async function fetchHistory(
         : { isLoadingMore: true },
     );
   }
-
   try {
-    const response = await historyApi.getList(buildHistoryParams(page));
+    const response = await historyApi.getMixedList(buildHistoryParams(page));
     if (requestId !== historyRequestSeq) {
       return null;
     }
@@ -177,6 +182,16 @@ async function fetchHistory(
 export const useStockPoolStore = create<StockPoolState>((set, get) => ({
   ...initialState,
 
+  setEntryType: (entryType) => {
+    set({
+      entryType,
+      query: '',
+      selectionSource: 'manual',
+      inputError: undefined,
+      duplicateError: null,
+    });
+  },
+
   setQuery: (query) => {
     set({
       query,
@@ -221,7 +236,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
     }
 
     try {
-      const report = await historyApi.getDetail(recordId);
+      const report = await historyApi.getMixedDetail(recordId);
       if (requestId !== reportRequestSeq) {
         return;
       }
@@ -276,7 +291,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
 
     set({ isDeletingHistory: true });
     try {
-      await historyApi.deleteRecords(recordIds);
+      await historyApi.deleteMixedRecords(recordIds);
 
       const deletedIds = new Set(recordIds);
       const selectedWasDeleted = state.selectedReport?.meta.id !== undefined
@@ -303,6 +318,63 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
 
   submitAnalysis: async (options) => {
     const state = get();
+    if (state.entryType === 'fund' || options?.fundCode) {
+      const rawFundCode = options?.fundCode ?? state.query;
+      const fundCode = rawFundCode.trim();
+      const fundName = options?.fundName;
+      const notify = options?.notify ?? state.notify;
+      const forceRefresh = options?.forceRefresh ?? false;
+
+      if (!fundCode) {
+        set({ inputError: '请输入基金代码', duplicateError: null });
+        return;
+      }
+      if (!/^\d{6}$/.test(fundCode)) {
+        set({ inputError: '基金代码必须是 6 位数字', duplicateError: null });
+        return;
+      }
+
+      set({
+        inputError: undefined,
+        duplicateError: null,
+        error: null,
+        isAnalyzing: true,
+      });
+
+      const requestId = ++analyzeRequestSeq;
+      try {
+        await fundAnalysisApi.analyzeAsync({
+          fundCode,
+          fundName,
+          reportType: 'detailed',
+          notify,
+          forceRefresh,
+        });
+
+        if (requestId !== analyzeRequestSeq) {
+          return;
+        }
+
+        set({ query: '', selectionSource: 'manual' });
+      } catch (error) {
+        if (requestId !== analyzeRequestSeq) {
+          return;
+        }
+
+        if (error instanceof DuplicateFundTaskError) {
+          set({ duplicateError: `基金 ${error.fundCode} 正在分析中，请等待完成` });
+          return;
+        }
+
+        set({ error: getParsedApiError(error) });
+      } finally {
+        if (requestId === analyzeRequestSeq) {
+          set({ isAnalyzing: false });
+        }
+      }
+      return;
+    }
+
     const rawStockCode = options?.stockCode ?? state.query;
     const stockCodeInput = rawStockCode.trim();
     const stockName = options?.stockName;

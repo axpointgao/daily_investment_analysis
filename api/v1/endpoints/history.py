@@ -9,8 +9,10 @@
 2. 提供 GET /api/v1/history/{query_id} 历史详情查询接口
 """
 
+import json
 import logging
-from typing import Optional
+from datetime import datetime
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Depends, Body
 
@@ -18,6 +20,8 @@ from api.deps import get_database_manager
 from api.v1.schemas.history import (
     HistoryListResponse,
     HistoryItem,
+    MixedHistoryItem,
+    MixedHistoryListResponse,
     DeleteHistoryRequest,
     DeleteHistoryResponse,
     NewsIntelItem,
@@ -48,6 +52,80 @@ from src.utils.data_processing import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _parse_date_param(value: Optional[str]):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        logger.warning("无效的日期参数: %s", value)
+        return None
+
+
+def _fund_record_to_report(record) -> dict[str, Any]:
+    raw_result = record.raw_result
+    data_snapshot = record.data_snapshot
+    try:
+        raw_result = json.loads(raw_result) if isinstance(raw_result, str) and raw_result else {}
+    except Exception:
+        raw_result = {}
+    try:
+        data_snapshot = json.loads(data_snapshot) if isinstance(data_snapshot, str) and data_snapshot else {}
+    except Exception:
+        data_snapshot = {}
+
+    report = raw_result if isinstance(raw_result, dict) else {}
+    meta = report.get("meta") if isinstance(report.get("meta"), dict) else {}
+    meta.update({
+        "id": -int(record.id),
+        "assetType": "fund",
+        "queryId": record.query_id,
+        "fundCode": record.fund_code,
+        "fundName": record.fund_name,
+        "reportType": record.report_type,
+        "createdAt": record.created_at.isoformat() if record.created_at else None,
+    })
+    report["meta"] = meta
+    report.setdefault("summary", {})
+    report.setdefault("metrics", {})
+    details = report.get("details") if isinstance(report.get("details"), dict) else {}
+    details.setdefault("dataCoverage", data_snapshot.get("dataCoverage") if isinstance(data_snapshot, dict) else {})
+    report["details"] = details
+    return report
+
+
+def _stock_item_to_mixed(item: dict[str, Any]) -> MixedHistoryItem:
+    return MixedHistoryItem(
+        id=int(item.get("id")),
+        type="stock",
+        query_id=item.get("query_id", ""),
+        display_code=item.get("stock_code", ""),
+        display_name=item.get("stock_name"),
+        report_type=item.get("report_type"),
+        sentiment_score=item.get("sentiment_score"),
+        operation_advice=item.get("operation_advice"),
+        created_at=item.get("created_at"),
+        stock_code=item.get("stock_code"),
+        stock_name=item.get("stock_name"),
+    )
+
+
+def _fund_record_to_mixed(record) -> MixedHistoryItem:
+    return MixedHistoryItem(
+        id=-int(record.id),
+        type="fund",
+        query_id=record.query_id or "",
+        display_code=record.fund_code,
+        display_name=record.fund_name,
+        report_type=record.report_type,
+        sentiment_score=record.suitability_score,
+        operation_advice=record.allocation_rating,
+        created_at=record.created_at.isoformat() if record.created_at else None,
+        fund_code=record.fund_code,
+        fund_name=record.fund_name,
+    )
 
 
 @router.get(
@@ -172,6 +250,112 @@ def delete_history_records(
                 "message": f"删除历史记录失败: {str(e)}"
             }
         )
+
+
+@router.get(
+    "/mixed",
+    response_model=MixedHistoryListResponse,
+    responses={200: {"description": "混合历史记录列表"}, 500: {"description": "服务器错误", "model": ErrorResponse}},
+    summary="获取股票/场外基金混合历史列表",
+    description="首页使用的混合历史列表；股票 ID 保持正数，基金 ID 使用负数避免与股票主键冲突。"
+)
+def get_mixed_history_list(
+    start_date: Optional[str] = Query(None, description="开始日期 (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="结束日期 (YYYY-MM-DD)"),
+    page: int = Query(1, ge=1, description="页码（从 1 开始）"),
+    limit: int = Query(20, ge=1, le=100, description="每页数量"),
+    db_manager: DatabaseManager = Depends(get_database_manager)
+) -> MixedHistoryListResponse:
+    try:
+        service = HistoryService(db_manager)
+        start_dt = _parse_date_param(start_date)
+        end_dt = _parse_date_param(end_date)
+
+        stock_result = service.get_history_list(
+            start_date=start_date,
+            end_date=end_date,
+            page=1,
+            limit=1,
+        )
+        stock_total = int(stock_result.get("total", 0) or 0)
+        stock_full = service.get_history_list(
+            start_date=start_date,
+            end_date=end_date,
+            page=1,
+            limit=max(stock_total, 1),
+        )
+
+        _, fund_total = db_manager.get_fund_analysis_history_paginated(
+            start_date=start_dt,
+            end_date=end_dt,
+            offset=0,
+            limit=1,
+        )
+        fund_records, _ = db_manager.get_fund_analysis_history_paginated(
+            start_date=start_dt,
+            end_date=end_dt,
+            offset=0,
+            limit=max(fund_total, 1),
+        )
+
+        items: list[MixedHistoryItem] = []
+        items.extend(_stock_item_to_mixed(item) for item in stock_full.get("items", []))
+        items.extend(_fund_record_to_mixed(record) for record in fund_records)
+        items.sort(key=lambda item: item.created_at or "", reverse=True)
+
+        total = len(items)
+        offset = (page - 1) * limit
+        return MixedHistoryListResponse(
+            total=total,
+            page=page,
+            limit=limit,
+            items=items[offset:offset + limit],
+        )
+    except Exception as e:
+        logger.error("查询混合历史列表失败: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail={"error": "internal_error", "message": f"查询混合历史列表失败: {str(e)}"})
+
+
+@router.delete(
+    "/mixed",
+    response_model=DeleteHistoryResponse,
+    responses={200: {"description": "删除成功"}, 400: {"description": "请求参数错误", "model": ErrorResponse}},
+    summary="删除股票/场外基金混合历史记录",
+)
+def delete_mixed_history_records(
+    request: DeleteHistoryRequest = Body(...),
+    db_manager: DatabaseManager = Depends(get_database_manager)
+) -> DeleteHistoryResponse:
+    record_ids = sorted({record_id for record_id in request.record_ids if record_id is not None})
+    if not record_ids:
+        raise HTTPException(status_code=400, detail={"error": "invalid_request", "message": "record_ids 不能为空"})
+    stock_ids = [record_id for record_id in record_ids if record_id > 0]
+    fund_ids = [abs(record_id) for record_id in record_ids if record_id < 0]
+    deleted = 0
+    if stock_ids:
+        deleted += HistoryService(db_manager).delete_history_records(stock_ids)
+    if fund_ids:
+        deleted += db_manager.delete_fund_analysis_history_records(fund_ids)
+    return DeleteHistoryResponse(deleted=deleted)
+
+
+@router.get(
+    "/mixed/{record_id}",
+    response_model=Any,
+    responses={200: {"description": "报告详情"}, 404: {"description": "报告不存在", "model": ErrorResponse}},
+    summary="获取股票/场外基金混合历史详情",
+)
+def get_mixed_history_detail(
+    record_id: int,
+    db_manager: DatabaseManager = Depends(get_database_manager)
+) -> Any:
+    if record_id >= 0:
+        return get_history_detail(str(record_id), db_manager)
+
+    fund_record = db_manager.get_fund_analysis_history_by_id(abs(record_id))
+    if not fund_record:
+        raise HTTPException(status_code=404, detail={"error": "not_found", "message": f"未找到基金分析记录 {record_id}"})
+    return _fund_record_to_report(fund_record)
 
 
 @router.get(

@@ -42,12 +42,36 @@ export const historyApi = {
     };
   },
 
+  getMixedList: async (params: GetHistoryListParams = {}): Promise<HistoryListResponse> => {
+    const { startDate, endDate, page = 1, limit = 20 } = params;
+    const queryParams: Record<string, string | number> = { page, limit };
+    if (startDate) queryParams.start_date = startDate;
+    if (endDate) queryParams.end_date = endDate;
+
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/history/mixed', {
+      params: queryParams,
+    });
+
+    const data = toCamelCase<{ total: number; page: number; limit: number; items: HistoryItem[] }>(response.data);
+    return {
+      total: data.total,
+      page: data.page,
+      limit: data.limit,
+      items: data.items.map(item => toCamelCase<HistoryItem>(item)),
+    };
+  },
+
   /**
    * 获取历史报告详情
    * @param recordId 分析历史记录主键 ID（使用 ID 而非 query_id，因为 query_id 在批量分析时可能重复）
    */
   getDetail: async (recordId: number): Promise<AnalysisReport> => {
     const response = await apiClient.get<Record<string, unknown>>(`/api/v1/history/${recordId}`);
+    return toCamelCase<AnalysisReport>(response.data);
+  },
+
+  getMixedDetail: async (recordId: number): Promise<AnalysisReport> => {
+    const response = await apiClient.get<Record<string, unknown>>(`/api/v1/history/mixed/${recordId}`);
     return toCamelCase<AnalysisReport>(response.data);
   },
 
@@ -84,6 +108,14 @@ export const historyApi = {
    */
   deleteRecords: async (recordIds: number[]): Promise<{ deleted: number }> => {
     const response = await apiClient.delete<Record<string, unknown>>('/api/v1/history', {
+      data: { record_ids: recordIds },
+    });
+
+    return toCamelCase<{ deleted: number }>(response.data);
+  },
+
+  deleteMixedRecords: async (recordIds: number[]): Promise<{ deleted: number }> => {
+    const response = await apiClient.delete<Record<string, unknown>>('/api/v1/history/mixed', {
       data: { record_ids: recordIds },
     });
 

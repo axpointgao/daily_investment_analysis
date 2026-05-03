@@ -47,6 +47,8 @@ export interface UseTaskStreamOptions {
   reconnectDelay?: number;
   /** Whether the hook is enabled */
   enabled?: boolean;
+  /** Optional custom SSE URL. Defaults to stock analysis stream. */
+  streamUrl?: string;
 }
 
 /**
@@ -76,6 +78,7 @@ export function useTaskStream(options: UseTaskStreamOptions = {}): UseTaskStream
     autoReconnect = true,
     reconnectDelay = 3000,
     enabled = true,
+    streamUrl,
   } = options;
 
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -111,8 +114,11 @@ export function useTaskStream(options: UseTaskStreamOptions = {}): UseTaskStream
   const toCamelCase = (data: Record<string, unknown>): TaskInfo => {
     return {
       taskId: data.task_id as string,
-      stockCode: data.stock_code as string,
+      type: data.type as TaskInfo['type'],
+      stockCode: data.stock_code as string | undefined,
       stockName: data.stock_name as string | undefined,
+      fundCode: data.fund_code as string | undefined,
+      fundName: data.fund_name as string | undefined,
       status: data.status as TaskInfo['status'],
       progress: data.progress as number,
       message: data.message as string | undefined,
@@ -143,7 +149,7 @@ export function useTaskStream(options: UseTaskStreamOptions = {}): UseTaskStream
       eventSourceRef.current.close();
     }
 
-    const url = analysisApi.getTaskStreamUrl();
+    const url = streamUrl || analysisApi.getTaskStreamUrl();
     const eventSource = new EventSource(url, { withCredentials: true });
     eventSourceRef.current = eventSource;
 
@@ -204,6 +210,7 @@ export function useTaskStream(options: UseTaskStreamOptions = {}): UseTaskStream
     autoReconnect,
     reconnectDelay,
     enabled,
+    streamUrl,
     parseEventData,
   ]);
 

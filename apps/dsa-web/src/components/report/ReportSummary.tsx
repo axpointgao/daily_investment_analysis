@@ -4,6 +4,7 @@ import { ReportOverview } from './ReportOverview';
 import { ReportStrategy } from './ReportStrategy';
 import { ReportNews } from './ReportNews';
 import { ReportDetails } from './ReportDetails';
+import { FundReportSummary } from './FundReportSummary';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
 
 interface ReportSummaryProps {
@@ -21,6 +22,9 @@ export const ReportSummary: React.FC<ReportSummaryProps> = ({
 }) => {
   // 兼容 AnalysisResult 和 AnalysisReport 两种数据格式
   const report: AnalysisReport = 'report' in data ? data.report : data;
+  if (report.meta.assetType === 'fund') {
+    return <FundReportSummary report={report} />;
+  }
   // 使用 report id，因为 queryId 在批量分析时可能重复，且历史报告详情接口需要 recordId 来获取关联资讯和详情数据
   const recordId = report.meta.id;
 

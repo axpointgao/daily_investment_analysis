@@ -273,6 +273,51 @@ class AnalysisHistory(Base):
         }
 
 
+class FundAnalysisHistory(Base):
+    """
+    场外基金分析历史记录。
+
+    与股票分析历史分表存储，避免基金语义污染既有 stockCode/stockName 链路。
+    """
+    __tablename__ = 'fund_analysis_history'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    query_id = Column(String(64), index=True)
+
+    fund_code = Column(String(10), nullable=False, index=True)
+    fund_name = Column(String(80))
+    report_type = Column(String(16), index=True)
+
+    allocation_rating = Column(String(20))
+    suitability_score = Column(Integer)
+    analysis_summary = Column(Text)
+    risk_summary = Column(Text)
+
+    raw_result = Column(Text)
+    data_snapshot = Column(Text)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+    __table_args__ = (
+        Index('ix_fund_analysis_code_time', 'fund_code', 'created_at'),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': self.id,
+            'query_id': self.query_id,
+            'fund_code': self.fund_code,
+            'fund_name': self.fund_name,
+            'report_type': self.report_type,
+            'allocation_rating': self.allocation_rating,
+            'suitability_score': self.suitability_score,
+            'analysis_summary': self.analysis_summary,
+            'risk_summary': self.risk_summary,
+            'raw_result': self.raw_result,
+            'data_snapshot': self.data_snapshot,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class BacktestResult(Base):
     """单条分析记录的回测结果。"""
 
@@ -1404,6 +1449,123 @@ class DatabaseManager:
             )
             result = session.execute(
                 delete(AnalysisHistory).where(AnalysisHistory.id.in_(ids))
+            )
+            return result.rowcount or 0
+
+    def save_fund_analysis_history(
+        self,
+        *,
+        query_id: str,
+        fund_code: str,
+        fund_name: Optional[str],
+        report_type: str,
+        allocation_rating: Optional[str],
+        suitability_score: Optional[int],
+        analysis_summary: Optional[str],
+        risk_summary: Optional[str],
+        raw_result: Optional[Dict[str, Any]],
+        data_snapshot: Optional[Dict[str, Any]],
+    ) -> int:
+        """保存场外基金分析历史记录。"""
+        code = str(fund_code or "").strip()
+        if not query_id or not code:
+            return 0
+
+        try:
+            def _write(session: Session) -> int:
+                session.add(
+                    FundAnalysisHistory(
+                        query_id=query_id,
+                        fund_code=code,
+                        fund_name=fund_name,
+                        report_type=report_type,
+                        allocation_rating=allocation_rating,
+                        suitability_score=suitability_score,
+                        analysis_summary=analysis_summary,
+                        risk_summary=risk_summary,
+                        raw_result=self._safe_json_dumps(raw_result or {}),
+                        data_snapshot=self._safe_json_dumps(data_snapshot or {}),
+                        created_at=datetime.now(),
+                    )
+                )
+                return 1
+
+            return self._run_write_transaction(
+                f"save_fund_analysis_history[{code}]",
+                _write,
+            )
+        except Exception as e:
+            logger.error("保存基金分析历史失败: %s", e)
+            return 0
+
+    def get_fund_analysis_history(
+        self,
+        *,
+        fund_code: Optional[str] = None,
+        query_id: Optional[str] = None,
+        days: int = 30,
+        limit: int = 50,
+    ) -> List[FundAnalysisHistory]:
+        cutoff_date = datetime.now() - timedelta(days=days)
+        with self.get_session() as session:
+            conditions = []
+            if query_id:
+                conditions.append(FundAnalysisHistory.query_id == query_id)
+            else:
+                conditions.append(FundAnalysisHistory.created_at >= cutoff_date)
+            if fund_code:
+                conditions.append(FundAnalysisHistory.fund_code == fund_code)
+
+            results = session.execute(
+                select(FundAnalysisHistory)
+                .where(and_(*conditions))
+                .order_by(desc(FundAnalysisHistory.created_at))
+                .limit(limit)
+            ).scalars().all()
+            return list(results)
+
+    def get_fund_analysis_history_paginated(
+        self,
+        *,
+        fund_code: Optional[str] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Tuple[List[FundAnalysisHistory], int]:
+        with self.get_session() as session:
+            conditions = []
+            if fund_code:
+                conditions.append(FundAnalysisHistory.fund_code == fund_code)
+            if start_date:
+                conditions.append(FundAnalysisHistory.created_at >= datetime.combine(start_date, datetime.min.time()))
+            if end_date:
+                conditions.append(FundAnalysisHistory.created_at < datetime.combine(end_date + timedelta(days=1), datetime.min.time()))
+            where_clause = and_(*conditions) if conditions else True
+
+            total = session.execute(select(func.count(FundAnalysisHistory.id)).where(where_clause)).scalar() or 0
+            results = session.execute(
+                select(FundAnalysisHistory)
+                .where(where_clause)
+                .order_by(desc(FundAnalysisHistory.created_at))
+                .offset(offset)
+                .limit(limit)
+            ).scalars().all()
+            return list(results), total
+
+    def get_fund_analysis_history_by_id(self, record_id: int) -> Optional[FundAnalysisHistory]:
+        with self.get_session() as session:
+            return session.execute(
+                select(FundAnalysisHistory).where(FundAnalysisHistory.id == int(record_id))
+            ).scalars().first()
+
+    def delete_fund_analysis_history_records(self, record_ids: List[int]) -> int:
+        ids = sorted({int(record_id) for record_id in record_ids if record_id is not None})
+        if not ids:
+            return 0
+        with self.session_scope() as session:
+            result = session.execute(
+                delete(FundAnalysisHistory).where(FundAnalysisHistory.id.in_(ids))
             )
             return result.rowcount or 0
 

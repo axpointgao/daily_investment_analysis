@@ -9,7 +9,7 @@
 2. 定义分析报告完整模型
 """
 
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -61,6 +61,33 @@ class HistoryListResponse(BaseModel):
                 "items": []
             }
         }
+
+
+class MixedHistoryItem(BaseModel):
+    """股票/场外基金混合历史记录摘要（首页展示用）。"""
+
+    id: int = Field(..., description="混合历史 ID；股票为原始正数 ID，基金为负数 ID")
+    type: Literal["stock", "fund"] = Field(..., description="记录类型")
+    query_id: str = Field(..., description="分析记录关联 query_id")
+    display_code: str = Field(..., description="列表展示代码")
+    display_name: Optional[str] = Field(None, description="列表展示名称")
+    report_type: Optional[str] = Field(None, description="报告类型")
+    sentiment_score: Optional[int] = Field(None, description="股票情绪分或基金适配分")
+    operation_advice: Optional[str] = Field(None, description="股票操作建议或基金配置评级")
+    created_at: Optional[str] = Field(None, description="创建时间")
+    stock_code: Optional[str] = Field(None, description="股票代码")
+    stock_name: Optional[str] = Field(None, description="股票名称")
+    fund_code: Optional[str] = Field(None, description="基金代码")
+    fund_name: Optional[str] = Field(None, description="基金名称")
+
+
+class MixedHistoryListResponse(BaseModel):
+    """股票/场外基金混合历史列表响应。"""
+
+    total: int = Field(..., description="总记录数")
+    page: int = Field(..., description="当前页码")
+    limit: int = Field(..., description="每页数量")
+    items: List[MixedHistoryItem] = Field(default_factory=list, description="记录列表")
 
 
 class DeleteHistoryRequest(BaseModel):

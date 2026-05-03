@@ -1,9 +1,7 @@
 import type React from 'react';
-import { Badge } from '../common';
 import type { HistoryItem } from '../../types/analysis';
 import { getSentimentColor } from '../../types/analysis';
 import { formatDateTime } from '../../utils/format';
-import { truncateStockName, isStockNameTruncated } from '../../utils/stockName';
 
 interface HistoryListItemProps {
   item: HistoryItem;
@@ -31,7 +29,20 @@ const getOperationBadgeLabel = (advice?: string) => {
   if (normalized.includes('买') || normalized.includes('布局')) {
     return '买入';
   }
-  return normalized.split(/[，。；、\s]/)[0] || '建议';
+  if (normalized.includes('适合配置')) {
+    return '适配';
+  }
+  if (normalized.includes('谨慎观察')) {
+    return '观察';
+  }
+  if (normalized.includes('不建议')) {
+    return '不新增';
+  }
+  if (normalized.includes('可替换')) {
+    return '替换';
+  }
+  const first = normalized.split(/[，。；、\s]/)[0] || '建议';
+  return first.length > 4 ? `${first.slice(0, 4)}.` : first;
 };
 
 export const HistoryListItem: React.FC<HistoryListItemProps> = ({
@@ -43,12 +54,14 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
   onClick,
 }) => {
   const sentimentColor = item.sentimentScore !== undefined ? getSentimentColor(item.sentimentScore) : null;
-  const stockName = item.stockName || item.stockCode;
-  const isTruncated = isStockNameTruncated(stockName);
+  const itemType = item.type || 'stock';
+  const displayCode = item.displayCode || item.stockCode || item.fundCode || '';
+  const displayName = item.displayName || item.stockName || item.fundName || displayCode;
+  const badgeLabel = getOperationBadgeLabel(item.operationAdvice);
 
   return (
     <div className="flex items-start gap-2 group">
-      <div className="pt-5">
+      <div className="pt-6">
         <input
           type="checkbox"
           checked={isChecked}
@@ -60,14 +73,15 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
       <button
         type="button"
         onClick={() => onClick(item.id)}
-        className={`home-history-item flex-1 text-left p-2.5 group/item ${
+        title={displayName}
+        className={`home-history-item min-w-0 flex-1 text-left p-2.5 group/item ${
           isViewing ? 'home-history-item-selected' : ''
         }`}
       >
-        <div className={`flex items-center gap-2.5 relative z-10${isTruncated ? ' group-hover/item:z-20' : ''}`}>
+        <div className="relative z-10 flex min-w-0 items-stretch gap-2.5">
           {sentimentColor && (
             <div
-              className="w-1 h-8 rounded-full flex-shrink-0"
+              className="my-1 w-1 rounded-full flex-shrink-0"
               style={{
                 backgroundColor: sentimentColor,
                 boxShadow: `0 0 10px ${sentimentColor}40`,
@@ -75,40 +89,36 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
             />
           )}
           <div className="flex-1 min-w-0">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <span className="truncate text-sm font-semibold text-foreground tracking-tight">
-                  <span className="group-hover/item:hidden">
-                    {truncateStockName(stockName)}
-                  </span>
-                  <span className="hidden group-hover/item:inline">
-                    {stockName}
-                  </span>
-                </span>
-              </div>
+            <div className="flex min-w-0 items-start gap-2">
+              <span className="min-w-0 flex-1 truncate text-sm font-semibold leading-5 text-foreground tracking-tight">
+                {displayName}
+              </span>
               {sentimentColor && (
-                <Badge
-                  variant="default"
-                  size="sm"
-                  className={`home-history-sentiment-badge shrink-0 shadow-none text-[11px] font-semibold leading-none transition-opacity duration-200${isTruncated ? ' group-hover/item:opacity-80' : ''}`}
+                <span
+                  className="home-history-sentiment-badge inline-flex max-w-[5.25rem] shrink-0 items-center justify-center truncate rounded-full border px-2 py-0.5 text-[11px] font-semibold leading-4 shadow-none"
                   style={{
                     color: sentimentColor,
                     borderColor: `${sentimentColor}30`,
                     backgroundColor: `${sentimentColor}10`,
                   }}
                 >
-                  {getOperationBadgeLabel(item.operationAdvice)} {item.sentimentScore}
-                </Badge>
+                  <span className="truncate">{badgeLabel}</span>
+                  {item.sentimentScore !== undefined ? (
+                    <span className="ml-1 font-mono">{item.sentimentScore}</span>
+                  ) : null}
+                </span>
               )}
             </div>
-            <div className="flex items-center gap-2 mt-1">
-              <span className="text-[11px] text-secondary-text font-mono">
-                {item.stockCode}
+            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="min-w-[4.25rem] text-[11px] text-secondary-text font-mono">
+                {displayCode}
               </span>
-              <span className="w-1 h-1 rounded-full bg-subtle-hover" />
-              <span className="text-[11px] text-muted-text">
-                {formatDateTime(item.createdAt)}
+              <span className="home-board-pill inline-flex shrink-0 rounded-full px-1.5 py-0.5 text-[10px] leading-4">
+                {itemType === 'fund' ? '基金' : '股票'}
               </span>
+            </div>
+            <div className="mt-1 text-[11px] leading-4 text-muted-text">
+              {formatDateTime(item.createdAt)}
             </div>
           </div>
         </div>
