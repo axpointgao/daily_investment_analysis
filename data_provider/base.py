@@ -1122,7 +1122,13 @@ class DataFetcherManager:
             logger.error(f"[预取] 批量预取异常: {e}")
             return 0
     
-    def get_realtime_quote(self, stock_code: str, *, log_final_failure: bool = True):
+    def get_realtime_quote(
+        self,
+        stock_code: str,
+        *,
+        log_final_failure: bool = True,
+        basic_only: bool = False,
+    ):
         """
         获取实时行情数据（自动故障切换）
         
@@ -1138,6 +1144,9 @@ class DataFetcherManager:
             stock_code: 股票代码
             log_final_failure: Whether to emit the final "all sources failed"
                 summary log when no realtime quote is available.
+            basic_only: Return after the first source with a valid price.
+                Portfolio snapshots use this to avoid slow supplemental
+                requests for fields they do not render.
             
         Returns:
             UnifiedRealtimeQuote 对象，所有数据源都失败则返回 None
@@ -1253,6 +1262,8 @@ class DataFetcherManager:
                         # First successful source becomes primary
                         primary_quote = quote
                         logger.info(f"[实时行情] {stock_code} 成功获取 (来源: {source})")
+                        if basic_only:
+                            return primary_quote
                         # If all key supplementary fields are present, return early
                         if not self._quote_needs_supplement(primary_quote):
                             return primary_quote

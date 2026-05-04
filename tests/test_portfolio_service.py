@@ -126,7 +126,12 @@ class PortfolioServiceTestCase(unittest.TestCase):
         )
 
         with patch.object(PortfolioService, "_fetch_realtime_position_price", return_value=(125.0, "unit-test")):
-            snapshot = self.service.get_portfolio_snapshot(account_id=aid, as_of=today, cost_method="fifo")
+            snapshot = self.service.get_portfolio_snapshot(
+                account_id=aid,
+                as_of=today,
+                cost_method="fifo",
+                refresh_prices=True,
+            )
 
         pos = snapshot["accounts"][0]["positions"][0]
         self.assertAlmostEqual(pos["last_price"], 125.0, places=6)
@@ -165,6 +170,78 @@ class PortfolioServiceTestCase(unittest.TestCase):
         self.assertAlmostEqual(pos["unrealized_pnl_base"], 180.0, places=6)
         self.assertEqual(pos["price_source"], "history_close")
         self.assertTrue(pos["price_available"])
+
+    def test_current_snapshot_defaults_to_skip_online_realtime_price(self) -> None:
+        today = date.today()
+        account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
+        aid = account["id"]
+        self.service.record_trade(
+            account_id=aid,
+            symbol="600519",
+            trade_date=today,
+            side="buy",
+            quantity=10,
+            price=100,
+            market="cn",
+            currency="CNY",
+        )
+
+        with patch.object(
+            PortfolioService,
+            "_fetch_realtime_position_price",
+            side_effect=AssertionError("default snapshot should not fetch online quote"),
+        ):
+            snapshot = self.service.get_portfolio_snapshot(account_id=aid, as_of=today, cost_method="fifo")
+
+        pos = snapshot["accounts"][0]["positions"][0]
+        self.assertEqual(pos["price_source"], "missing")
+        self.assertFalse(pos["price_available"])
+
+    def test_cached_snapshot_is_used_when_prices_are_not_refreshed(self) -> None:
+        today = date.today()
+        account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
+        aid = account["id"]
+        self.service.record_trade(
+            account_id=aid,
+            symbol="600519",
+            trade_date=today,
+            side="buy",
+            quantity=10,
+            price=100,
+            market="cn",
+            currency="CNY",
+        )
+
+        with patch.object(PortfolioService, "_fetch_realtime_position_price", return_value=(125.0, "unit-test")):
+            refreshed = self.service.get_portfolio_snapshot(
+                account_id=aid,
+                as_of=today,
+                cost_method="fifo",
+                refresh_prices=True,
+            )
+
+        with patch.object(
+            PortfolioService,
+            "_replay_account",
+            side_effect=AssertionError("cached snapshot should avoid replay"),
+        ):
+            cached = self.service.get_portfolio_snapshot(account_id=aid, as_of=today, cost_method="fifo")
+
+        self.assertEqual(cached["accounts"][0]["positions"][0]["price_source"], "realtime_quote")
+        self.assertEqual(cached["accounts"][0]["positions"][0]["price_provider"], "unit-test")
+        self.assertAlmostEqual(
+            cached["accounts"][0]["total_market_value"],
+            refreshed["accounts"][0]["total_market_value"],
+            places=6,
+        )
+
+    def test_fund_display_name_does_not_use_stock_data_manager(self) -> None:
+        with patch.object(
+            PortfolioService,
+            "_get_data_manager",
+            side_effect=AssertionError("fund display name should not use stock data manager"),
+        ):
+            self.assertIsNone(self.service._resolve_position_display_name(symbol="000274", market="fund"))
 
     def test_historical_snapshot_marks_missing_price_without_cost_fallback(self) -> None:
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
@@ -332,11 +409,12 @@ class PortfolioServiceTestCase(unittest.TestCase):
         account = SimpleNamespace(base_currency="CNY")
 
         positions, _, _, _, _ = self.service._build_positions(
-            account=account,
+            account=SimpleNamespace(id=1, base_currency="CNY"),
             as_of_date=date(2026, 1, 3),
             cost_method="avg",
             fifo_lots={},
             avg_state={("AAPL", "us", "USD"): _AvgState(quantity=10.0, total_cost=0.0)},
+            refresh_prices=False,
         )
 
         self.assertEqual(len(positions), 1)

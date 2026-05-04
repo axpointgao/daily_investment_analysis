@@ -617,12 +617,13 @@ const PortfolioPage: React.FC = () => {
     }
   }, [selectedBroker]);
 
-  const loadSnapshot = useCallback(async () => {
+  const loadSnapshot = useCallback(async (options: { refreshPrices?: boolean } = {}) => {
     setIsLoading(true);
     try {
       const snapshotData = await portfolioApi.getSnapshot({
         accountId: queryAccountId,
         costMethod,
+        refreshPrices: options.refreshPrices ?? false,
       });
       setSnapshot(snapshotData);
       setError(null);
@@ -705,8 +706,8 @@ const PortfolioPage: React.FC = () => {
     await loadEventsPage(eventPage);
   }, [eventPage, loadEventsPage]);
 
-  const refreshPortfolioData = useCallback(async (page = eventPage) => {
-    await Promise.all([loadSnapshot(), loadEventsPage(page)]);
+  const refreshPortfolioData = useCallback(async (page = eventPage, options: { refreshPrices?: boolean } = {}) => {
+    await Promise.all([loadSnapshot({ refreshPrices: options.refreshPrices ?? false }), loadEventsPage(page)]);
   }, [eventPage, loadEventsPage, loadSnapshot]);
 
   useEffect(() => {
@@ -815,7 +816,7 @@ const PortfolioPage: React.FC = () => {
         tradeUid: tradeForm.tradeUid || undefined,
         note: tradeForm.note || undefined,
       });
-      await refreshPortfolioData();
+      await refreshPortfolioData(eventPage, { refreshPrices: true });
       setTradeForm((prev) => ({ ...prev, symbol: '', tradeUid: '', note: '' }));
     } catch (err) {
       setError(getParsedApiError(err));
@@ -838,7 +839,7 @@ const PortfolioPage: React.FC = () => {
         currency: cashForm.currency || undefined,
         note: cashForm.note || undefined,
       });
-      await refreshPortfolioData();
+      await refreshPortfolioData(eventPage, { refreshPrices: true });
       setCashForm((prev) => ({ ...prev, note: '' }));
     } catch (err) {
       setError(getParsedApiError(err));
@@ -862,7 +863,7 @@ const PortfolioPage: React.FC = () => {
         splitRatio: corpForm.splitRatio ? Number(corpForm.splitRatio) : undefined,
         note: corpForm.note || undefined,
       });
-      await refreshPortfolioData();
+      await refreshPortfolioData(eventPage, { refreshPrices: true });
       setCorpForm((prev) => ({ ...prev, symbol: '', note: '' }));
     } catch (err) {
       setError(getParsedApiError(err));
@@ -887,7 +888,7 @@ const PortfolioPage: React.FC = () => {
         currency: getDefaultCurrencyForMarket(writableAccount.market),
         note: manualPriceForm.note || undefined,
       });
-      await refreshPortfolioData();
+      await refreshPortfolioData(eventPage, { refreshPrices: true });
       setManualPriceForm((prev) => ({ ...prev, symbol: '', price: '', note: '' }));
     } catch (err) {
       setError(getParsedApiError(err));
@@ -914,7 +915,7 @@ const PortfolioPage: React.FC = () => {
         maturityDate: bankForm.assetKind === 'term' ? bankForm.maturityDate || undefined : undefined,
         note: bankForm.note || undefined,
       });
-      await refreshPortfolioData();
+      await refreshPortfolioData(eventPage, { refreshPrices: true });
       setBankForm((prev) => ({ ...prev, amount: '', productName: '', maturityDate: '', note: '' }));
     } catch (err) {
       setError(getParsedApiError(err));
@@ -947,7 +948,7 @@ const PortfolioPage: React.FC = () => {
       const committed = await portfolioApi.commitCsvImport(writableAccountId, selectedBroker, csvFile, csvDryRun);
       setCsvCommitResult(committed);
       if (!csvDryRun) {
-        await refreshPortfolioData();
+        await refreshPortfolioData(eventPage, { refreshPrices: true });
       }
     } catch (err) {
       setError(getParsedApiError(err));
@@ -989,7 +990,7 @@ const PortfolioPage: React.FC = () => {
       if (nextPage !== eventPage) {
         setEventPage(nextPage);
       }
-      await refreshPortfolioData(nextPage);
+      await refreshPortfolioData(nextPage, { refreshPrices: true });
     } catch (err) {
       setError(getParsedApiError(err));
     } finally {
@@ -1036,7 +1037,7 @@ const PortfolioPage: React.FC = () => {
   };
 
   const handleRefresh = async () => {
-    await Promise.all([loadAccounts(), loadSnapshot(), loadEvents(), loadBrokers()]);
+    await Promise.all([loadAccounts(), loadSnapshot({ refreshPrices: true }), loadEvents(), loadBrokers()]);
   };
 
   const clearEventFilters = () => {
@@ -1063,6 +1064,7 @@ const PortfolioPage: React.FC = () => {
       const snapshotData = await portfolioApi.getSnapshot({
         accountId: requestedAccountId,
         costMethod: requestedCostMethod,
+        refreshPrices: true,
       });
       if (!isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
         return false;

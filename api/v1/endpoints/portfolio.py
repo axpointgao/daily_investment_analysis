@@ -557,6 +557,7 @@ def get_snapshot(
     account_id: Optional[int] = Query(None, description="Optional account id, default returns all accounts"),
     as_of: Optional[date] = Query(None, description="Snapshot date, default today"),
     cost_method: str = Query("fifo", description="Cost method: fifo or avg"),
+    refresh_prices: bool = Query(False, description="Refresh online prices instead of using cached/latest snapshot"),
 ) -> PortfolioSnapshotResponse:
     service = PortfolioService()
     try:
@@ -564,6 +565,7 @@ def get_snapshot(
             account_id=account_id,
             as_of=as_of,
             cost_method=cost_method,
+            refresh_prices=refresh_prices,
         )
         return PortfolioSnapshotResponse(**data)
     except ValueError as exc:

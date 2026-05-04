@@ -976,6 +976,27 @@ class PortfolioRepository:
     # ------------------------------------------------------------------
     # Snapshot / position cache
     # ------------------------------------------------------------------
+    def get_latest_daily_snapshot(
+        self,
+        *,
+        account_id: int,
+        as_of: date,
+        cost_method: str,
+    ) -> Optional[PortfolioDailySnapshot]:
+        with self.db.get_session() as session:
+            return session.execute(
+                select(PortfolioDailySnapshot)
+                .where(
+                    and_(
+                        PortfolioDailySnapshot.account_id == account_id,
+                        PortfolioDailySnapshot.snapshot_date <= as_of,
+                        PortfolioDailySnapshot.cost_method == cost_method,
+                    )
+                )
+                .order_by(PortfolioDailySnapshot.snapshot_date.desc(), PortfolioDailySnapshot.id.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+
     def replace_positions_and_lots(
         self,
         *,

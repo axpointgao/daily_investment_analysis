@@ -99,6 +99,12 @@ class PortfolioService:
 
     def __init__(self, repo: Optional[PortfolioRepository] = None):
         self.repo = repo or PortfolioRepository()
+        self._data_manager: Optional[DataFetcherManager] = None
+
+    def _get_data_manager(self) -> DataFetcherManager:
+        if self._data_manager is None:
+            self._data_manager = DataFetcherManager()
+        return self._data_manager
 
     # ------------------------------------------------------------------
     # Account CRUD
@@ -586,6 +592,7 @@ class PortfolioService:
         account_id: Optional[int] = None,
         as_of: Optional[date] = None,
         cost_method: str = "fifo",
+        refresh_prices: bool = False,
     ) -> Dict[str, Any]:
         as_of_date = as_of or date.today()
         method = self._normalize_cost_method(cost_method)
@@ -595,6 +602,15 @@ class PortfolioService:
             account_rows = [account]
         else:
             account_rows = self.repo.list_accounts(include_inactive=False)
+
+        if not refresh_prices:
+            cached_snapshot = self._build_cached_portfolio_snapshot(
+                account_rows=account_rows,
+                as_of_date=as_of_date,
+                cost_method=method,
+            )
+            if cached_snapshot is not None:
+                return cached_snapshot
 
         accounts_payload: List[Dict[str, Any]] = []
         aggregate_currency = "CNY"
@@ -612,7 +628,12 @@ class PortfolioService:
         missing_fx_pairs: Set[Tuple[str, str]] = set()
 
         for account in account_rows:
-            account_snapshot = self._replay_account(account=account, as_of_date=as_of_date, cost_method=method)
+            account_snapshot = self._replay_account(
+                account=account,
+                as_of_date=as_of_date,
+                cost_method=method,
+                refresh_prices=refresh_prices,
+            )
 
             self.repo.replace_positions_lots_and_snapshot(
                 account_id=account.id,
@@ -717,6 +738,161 @@ class PortfolioService:
         return {
             "as_of": as_of_date.isoformat(),
             "cost_method": method,
+            "currency": aggregate_currency,
+            "account_count": len(account_rows),
+            "total_cash": _aggregate_value("total_cash"),
+            "total_market_value": _aggregate_value("total_market_value"),
+            "total_equity": _aggregate_value("total_equity"),
+            "realized_pnl": _aggregate_value("realized_pnl"),
+            "unrealized_pnl": _aggregate_value("unrealized_pnl"),
+            "fee_total": _aggregate_value("fee_total"),
+            "tax_total": _aggregate_value("tax_total"),
+            "fx_stale": aggregate["fx_stale"],
+            "fx_missing": aggregate["fx_missing"],
+            "missing_fx_pairs": [
+                {"from_currency": from_currency, "to_currency": to_currency}
+                for from_currency, to_currency in sorted(missing_fx_pairs)
+            ],
+            "asset_breakdown": {} if has_missing_fx else asset_breakdown,
+            "accounts": accounts_payload,
+        }
+
+    def _build_cached_portfolio_snapshot(
+        self,
+        *,
+        account_rows: List[Any],
+        as_of_date: date,
+        cost_method: str,
+    ) -> Optional[Dict[str, Any]]:
+        account_payloads: List[Dict[str, Any]] = []
+        for account in account_rows:
+            row = self.repo.get_latest_daily_snapshot(
+                account_id=int(account.id),
+                as_of=as_of_date,
+                cost_method=cost_method,
+            )
+            if row is None or not row.payload:
+                return None
+            try:
+                payload = json.loads(row.payload)
+            except (TypeError, ValueError):
+                return None
+            if not isinstance(payload, dict):
+                return None
+            account_payloads.append(payload)
+
+        return self._aggregate_account_payloads(
+            account_rows=account_rows,
+            accounts_payload=account_payloads,
+            as_of_date=as_of_date,
+            cost_method=cost_method,
+        )
+
+    def _aggregate_account_payloads(
+        self,
+        *,
+        account_rows: List[Any],
+        accounts_payload: List[Dict[str, Any]],
+        as_of_date: date,
+        cost_method: str,
+    ) -> Dict[str, Any]:
+        aggregate_currency = "CNY"
+        aggregate = {
+            "total_cash": 0.0,
+            "total_market_value": 0.0,
+            "total_equity": 0.0,
+            "realized_pnl": 0.0,
+            "unrealized_pnl": 0.0,
+            "fee_total": 0.0,
+            "tax_total": 0.0,
+            "fx_stale": False,
+            "fx_missing": False,
+        }
+        missing_fx_pairs: Set[Tuple[str, str]] = set()
+
+        for account, account_snapshot in zip(account_rows, accounts_payload):
+            conversions = {
+                "total_cash": self._convert_amount(
+                    amount=float(account_snapshot.get("total_cash") or 0.0),
+                    from_currency=account.base_currency,
+                    to_currency=aggregate_currency,
+                    as_of_date=as_of_date,
+                ),
+                "total_market_value": self._convert_amount(
+                    amount=float(account_snapshot.get("total_market_value") or 0.0),
+                    from_currency=account.base_currency,
+                    to_currency=aggregate_currency,
+                    as_of_date=as_of_date,
+                ),
+                "total_equity": self._convert_amount(
+                    amount=float(account_snapshot.get("total_equity") or 0.0),
+                    from_currency=account.base_currency,
+                    to_currency=aggregate_currency,
+                    as_of_date=as_of_date,
+                ),
+                "realized_pnl": self._convert_amount(
+                    amount=float(account_snapshot.get("realized_pnl") or 0.0),
+                    from_currency=account.base_currency,
+                    to_currency=aggregate_currency,
+                    as_of_date=as_of_date,
+                ),
+                "unrealized_pnl": self._convert_amount(
+                    amount=float(account_snapshot.get("unrealized_pnl") or 0.0),
+                    from_currency=account.base_currency,
+                    to_currency=aggregate_currency,
+                    as_of_date=as_of_date,
+                ),
+                "fee_total": self._convert_amount(
+                    amount=float(account_snapshot.get("fee_total") or 0.0),
+                    from_currency=account.base_currency,
+                    to_currency=aggregate_currency,
+                    as_of_date=as_of_date,
+                ),
+                "tax_total": self._convert_amount(
+                    amount=float(account_snapshot.get("tax_total") or 0.0),
+                    from_currency=account.base_currency,
+                    to_currency=aggregate_currency,
+                    as_of_date=as_of_date,
+                ),
+            }
+            for key, conversion in conversions.items():
+                if conversion.amount is not None:
+                    aggregate[key] += conversion.amount
+                if conversion.missing_pair is not None:
+                    aggregate["fx_missing"] = True
+                    missing_fx_pairs.add(conversion.missing_pair)
+                aggregate["fx_stale"] = aggregate["fx_stale"] or conversion.is_stale
+            aggregate["fx_stale"] = aggregate["fx_stale"] or bool(account_snapshot.get("fx_stale"))
+
+        has_missing_fx = bool(aggregate["fx_missing"])
+        asset_breakdown = {
+            "stock": 0.0,
+            "fund": 0.0,
+            "crypto": 0.0,
+            "bank": 0.0,
+            "cash": 0.0,
+        }
+        if not has_missing_fx:
+            asset_breakdown["cash"] = round(aggregate["total_cash"], 6)
+            for account, account_snapshot in zip(account_rows, accounts_payload):
+                converted_mv = self._convert_amount(
+                    amount=float(account_snapshot.get("total_market_value") or 0.0),
+                    from_currency=account.base_currency,
+                    to_currency=aggregate_currency,
+                    as_of_date=as_of_date,
+                )
+                key = account.market if account.market in {"fund", "crypto", "bank"} else "stock"
+                asset_breakdown[key] += float(converted_mv.amount or 0.0)
+            asset_breakdown = {key: round(value, 6) for key, value in asset_breakdown.items()}
+
+        def _aggregate_value(key: str) -> Optional[float]:
+            if has_missing_fx:
+                return None
+            return round(aggregate[key], 6)
+
+        return {
+            "as_of": as_of_date.isoformat(),
+            "cost_method": cost_method,
             "currency": aggregate_currency,
             "account_count": len(account_rows),
             "total_cash": _aggregate_value("total_cash"),
@@ -899,7 +1075,14 @@ class PortfolioService:
 
         return quantity_held
 
-    def _replay_account(self, *, account: Any, as_of_date: date, cost_method: str) -> Dict[str, Any]:
+    def _replay_account(
+        self,
+        *,
+        account: Any,
+        as_of_date: date,
+        cost_method: str,
+        refresh_prices: bool,
+    ) -> Dict[str, Any]:
         trades = self.repo.list_trades(account.id, as_of=as_of_date)
         cash_ledger = self.repo.list_cash_ledger(account.id, as_of=as_of_date)
         corporate_actions = self.repo.list_corporate_actions(account.id, as_of=as_of_date)
@@ -1111,6 +1294,7 @@ class PortfolioService:
             cost_method=cost_method,
             fifo_lots=fifo_lots,
             avg_state=avg_state,
+            refresh_prices=refresh_prices,
         )
         fx_stale = fx_stale or stale_pos
 
@@ -1193,6 +1377,7 @@ class PortfolioService:
         cost_method: str,
         fifo_lots: Dict[Tuple[str, str, str], List[Dict[str, Any]]],
         avg_state: Dict[Tuple[str, str, str], _AvgState],
+        refresh_prices: bool,
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], float, float, bool]:
         position_rows: List[Dict[str, Any]] = []
         lot_rows: List[Dict[str, Any]] = []
@@ -1241,6 +1426,7 @@ class PortfolioService:
                 symbol=symbol,
                 market=market,
                 as_of_date=as_of_date,
+                refresh_prices=refresh_prices,
             )
             last_price = price_info.price
 
@@ -1298,9 +1484,8 @@ class PortfolioService:
 
         return position_rows, lot_rows, market_value_base, total_cost_base, fx_stale
 
-    @staticmethod
     @lru_cache(maxsize=1024)
-    def _resolve_position_display_name(*, symbol: str, market: str) -> Optional[str]:
+    def _resolve_position_display_name(self, *, symbol: str, market: str) -> Optional[str]:
         if market == "bank":
             return None
         raw_symbol = str(symbol or "").strip()
@@ -1309,6 +1494,8 @@ class PortfolioService:
 
         if market == "crypto":
             return raw_symbol.upper()
+        if market == "fund":
+            return None
 
         normalized = normalize_stock_code(raw_symbol)
         static_name = STOCK_NAME_MAP.get(normalized)
@@ -1320,7 +1507,7 @@ class PortfolioService:
             return index_name
 
         try:
-            name = DataFetcherManager().get_stock_name(raw_symbol, allow_realtime=False)
+            name = self._get_data_manager().get_stock_name(raw_symbol, allow_realtime=False)
         except Exception as exc:
             logger.debug("Resolve portfolio position display name failed for %s: %s", raw_symbol, exc)
             return None
@@ -1335,19 +1522,30 @@ class PortfolioService:
         symbol: str,
         market: str,
         as_of_date: date,
+        refresh_prices: bool,
     ) -> _ResolvedPositionPrice:
         today = date.today()
 
         if market == "fund":
-            fund_price = self._fetch_fund_nav(symbol=symbol, as_of_date=as_of_date)
-            if fund_price is not None:
-                return fund_price
             manual = self._get_manual_position_price(
                 account_id=account_id,
                 symbol=symbol,
                 market=market,
                 as_of_date=as_of_date,
             )
+            if manual is not None and not refresh_prices:
+                return manual
+            if not refresh_prices:
+                return _ResolvedPositionPrice(
+                    price=0.0,
+                    source="missing",
+                    price_date=None,
+                    is_stale=True,
+                    is_available=False,
+                )
+            fund_price = self._fetch_fund_nav(symbol=symbol, as_of_date=as_of_date)
+            if fund_price is not None:
+                return fund_price
             if manual is not None:
                 return manual
             return _ResolvedPositionPrice(
@@ -1359,15 +1557,25 @@ class PortfolioService:
             )
 
         if market == "crypto":
-            crypto_price = self._fetch_crypto_price(symbol=symbol, as_of_date=as_of_date)
-            if crypto_price is not None:
-                return crypto_price
             manual = self._get_manual_position_price(
                 account_id=account_id,
                 symbol=symbol,
                 market=market,
                 as_of_date=as_of_date,
             )
+            if manual is not None and not refresh_prices:
+                return manual
+            if not refresh_prices:
+                return _ResolvedPositionPrice(
+                    price=0.0,
+                    source="missing",
+                    price_date=None,
+                    is_stale=True,
+                    is_available=False,
+                )
+            crypto_price = self._fetch_crypto_price(symbol=symbol, as_of_date=as_of_date)
+            if crypto_price is not None:
+                return crypto_price
             if manual is not None:
                 return manual
             return _ResolvedPositionPrice(
@@ -1390,7 +1598,7 @@ class PortfolioService:
                     is_available=True,
                 )
 
-        if as_of_date == today:
+        if as_of_date == today and refresh_prices:
             realtime_price, provider = self._fetch_realtime_position_price(symbol)
             if realtime_price is not None and realtime_price > 0:
                 return _ResolvedPositionPrice(
@@ -1558,10 +1766,9 @@ class PortfolioService:
         except Exception:
             return None
 
-    @staticmethod
-    def _fetch_realtime_position_price(symbol: str) -> Tuple[Optional[float], Optional[str]]:
+    def _fetch_realtime_position_price(self, symbol: str) -> Tuple[Optional[float], Optional[str]]:
         try:
-            quote = DataFetcherManager().get_realtime_quote(symbol, log_final_failure=False)
+            quote = self._get_data_manager().get_realtime_quote(symbol, log_final_failure=False, basic_only=True)
         except Exception as exc:
             logger.warning("Failed to fetch realtime portfolio price for %s: %s", symbol, exc)
             return None, None

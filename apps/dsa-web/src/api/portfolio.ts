@@ -31,6 +31,7 @@ type SnapshotQuery = {
   accountId?: number;
   asOf?: string;
   costMethod?: PortfolioCostMethod;
+  refreshPrices?: boolean;
 };
 
 type FxRefreshQuery = {
@@ -66,8 +67,8 @@ type CorporateListQuery = EventQuery & {
 
 const PORTFOLIO_ANALYSIS_TIMEOUT_MS = 180000;
 
-function buildSnapshotParams(query: SnapshotQuery): Record<string, string | number> {
-  const params: Record<string, string | number> = {};
+function buildSnapshotParams(query: SnapshotQuery): Record<string, string | number | boolean> {
+  const params: Record<string, string | number | boolean> = {};
   if (query.accountId != null) {
     params.account_id = query.accountId;
   }
@@ -76,6 +77,9 @@ function buildSnapshotParams(query: SnapshotQuery): Record<string, string | numb
   }
   if (query.costMethod) {
     params.cost_method = query.costMethod;
+  }
+  if (query.refreshPrices != null) {
+    params.refresh_prices = query.refreshPrices;
   }
   return params;
 }
