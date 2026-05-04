@@ -766,7 +766,7 @@ class PortfolioService:
                 account=account,
                 as_of_date=as_of_date,
                 refresh_enabled=refresh_enabled,
-                aggregate_currency="CNY" if account_id is None else None,
+                aggregate_currency="CNY",
             )
             summary["pair_count"] += item["pair_count"]
             summary["updated_count"] += item["updated_count"]

@@ -25,7 +25,6 @@ import type {
   PortfolioImportParseResponse,
   PortfolioMarket,
   PortfolioPositionItem,
-  PortfolioRiskResponse,
   PortfolioSide,
   PortfolioSnapshotResponse,
   PortfolioTradeListItem,
@@ -121,9 +120,32 @@ function formatPositionPrice(row: PortfolioPositionItem): string {
   return row.lastPrice.toFixed(4);
 }
 
+function formatAssetQuantity(value: number | undefined | null, market?: string): string {
+  if (value == null || Number.isNaN(value)) return '--';
+  const maximumFractionDigits = market === 'crypto' ? 8 : 4;
+  return Number(value).toLocaleString('zh-CN', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits,
+  });
+}
+
+function formatPositionQuantity(row: PortfolioPositionItem): string {
+  if (row.market === 'bank') return '-';
+  return formatAssetQuantity(row.quantity, row.market);
+}
+
+function formatTradeQuantity(item: PortfolioTradeListItem): string {
+  return formatAssetQuantity(item.quantity, item.market);
+}
+
 function formatPositionMoney(value: number, row: PortfolioPositionItem): string {
   if (!hasPositionPrice(row)) return '--';
   return formatMoney(value, row.valuationCurrency);
+}
+
+function getChinaPnlColorClass(value: number | undefined | null, hasValue: boolean): string {
+  if (!hasValue || value == null || Number.isNaN(value) || value === 0) return 'text-secondary';
+  return value > 0 ? 'text-danger' : 'text-success';
 }
 
 function getPositionPriceLabel(row: PortfolioPositionItem): string {
@@ -389,7 +411,6 @@ const PortfolioPage: React.FC = () => {
   });
   const [costMethod, setCostMethod] = useState<PortfolioCostMethod>('fifo');
   const [snapshot, setSnapshot] = useState<PortfolioSnapshotResponse | null>(null);
-  const [, setRisk] = useState<PortfolioRiskResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [portfolioAnalysis, setPortfolioAnalysis] = useState<PortfolioAnalysisResponse | null>(null);
   const [portfolioAnalysisLoading, setPortfolioAnalysisLoading] = useState(false);
@@ -398,7 +419,6 @@ const PortfolioPage: React.FC = () => {
   const [fxRefreshing, setFxRefreshing] = useState(false);
   const [fxRefreshFeedback, setFxRefreshFeedback] = useState<FxRefreshFeedback | null>(null);
   const [error, setError] = useState<ParsedApiError | null>(null);
-  const [riskWarning, setRiskWarning] = useState<string | null>(null);
   const [writeWarning, setWriteWarning] = useState<string | null>(null);
 
   const [brokers, setBrokers] = useState<PortfolioImportBrokerItem[]>([]);
@@ -486,6 +506,7 @@ const PortfolioPage: React.FC = () => {
   const isFundAccount = selectedMarket === 'fund';
   const isCryptoAccount = selectedMarket === 'crypto';
   const isBankAccount = selectedMarket === 'bank';
+  const quantityStep = isCryptoAccount ? '0.00000001' : '0.0001';
   const missingFxPairsText = formatMissingFxPairs(snapshot);
   const snapshotSignature = useMemo(
     () => buildSnapshotSignature(snapshot, selectedAccount, costMethod),
@@ -596,9 +617,8 @@ const PortfolioPage: React.FC = () => {
     }
   }, [selectedBroker]);
 
-  const loadSnapshotAndRisk = useCallback(async () => {
+  const loadSnapshot = useCallback(async () => {
     setIsLoading(true);
-    setRiskWarning(null);
     try {
       const snapshotData = await portfolioApi.getSnapshot({
         accountId: queryAccountId,
@@ -606,21 +626,8 @@ const PortfolioPage: React.FC = () => {
       });
       setSnapshot(snapshotData);
       setError(null);
-
-      try {
-        const riskData = await portfolioApi.getRisk({
-          accountId: queryAccountId,
-          costMethod,
-        });
-        setRisk(riskData);
-      } catch (riskErr) {
-        setRisk(null);
-        const parsed = getParsedApiError(riskErr);
-        setRiskWarning(parsed.message || '风险数据获取失败，已降级为仅展示快照数据。');
-      }
     } catch (err) {
       setSnapshot(null);
-      setRisk(null);
       setError(getParsedApiError(err));
     } finally {
       setIsLoading(false);
@@ -699,8 +706,8 @@ const PortfolioPage: React.FC = () => {
   }, [eventPage, loadEventsPage]);
 
   const refreshPortfolioData = useCallback(async (page = eventPage) => {
-    await Promise.all([loadSnapshotAndRisk(), loadEventsPage(page)]);
-  }, [eventPage, loadEventsPage, loadSnapshotAndRisk]);
+    await Promise.all([loadSnapshot(), loadEventsPage(page)]);
+  }, [eventPage, loadEventsPage, loadSnapshot]);
 
   useEffect(() => {
     void loadAccounts();
@@ -708,8 +715,8 @@ const PortfolioPage: React.FC = () => {
   }, [loadAccounts, loadBrokers]);
 
   useEffect(() => {
-    void loadSnapshotAndRisk();
-  }, [loadSnapshotAndRisk]);
+    void loadSnapshot();
+  }, [loadSnapshot]);
 
   useEffect(() => {
     void loadEvents();
@@ -1029,7 +1036,7 @@ const PortfolioPage: React.FC = () => {
   };
 
   const handleRefresh = async () => {
-    await Promise.all([loadAccounts(), loadSnapshotAndRisk(), loadEvents(), loadBrokers()]);
+    await Promise.all([loadAccounts(), loadSnapshot(), loadEvents(), loadBrokers()]);
   };
 
   const clearEventFilters = () => {
@@ -1042,7 +1049,7 @@ const PortfolioPage: React.FC = () => {
     setEventBankAssetKind('');
   };
 
-  const reloadSnapshotAndRiskForScope = useCallback(async (
+  const reloadSnapshotForScope = useCallback(async (
     requestedViewKey: string,
     requestedRequestId: number,
     requestedAccountId: number | undefined,
@@ -1051,8 +1058,6 @@ const PortfolioPage: React.FC = () => {
     if (!isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
       return false;
     }
-
-    setRiskWarning(null);
 
     try {
       const snapshotData = await portfolioApi.getSnapshot({
@@ -1064,32 +1069,12 @@ const PortfolioPage: React.FC = () => {
       }
       setSnapshot(snapshotData);
       setError(null);
-
-      try {
-        const riskData = await portfolioApi.getRisk({
-          accountId: requestedAccountId,
-          costMethod: requestedCostMethod,
-        });
-        if (!isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
-          return false;
-        }
-        setRisk(riskData);
-        setRiskWarning(null);
-      } catch (riskErr) {
-        if (!isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
-          return false;
-        }
-        setRisk(null);
-        const parsed = getParsedApiError(riskErr);
-        setRiskWarning(parsed.message || '风险数据获取失败，已降级为仅展示快照数据。');
-      }
       return true;
     } catch (err) {
       if (!isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
         return false;
       }
       setSnapshot(null);
-      setRisk(null);
       setError(getParsedApiError(err));
       return false;
     }
@@ -1118,7 +1103,7 @@ const PortfolioPage: React.FC = () => {
       if (!isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
         return;
       }
-      const reloaded = await reloadSnapshotAndRiskForScope(
+      const reloaded = await reloadSnapshotForScope(
         requestedViewKey,
         requestedRequestId,
         requestedAccountId,
@@ -1168,7 +1153,7 @@ const PortfolioPage: React.FC = () => {
         <div className="space-y-2">
           <h1 className="text-xl md:text-2xl font-semibold text-foreground">持仓管理</h1>
           <p className="text-xs md:text-sm text-secondary">
-            组合快照、手工录入、CSV 导入与风险分析（支持全组合 / 单账户切换）
+            组合快照、手工录入、CSV 导入与资产分析（支持全组合 / 单账户切换）
           </p>
         </div>
         {hasAccounts ? (
@@ -1233,13 +1218,6 @@ const PortfolioPage: React.FC = () => {
       </section>
 
       {error ? <ApiErrorAlert error={error} onDismiss={() => setError(null)} /> : null}
-      {riskWarning ? (
-        <InlineAlert
-          variant="warning"
-          title="风险模块降级"
-          message={riskWarning}
-        />
-      ) : null}
       {snapshot?.fxMissing ? (
         <InlineAlert
           variant="danger"
@@ -1430,7 +1408,7 @@ const PortfolioPage: React.FC = () => {
                           );
                         })()}
                       </td>
-                      <td className="py-2 pr-2 text-right">{row.market === 'bank' ? '-' : row.quantity.toFixed(4)}</td>
+                      <td className="py-2 pr-2 text-right">{formatPositionQuantity(row)}</td>
                       <td className="py-2 pr-2 text-right">{row.market === 'bank' ? '-' : row.avgCost.toFixed(4)}</td>
                       <td className="py-2 pr-2 text-right">
                         <div>{formatPositionPrice(row)}</div>
@@ -1440,24 +1418,21 @@ const PortfolioPage: React.FC = () => {
                       </td>
                       <td className="py-2 pr-2 text-right">{formatPositionMoney(row.marketValueBase, row)}</td>
                       <td
-                        className={`py-2 text-right ${
-                          hasPositionPrice(row)
-                            ? row.unrealizedPnlBase >= 0
-                              ? 'text-success'
-                              : 'text-danger'
-                            : 'text-secondary'
-                        }`}
+                        className={`py-2 text-right ${getChinaPnlColorClass(
+                          row.unrealizedPnlBase,
+                          row.market !== 'bank' && hasPositionPrice(row),
+                        )}`}
                       >
                         {row.market === 'bank' ? '-' : formatPositionMoney(row.unrealizedPnlBase, row)}
                       </td>
                       <td
-                        className={`py-2 text-right ${
-                          hasPositionPrice(row) && row.unrealizedPnlPct !== null && row.unrealizedPnlPct !== undefined
-                            ? row.unrealizedPnlPct >= 0
-                              ? 'text-success'
-                              : 'text-danger'
-                            : 'text-secondary'
-                        }`}
+                        className={`py-2 text-right ${getChinaPnlColorClass(
+                          row.unrealizedPnlPct,
+                          row.market !== 'bank'
+                            && hasPositionPrice(row)
+                            && row.unrealizedPnlPct !== null
+                            && row.unrealizedPnlPct !== undefined,
+                        )}`}
                       >
                         {row.market === 'bank' ? '-' : formatSignedPct(row.unrealizedPnlPct)}
                       </td>
@@ -1608,7 +1583,7 @@ const PortfolioPage: React.FC = () => {
                   </select>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder={isFundAccount ? '份额' : isCryptoAccount ? '数量' : '数量'} value={tradeForm.quantity}
+                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step={quantityStep} placeholder={isFundAccount ? '份额' : isCryptoAccount ? '数量' : '数量'} value={tradeForm.quantity}
                     onChange={(e) => setTradeForm((prev) => ({ ...prev, quantity: e.target.value }))} required />
                   <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder={isFundAccount ? '成交净值' : isCryptoAccount ? '成交价（USD）' : '成交价'} value={tradeForm.price}
                     onChange={(e) => setTradeForm((prev) => ({ ...prev, price: e.target.value }))} required />
@@ -1870,7 +1845,7 @@ const PortfolioPage: React.FC = () => {
               {eventType === 'trade' && tradeEvents.map((item) => (
                 <div key={`t-${item.id}`} className="flex items-start justify-between gap-3 border-b border-white/5 py-2 text-xs text-secondary">
                   <div className="min-w-0">
-                    {item.tradeDate} {formatSideLabel(item.side)} {item.symbol} 数量={item.quantity} 价格={item.price}
+                    {item.tradeDate} {formatSideLabel(item.side)} {item.symbol} 数量={formatTradeQuantity(item)} 价格={item.price}
                   </div>
                   {!writeBlocked ? (
                     <button
@@ -1879,7 +1854,7 @@ const PortfolioPage: React.FC = () => {
                       onClick={() => openDeleteDialog({
                         eventType: 'trade',
                         id: item.id,
-                        message: `确认删除 ${item.tradeDate} 的${formatSideLabel(item.side)}流水 ${item.symbol}（数量 ${item.quantity}，价格 ${item.price}）吗？`,
+                        message: `确认删除 ${item.tradeDate} 的${formatSideLabel(item.side)}流水 ${item.symbol}（数量 ${formatTradeQuantity(item)}，价格 ${item.price}）吗？`,
                       })}
                     >
                       删除

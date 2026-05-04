@@ -562,6 +562,39 @@ class PortfolioPr2TestCase(unittest.TestCase):
         self.assertTrue(bool(latest.is_stale))
         self.assertAlmostEqual(float(latest.rate), 7.0, places=6)
 
+    def test_fx_refresh_single_usd_account_includes_cny_aggregate_pair(self) -> None:
+        account = self.service.create_account(name="Crypto", broker="Demo", market="crypto", base_currency="USD")
+        aid = account["id"]
+        self.service.record_trade(
+            account_id=aid,
+            symbol="ETH",
+            trade_date=date(2026, 1, 1),
+            side="buy",
+            quantity=1,
+            price=1000,
+            market="crypto",
+            currency="USD",
+        )
+
+        with patch.object(PortfolioService, "_fetch_fx_rate_from_yfinance", return_value=7.2) as fetch_mock:
+            summary = self.service.refresh_fx_rates(account_id=aid, as_of=date(2026, 1, 2))
+
+        self.assertEqual(summary["pair_count"], 1)
+        self.assertEqual(summary["updated_count"], 1)
+        fetch_mock.assert_called_once_with(
+            from_currency="USD",
+            to_currency="CNY",
+            as_of_date=date(2026, 1, 2),
+        )
+        latest = self.service.repo.get_latest_fx_rate(
+            from_currency="USD",
+            to_currency="CNY",
+            as_of=date(2026, 1, 2),
+        )
+        self.assertIsNotNone(latest)
+        self.assertFalse(bool(latest.is_stale))
+        self.assertAlmostEqual(float(latest.rate), 7.2, places=6)
+
     def test_fx_refresh_disabled_returns_real_pair_count_without_fetching(self) -> None:
         account = self.service.create_account(name="US", broker="Demo", market="us", base_currency="CNY")
         aid = account["id"]

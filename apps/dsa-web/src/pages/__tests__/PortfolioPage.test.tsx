@@ -6,7 +6,6 @@ import PortfolioPage from '../PortfolioPage';
 const {
   getAccounts,
   getSnapshot,
-  getRisk,
   refreshFx,
   analyzePortfolio,
   listImportBrokers,
@@ -25,7 +24,6 @@ const {
 } = vi.hoisted(() => ({
   getAccounts: vi.fn(),
   getSnapshot: vi.fn(),
-  getRisk: vi.fn(),
   refreshFx: vi.fn(),
   analyzePortfolio: vi.fn(),
   listImportBrokers: vi.fn(),
@@ -47,7 +45,6 @@ vi.mock('../../api/portfolio', () => ({
   portfolioApi: {
     getAccounts,
     getSnapshot,
-    getRisk,
     refreshFx,
     analyzePortfolio,
     listImportBrokers,
@@ -69,7 +66,7 @@ vi.mock('../../api/portfolio', () => ({
 type AccountItem = {
   id: number;
   name: string;
-  market?: 'cn' | 'hk' | 'us';
+  market?: 'cn' | 'hk' | 'us' | 'crypto';
   baseCurrency?: string;
 };
 
@@ -133,43 +130,6 @@ function makeSnapshot(options: {
   };
 }
 
-function makeRisk() {
-  return {
-    asOf: '2026-03-19',
-    accountId: null,
-    costMethod: 'fifo' as const,
-    currency: 'CNY',
-    thresholds: {},
-    concentration: {
-      totalMarketValue: 0,
-      topWeightPct: 0,
-      alert: false,
-      topPositions: [],
-    },
-    sectorConcentration: {
-      totalMarketValue: 0,
-      topWeightPct: 0,
-      alert: false,
-      topSectors: [],
-      coverage: {},
-      errors: [],
-    },
-    drawdown: {
-      seriesPoints: 0,
-      maxDrawdownPct: 0,
-      currentDrawdownPct: 0,
-      alert: false,
-      fxStale: false,
-    },
-    stopLoss: {
-      nearAlert: false,
-      triggeredCount: 0,
-      nearCount: 0,
-      items: [],
-    },
-  };
-}
-
 function deferredPromise<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -183,7 +143,6 @@ function deferredPromise<T>() {
 async function waitForInitialLoad() {
   await waitFor(() => expect(getAccounts).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(getSnapshot).toHaveBeenCalledTimes(1));
-  await waitFor(() => expect(getRisk).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(listTrades).toHaveBeenCalledTimes(1));
 }
 
@@ -212,7 +171,6 @@ describe('PortfolioPage FX refresh', () => {
 
     getAccounts.mockResolvedValue(makeAccounts());
     getSnapshot.mockImplementation(async ({ accountId }: { accountId?: number } = {}) => makeSnapshot({ accountId, fxStale: true }));
-    getRisk.mockResolvedValue(makeRisk());
     analyzePortfolio.mockResolvedValue({
       asOf: '2026-03-19',
       snapshotSignature: 'v1:test',
@@ -265,11 +223,13 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
+    expect(screen.getByText('组合快照、手工录入、CSV 导入与资产分析（支持全组合 / 单账户切换）')).toBeInTheDocument();
+    expect(screen.queryByText(/风险分析/)).not.toBeInTheDocument();
     expect(await screen.findByText('过期')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '刷新汇率' })).toBeInTheDocument();
   });
 
-  it('refreshes FX for a single selected account and only reloads snapshot/risk', async () => {
+  it('refreshes FX for a single selected account and only reloads snapshot', async () => {
     getSnapshot
       .mockResolvedValueOnce(makeSnapshot({ fxStale: true }))
       .mockResolvedValueOnce(makeSnapshot({ accountId: 1, fxStale: true }))
@@ -287,7 +247,6 @@ describe('PortfolioPage FX refresh', () => {
     });
 
     const snapshotCallsBeforeRefresh = getSnapshot.mock.calls.length;
-    const riskCallsBeforeRefresh = getRisk.mock.calls.length;
     const tradeCallsBeforeRefresh = listTrades.mock.calls.length;
 
     fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }));
@@ -295,7 +254,6 @@ describe('PortfolioPage FX refresh', () => {
     await waitFor(() => expect(refreshFx).toHaveBeenCalledWith({ accountId: 1 }));
     expect(await screen.findByText('汇率已刷新，共更新 1 对。')).toBeInTheDocument();
     await waitFor(() => expect(getSnapshot).toHaveBeenCalledTimes(snapshotCallsBeforeRefresh + 1));
-    await waitFor(() => expect(getRisk).toHaveBeenCalledTimes(riskCallsBeforeRefresh + 1));
     expect(listTrades).toHaveBeenCalledTimes(tradeCallsBeforeRefresh);
     expect(listCashLedger).not.toHaveBeenCalled();
     expect(listCorporateActions).not.toHaveBeenCalled();
@@ -344,10 +302,11 @@ describe('PortfolioPage FX refresh', () => {
     expect(await screen.findByText('汇率在线刷新已被禁用。')).toBeInTheDocument();
   });
 
-  it('renders backend-provided position valuation fields and stale missing-price hint', async () => {
+  it('renders backend-provided position valuation fields, Chinese pnl colors and stale missing-price hint', async () => {
     getSnapshot.mockResolvedValueOnce(makeSnapshot({ fxStale: true, positions: [
       { symbol: 'HK00700', displayName: '腾讯控股', market: 'hk', currency: 'HKD', quantity: 10, avgCost: 400, totalCost: 4000, lastPrice: 420, marketValueBase: 4200, unrealizedPnlBase: 200, unrealizedPnlPct: 5, valuationCurrency: 'HKD', priceSource: 'history_close', priceDate: '2026-03-18', priceStale: true, priceAvailable: true },
-      { symbol: 'AAPL', market: 'us', currency: 'USD', quantity: 5, avgCost: 100, totalCost: 500, lastPrice: 0, marketValueBase: 0, unrealizedPnlBase: 0, unrealizedPnlPct: null, valuationCurrency: 'USD', priceSource: 'missing', priceDate: null, priceStale: true, priceAvailable: false },
+      { symbol: 'AAPL', market: 'us', currency: 'USD', quantity: 5, avgCost: 100, totalCost: 500, lastPrice: 90, marketValueBase: 450, unrealizedPnlBase: -50, unrealizedPnlPct: -10, valuationCurrency: 'USD', priceSource: 'realtime_quote', priceDate: '2026-03-19', priceStale: false, priceAvailable: true },
+      { symbol: 'MSFT', market: 'us', currency: 'USD', quantity: 5, avgCost: 100, totalCost: 500, lastPrice: 0, marketValueBase: 0, unrealizedPnlBase: 0, unrealizedPnlPct: null, valuationCurrency: 'USD', priceSource: 'missing', priceDate: null, priceStale: true, priceAvailable: false },
     ] }));
 
     render(<PortfolioPage />);
@@ -360,19 +319,64 @@ describe('PortfolioPage FX refresh', () => {
     expect(screen.getByText('420.0000')).toBeInTheDocument();
     expect(screen.getByText('HKD 4,200.00')).toBeInTheDocument();
     expect(screen.getByText('+5.00%')).toBeInTheDocument();
+    expect(screen.getByText('-10.00%')).toBeInTheDocument();
     expect(screen.getByText('收盘价 · 2026-03-18')).toBeInTheDocument();
     expect(screen.getByText('缺价')).toBeInTheDocument();
     expect(screen.getAllByText('--').length).toBeGreaterThanOrEqual(2);
 
     const hkRow = screen.getByText('HK00700').closest('tr');
     const aaplRow = screen.getByText('AAPL').closest('tr');
+    const msftRow = screen.getByText('MSFT').closest('tr');
     expect(hkRow).not.toBeNull();
     expect(aaplRow).not.toBeNull();
+    expect(msftRow).not.toBeNull();
 
     const hkRowCells = within(hkRow as HTMLTableRowElement).getAllByRole('cell');
     const aaplRowCells = within(aaplRow as HTMLTableRowElement).getAllByRole('cell');
-    expect(hkRowCells.at(-1)).toHaveClass('text-success');
-    expect(aaplRowCells.at(-1)).toHaveClass('text-secondary');
+    const msftRowCells = within(msftRow as HTMLTableRowElement).getAllByRole('cell');
+    expect(hkRowCells.at(-2)).toHaveClass('text-danger');
+    expect(hkRowCells.at(-1)).toHaveClass('text-danger');
+    expect(aaplRowCells.at(-2)).toHaveClass('text-success');
+    expect(aaplRowCells.at(-1)).toHaveClass('text-success');
+    expect(msftRowCells.at(-1)).toHaveClass('text-secondary');
+  });
+
+  it('keeps crypto quantities at up to 8 decimals in display and entry controls', async () => {
+    getAccounts.mockResolvedValueOnce(makeAccounts([
+      { id: 1, name: 'Crypto', market: 'crypto', baseCurrency: 'USD' },
+    ]));
+    const cryptoSnapshot = makeSnapshot({ positions: [
+      { symbol: 'BTC', market: 'crypto', currency: 'USD', quantity: 0.12345678, avgCost: 60000, totalCost: 7407.4068, lastPrice: 65000, marketValueBase: 8024.6907, unrealizedPnlBase: 617.2839, unrealizedPnlPct: 8.33, valuationCurrency: 'USD', priceSource: 'crypto_price', priceProvider: 'okx', priceDate: '2026-03-19', priceStale: false, priceAvailable: true },
+    ] });
+    getSnapshot.mockResolvedValue(cryptoSnapshot);
+    listTrades.mockResolvedValue({
+      items: [{
+        id: 1,
+        accountId: 1,
+        symbol: 'BTC',
+        market: 'crypto',
+        currency: 'USD',
+        tradeDate: '2026-03-19',
+        side: 'buy',
+        quantity: 0.12345678,
+        price: 60000,
+        fee: 0,
+        tax: 0,
+      }],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    });
+
+    render(<PortfolioPage />);
+
+    await waitForInitialLoad();
+
+    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: '1' } });
+
+    expect(await screen.findByText('0.12345678')).toBeInTheDocument();
+    expect(screen.getByText(/数量=0.12345678/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('数量')).toHaveAttribute('step', '0.00000001');
   });
 
   it('generates portfolio analysis only from the explicit refresh button and shows full drawer', async () => {
@@ -457,14 +461,12 @@ describe('PortfolioPage FX refresh', () => {
     await waitForInitialLoad();
 
     const snapshotCallsBeforeRefresh = getSnapshot.mock.calls.length;
-    const riskCallsBeforeRefresh = getRisk.mock.calls.length;
     const tradeCallsBeforeRefresh = listTrades.mock.calls.length;
 
     fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }));
 
     expect(await screen.findByText(/在线刷新未完全成功/)).toBeInTheDocument();
     await waitFor(() => expect(getSnapshot).toHaveBeenCalledTimes(snapshotCallsBeforeRefresh + 1));
-    await waitFor(() => expect(getRisk).toHaveBeenCalledTimes(riskCallsBeforeRefresh + 1));
     expect(listTrades).toHaveBeenCalledTimes(tradeCallsBeforeRefresh);
     expect(listCashLedger).not.toHaveBeenCalled();
     expect(listCorporateActions).not.toHaveBeenCalled();
@@ -551,7 +553,6 @@ describe('PortfolioPage FX refresh', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).not.toBeDisabled());
 
     const snapshotCallsAfterSwitch = getSnapshot.mock.calls.length;
-    const riskCallsAfterSwitch = getRisk.mock.calls.length;
 
     await act(async () => {
       pendingRefresh.resolve({
@@ -566,7 +567,6 @@ describe('PortfolioPage FX refresh', () => {
     });
 
     expect(getSnapshot).toHaveBeenCalledTimes(snapshotCallsAfterSwitch);
-    expect(getRisk).toHaveBeenCalledTimes(riskCallsAfterSwitch);
     expect(screen.queryByText('汇率已刷新，共更新 1 对。')).not.toBeInTheDocument();
   });
 
@@ -595,7 +595,6 @@ describe('PortfolioPage FX refresh', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).not.toBeDisabled());
 
     const snapshotCallsAfterSwitch = getSnapshot.mock.calls.length;
-    const riskCallsAfterSwitch = getRisk.mock.calls.length;
 
     await act(async () => {
       pendingRefresh.resolve({
@@ -610,7 +609,6 @@ describe('PortfolioPage FX refresh', () => {
     });
 
     expect(getSnapshot).toHaveBeenCalledTimes(snapshotCallsAfterSwitch);
-    expect(getRisk).toHaveBeenCalledTimes(riskCallsAfterSwitch);
     expect(screen.queryByText('汇率已刷新，共更新 1 对。')).not.toBeInTheDocument();
   });
 });
