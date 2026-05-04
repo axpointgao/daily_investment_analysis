@@ -1,6 +1,5 @@
-import type React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApiError, createParsedApiError } from '../../api/error';
 import PortfolioPage from '../PortfolioPage';
 
@@ -9,6 +8,7 @@ const {
   getSnapshot,
   getRisk,
   refreshFx,
+  analyzePortfolio,
   listImportBrokers,
   listTrades,
   listCashLedger,
@@ -27,6 +27,7 @@ const {
   getSnapshot: vi.fn(),
   getRisk: vi.fn(),
   refreshFx: vi.fn(),
+  analyzePortfolio: vi.fn(),
   listImportBrokers: vi.fn(),
   listTrades: vi.fn(),
   listCashLedger: vi.fn(),
@@ -48,6 +49,7 @@ vi.mock('../../api/portfolio', () => ({
     getSnapshot,
     getRisk,
     refreshFx,
+    analyzePortfolio,
     listImportBrokers,
     listTrades,
     listCashLedger,
@@ -62,15 +64,6 @@ vi.mock('../../api/portfolio', () => ({
     commitCsvImport,
     createAccount,
   },
-}));
-
-vi.mock('recharts', () => ({
-  ResponsiveContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  PieChart: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  Pie: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  Tooltip: () => null,
-  Legend: () => null,
-  Cell: () => null,
 }));
 
 type AccountItem = {
@@ -195,12 +188,39 @@ async function waitForInitialLoad() {
 }
 
 describe('PortfolioPage FX refresh', () => {
+  const originalFetch = globalThis.fetch;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('stocks.index.json')) {
+        return new Response(JSON.stringify([
+          ['00700.HK', '00700', '腾讯控股', '', '', [], 'HK', 'stock', true, 100],
+        ]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('funds.index.json')) {
+        return new Response(JSON.stringify([
+          { fundCode: '510050', fundName: '上证50ETF华夏', active: true, popularity: 100 },
+          { fundCode: '000290', fundName: '鹏华全球高收益债(QDII)', active: true, popularity: 100 },
+          { fundCode: '006285', fundName: '鹏华全球高收益债(QDII)', active: true, popularity: 100 },
+        ]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response('{}', { status: 404 });
+    }) as typeof fetch;
 
     getAccounts.mockResolvedValue(makeAccounts());
     getSnapshot.mockImplementation(async ({ accountId }: { accountId?: number } = {}) => makeSnapshot({ accountId, fxStale: true }));
     getRisk.mockResolvedValue(makeRisk());
+    analyzePortfolio.mockResolvedValue({
+      asOf: '2026-03-19',
+      snapshotSignature: 'v1:test',
+      generatedAt: '2026-03-19T10:00:00',
+      summaryPoints: ['权益资产占比较高', '单一资产集中度可关注', '组合波动主要来自股票'],
+      fullMarkdown: '## 资产配置结构\n权益资产占比较高。',
+      modelUsed: 'test-model',
+    });
     refreshFx.mockResolvedValue({
       asOf: '2026-03-19',
       accountCount: 1,
@@ -234,6 +254,10 @@ describe('PortfolioPage FX refresh', () => {
       errors: [],
     });
     createAccount.mockResolvedValue({ id: 1 });
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
   });
 
   it('renders stale FX status with a manual refresh button', async () => {
@@ -322,7 +346,7 @@ describe('PortfolioPage FX refresh', () => {
 
   it('renders backend-provided position valuation fields and stale missing-price hint', async () => {
     getSnapshot.mockResolvedValueOnce(makeSnapshot({ fxStale: true, positions: [
-      { symbol: 'HK00700', market: 'hk', currency: 'HKD', quantity: 10, avgCost: 400, totalCost: 4000, lastPrice: 420, marketValueBase: 4200, unrealizedPnlBase: 200, unrealizedPnlPct: 5, valuationCurrency: 'HKD', priceSource: 'history_close', priceDate: '2026-03-18', priceStale: true, priceAvailable: true },
+      { symbol: 'HK00700', displayName: '腾讯控股', market: 'hk', currency: 'HKD', quantity: 10, avgCost: 400, totalCost: 4000, lastPrice: 420, marketValueBase: 4200, unrealizedPnlBase: 200, unrealizedPnlPct: 5, valuationCurrency: 'HKD', priceSource: 'history_close', priceDate: '2026-03-18', priceStale: true, priceAvailable: true },
       { symbol: 'AAPL', market: 'us', currency: 'USD', quantity: 5, avgCost: 100, totalCost: 500, lastPrice: 0, marketValueBase: 0, unrealizedPnlBase: 0, unrealizedPnlPct: null, valuationCurrency: 'USD', priceSource: 'missing', priceDate: null, priceStale: true, priceAvailable: false },
     ] }));
 
@@ -331,6 +355,8 @@ describe('PortfolioPage FX refresh', () => {
     await waitForInitialLoad();
 
     expect(await screen.findByText('HK00700')).toBeInTheDocument();
+    expect(screen.getByText('港股')).toBeInTheDocument();
+    expect(screen.getByText('腾讯控股')).toBeInTheDocument();
     expect(screen.getByText('420.0000')).toBeInTheDocument();
     expect(screen.getByText('HKD 4,200.00')).toBeInTheDocument();
     expect(screen.getByText('+5.00%')).toBeInTheDocument();
@@ -347,6 +373,32 @@ describe('PortfolioPage FX refresh', () => {
     const aaplRowCells = within(aaplRow as HTMLTableRowElement).getAllByRole('cell');
     expect(hkRowCells.at(-1)).toHaveClass('text-success');
     expect(aaplRowCells.at(-1)).toHaveClass('text-secondary');
+  });
+
+  it('generates portfolio analysis only from the explicit refresh button and shows full drawer', async () => {
+    getSnapshot.mockResolvedValueOnce(makeSnapshot({ fxStale: false, positions: [
+      { symbol: '510050', market: 'cn', currency: 'CNY', quantity: 100, avgCost: 2.5, totalCost: 250, lastPrice: 2.8, marketValueBase: 280, unrealizedPnlBase: 30, unrealizedPnlPct: 12, valuationCurrency: 'CNY', priceSource: 'history_close', priceDate: '2026-03-18', priceStale: false, priceAvailable: true },
+      { symbol: '000290', market: 'fund', currency: 'CNY', quantity: 100, avgCost: 1.1, totalCost: 110, lastPrice: 1.2, marketValueBase: 120, unrealizedPnlBase: 10, unrealizedPnlPct: 9.09, valuationCurrency: 'CNY', priceSource: 'fund_nav', priceDate: '2026-03-18', priceStale: false, priceAvailable: true },
+    ] }));
+
+    render(<PortfolioPage />);
+
+    await waitForInitialLoad();
+
+    expect(screen.getByText('资产分析')).toBeInTheDocument();
+    expect(await screen.findByText('上证50ETF华夏')).toBeInTheDocument();
+    expect(screen.getAllByText('ETF').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('鹏华全球高收益债(QDII)')).toBeInTheDocument();
+    expect(screen.getByText('场外基金')).toBeInTheDocument();
+    expect(analyzePortfolio).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '重新分析' }));
+
+    expect(await screen.findByText('权益资产占比较高')).toBeInTheDocument();
+    expect(analyzePortfolio).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: '完整分析' }));
+    expect(await screen.findByText('资产配置结构')).toBeInTheDocument();
   });
 
   it('prefers disabled feedback over empty-pair feedback when refresh is disabled', async () => {

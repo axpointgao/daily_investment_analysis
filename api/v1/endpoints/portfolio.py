@@ -15,6 +15,8 @@ from api.v1.schemas.portfolio import (
     PortfolioAccountItem,
     PortfolioAccountListResponse,
     PortfolioAccountUpdateRequest,
+    PortfolioAnalysisRequest,
+    PortfolioAnalysisResponse,
     PortfolioBankLedgerCreateRequest,
     PortfolioBankLedgerListResponse,
     PortfolioCashLedgerListResponse,
@@ -35,6 +37,7 @@ from api.v1.schemas.portfolio import (
     PortfolioTradeListResponse,
     PortfolioTradeCreateRequest,
 )
+from src.services.portfolio_analysis_service import PortfolioAnalysisError, PortfolioAnalysisService
 from src.services.portfolio_import_service import PortfolioImportService
 from src.services.portfolio_risk_service import PortfolioRiskService
 from src.services.portfolio_service import (
@@ -567,6 +570,30 @@ def get_snapshot(
         raise _bad_request(exc)
     except Exception as exc:
         raise _internal_error("Get snapshot failed", exc)
+
+
+@router.post(
+    "/analysis",
+    response_model=PortfolioAnalysisResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Generate LLM portfolio asset analysis",
+)
+def analyze_portfolio(request: PortfolioAnalysisRequest) -> PortfolioAnalysisResponse:
+    service = PortfolioAnalysisService()
+    try:
+        data = service.analyze(
+            account_id=request.account_id,
+            as_of=request.as_of,
+            cost_method=request.cost_method,
+            snapshot_signature=request.snapshot_signature,
+        )
+        return PortfolioAnalysisResponse(**data)
+    except PortfolioAnalysisError as exc:
+        raise _bad_request(exc)
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Generate portfolio analysis failed", exc)
 
 
 @router.post(

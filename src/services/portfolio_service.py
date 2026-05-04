@@ -9,10 +9,13 @@ import requests
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from urllib.parse import urlencode
 
-from data_provider.base import canonical_stock_code, normalize_stock_code
+from data_provider.base import DataFetcherManager, canonical_stock_code, normalize_stock_code
+from src.data.stock_index_loader import get_index_stock_name
+from src.data.stock_mapping import STOCK_NAME_MAP, is_meaningful_stock_name
 from src.config import get_config
 from src.repositories.portfolio_repo import (
     DuplicateTradeDedupHashError,
@@ -949,6 +952,7 @@ class PortfolioService:
                     key,
                     {
                         "symbol": f"BANK:{len(bank_assets) + 1}",
+                        "display_name": key[1] or key[0] or None,
                         "market": "bank",
                         "currency": currency,
                         "bank_name": key[0],
@@ -1270,6 +1274,7 @@ class PortfolioService:
             position_rows.append(
                 {
                     "symbol": symbol,
+                    "display_name": self._resolve_position_display_name(symbol=symbol, market=market),
                     "market": market,
                     "currency": currency,
                     "quantity": round(qty, 8),
@@ -1292,6 +1297,36 @@ class PortfolioService:
             total_cost_base += cost_base
 
         return position_rows, lot_rows, market_value_base, total_cost_base, fx_stale
+
+    @staticmethod
+    @lru_cache(maxsize=1024)
+    def _resolve_position_display_name(*, symbol: str, market: str) -> Optional[str]:
+        if market == "bank":
+            return None
+        raw_symbol = str(symbol or "").strip()
+        if not raw_symbol:
+            return None
+
+        if market == "crypto":
+            return raw_symbol.upper()
+
+        normalized = normalize_stock_code(raw_symbol)
+        static_name = STOCK_NAME_MAP.get(normalized)
+        if is_meaningful_stock_name(static_name, normalized):
+            return static_name
+
+        index_name = get_index_stock_name(normalized)
+        if is_meaningful_stock_name(index_name, normalized):
+            return index_name
+
+        try:
+            name = DataFetcherManager().get_stock_name(raw_symbol, allow_realtime=False)
+        except Exception as exc:
+            logger.debug("Resolve portfolio position display name failed for %s: %s", raw_symbol, exc)
+            return None
+        if is_meaningful_stock_name(name, normalized):
+            return str(name)
+        return None
 
     def _resolve_position_price(
         self,
@@ -1526,8 +1561,6 @@ class PortfolioService:
     @staticmethod
     def _fetch_realtime_position_price(symbol: str) -> Tuple[Optional[float], Optional[str]]:
         try:
-            from data_provider.base import DataFetcherManager
-
             quote = DataFetcherManager().get_realtime_quote(symbol, log_final_failure=False)
         except Exception as exc:
             logger.warning("Failed to fetch realtime portfolio price for %s: %s", symbol, exc)

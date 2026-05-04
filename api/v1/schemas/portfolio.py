@@ -209,6 +209,7 @@ class PortfolioCorporateActionListResponse(BaseModel):
 
 class PortfolioPositionItem(BaseModel):
     symbol: str
+    display_name: Optional[str] = None
     market: str
     currency: str
     quantity: float
@@ -331,3 +332,19 @@ class PortfolioRiskResponse(BaseModel):
     sector_concentration: Dict[str, Any] = Field(default_factory=dict)
     drawdown: Dict[str, Any] = Field(default_factory=dict)
     stop_loss: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PortfolioAnalysisRequest(BaseModel):
+    account_id: Optional[int] = None
+    as_of: Optional[date] = None
+    cost_method: Literal["fifo", "avg"] = "fifo"
+    snapshot_signature: str = Field(..., min_length=1, max_length=128)
+
+
+class PortfolioAnalysisResponse(BaseModel):
+    as_of: str
+    snapshot_signature: str
+    generated_at: str
+    summary_points: List[str] = Field(default_factory=list)
+    full_markdown: str
+    model_used: Optional[str] = None

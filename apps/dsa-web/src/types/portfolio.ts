@@ -31,6 +31,7 @@ export interface PortfolioAccountCreateRequest {
 
 export interface PortfolioPositionItem {
   symbol: string;
+  displayName?: string | null;
   market: string;
   currency: string;
   quantity: number;
@@ -153,6 +154,22 @@ export interface PortfolioRiskResponse {
     nearCount: number;
     items: PortfolioStopLossItem[];
   };
+}
+
+export interface PortfolioAnalysisRequest {
+  accountId?: number;
+  asOf?: string;
+  costMethod: PortfolioCostMethod;
+  snapshotSignature: string;
+}
+
+export interface PortfolioAnalysisResponse {
+  asOf: string;
+  snapshotSignature: string;
+  generatedAt: string;
+  summaryPoints: string[];
+  fullMarkdown: string;
+  modelUsed?: string | null;
 }
 
 export interface PortfolioTradeCreateRequest {

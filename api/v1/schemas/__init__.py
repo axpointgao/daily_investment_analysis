@@ -90,6 +90,8 @@ from api.v1.schemas.portfolio import (
     PortfolioImportBrokerListResponse,
     PortfolioFxRefreshResponse,
     PortfolioRiskResponse,
+    PortfolioAnalysisRequest,
+    PortfolioAnalysisResponse,
 )
 
 __all__ = [
@@ -169,4 +171,6 @@ __all__ = [
     "PortfolioImportBrokerListResponse",
     "PortfolioFxRefreshResponse",
     "PortfolioRiskResponse",
+    "PortfolioAnalysisRequest",
+    "PortfolioAnalysisResponse",
 ]

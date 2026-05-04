@@ -1,13 +1,17 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pie, PieChart, ResponsiveContainer, Tooltip, Legend, Cell } from 'recharts';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { portfolioApi } from '../api/portfolio';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
-import { ApiErrorAlert, Card, Badge, ConfirmDialog, EmptyState, InlineAlert } from '../components/common';
+import { ApiErrorAlert, Card, Badge, ConfirmDialog, Drawer, EmptyState, InlineAlert } from '../components/common';
+import { useFundIndex } from '../hooks/useFundIndex';
+import { useStockIndex } from '../hooks/useStockIndex';
 import { toDateInputValue } from '../utils/format';
 import type {
   PortfolioAccountItem,
+  PortfolioAnalysisResponse,
   PortfolioBankAssetKind,
   PortfolioBankLedgerListItem,
   PortfolioCashDirection,
@@ -27,8 +31,8 @@ import type {
   PortfolioTradeListItem,
 } from '../types/portfolio';
 
-const PIE_COLORS = ['#00d4ff', '#00ff88', '#ffaa00', '#ff7a45', '#7f8cff', '#ff4466'];
 const DEFAULT_PAGE_SIZE = 20;
+const PORTFOLIO_ANALYSIS_CACHE_PREFIX = 'dsa_portfolio_analysis';
 const FALLBACK_BROKERS: PortfolioImportBrokerItem[] = [
   { broker: 'huatai', aliases: [], displayName: '华泰' },
   { broker: 'citic', aliases: ['zhongxin'], displayName: '中信' },
@@ -61,6 +65,12 @@ type FxRefreshContext = {
 };
 
 type PortfolioAlertVariant = 'info' | 'success' | 'warning' | 'danger';
+
+type AssetNameMaps = {
+  stockByCode: Map<string, string>;
+  stockAssetTypeByCode: Map<string, string>;
+  fundByCode: Map<string, string>;
+};
 
 const PORTFOLIO_INPUT_CLASS =
   'input-surface input-focus-glow h-11 w-full rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
@@ -176,6 +186,128 @@ function getPositionDisplayName(row: PortfolioPositionItem): string {
   return row.symbol;
 }
 
+function getCodeCandidates(symbol: string): string[] {
+  const raw = String(symbol || '').trim();
+  if (!raw) return [];
+  const upper = raw.toUpperCase();
+  const compact = upper.replace(/\s+/g, '');
+  const noSuffix = compact.replace(/\.(SH|SZ|BJ|HK|US)$/i, '');
+  const noPrefix = compact.replace(/^(SH|SZ|BJ)/i, '');
+  const hkDigits = compact.startsWith('HK') ? compact.slice(2) : noSuffix;
+  const candidates = [
+    compact,
+    noSuffix,
+    noPrefix,
+    hkDigits,
+    hkDigits ? `HK${hkDigits.padStart(5, '0')}` : '',
+    hkDigits ? `${hkDigits.padStart(5, '0')}.HK` : '',
+    noSuffix ? `${noSuffix}.SH` : '',
+    noSuffix ? `${noSuffix}.SZ` : '',
+    noSuffix ? `${noSuffix}.BJ` : '',
+  ];
+  return Array.from(new Set(candidates.filter(Boolean)));
+}
+
+function getPositionSecondaryName(row: PortfolioPositionItem, assetNameMaps: AssetNameMaps): string {
+  if (row.market === 'bank') {
+    const hints = [row.bankName, row.productName].filter(Boolean);
+    return hints.join(' · ');
+  }
+  if (row.displayName) return row.displayName;
+  const candidates = getCodeCandidates(row.symbol);
+  if (row.market === 'fund') {
+    for (const code of candidates) {
+      const name = assetNameMaps.fundByCode.get(code);
+      if (name) return name;
+    }
+    return '';
+  }
+  if (row.market === 'cn' || row.market === 'hk' || row.market === 'us') {
+    for (const code of candidates) {
+      const name = assetNameMaps.stockByCode.get(code);
+      if (name) return name;
+    }
+    for (const code of candidates) {
+      const name = assetNameMaps.fundByCode.get(code);
+      if (name) return name;
+    }
+  }
+  return '';
+}
+
+function isExchangeTradedFundName(name: string | undefined): boolean {
+  return Boolean(name && /(ETF|LOF|REIT|封闭式|场内)/i.test(name));
+}
+
+function getPositionAssetType(row: PortfolioPositionItem, assetNameMaps: AssetNameMaps): string {
+  if (row.market === 'bank') return row.maturityDate ? '定期/理财' : '活期/现金';
+  if (row.market === 'fund') return formatMarketLabel(row.market);
+  const candidates = getCodeCandidates(row.symbol);
+  for (const code of candidates) {
+    const fundName = assetNameMaps.fundByCode.get(code);
+    if (assetNameMaps.stockAssetTypeByCode.get(code) === 'etf' || isExchangeTradedFundName(fundName)) {
+      return 'ETF';
+    }
+  }
+  return formatMarketLabel(row.market);
+}
+
+function buildSnapshotSignature(snapshot: PortfolioSnapshotResponse | null, selectedAccount: AccountOption, costMethod: PortfolioCostMethod): string {
+  if (!snapshot) return '';
+  const payload = {
+    selectedAccount,
+    costMethod,
+    asOf: snapshot.asOf,
+    currency: snapshot.currency,
+    totalCash: snapshot.totalCash,
+    totalMarketValue: snapshot.totalMarketValue,
+    totalEquity: snapshot.totalEquity,
+    fxStale: snapshot.fxStale,
+    fxMissing: snapshot.fxMissing,
+    positions: (snapshot.accounts || []).flatMap((account) =>
+      (account.positions || []).map((position) => ({
+        accountId: account.accountId,
+        symbol: position.symbol,
+        market: position.market,
+        currency: position.currency,
+        quantity: position.quantity,
+        lastPrice: position.lastPrice,
+        marketValueBase: position.marketValueBase,
+        priceDate: position.priceDate,
+        priceSource: position.priceSource,
+      })),
+    ),
+  };
+  const text = JSON.stringify(payload);
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `v1:${(hash >>> 0).toString(16)}`;
+}
+
+function loadCachedPortfolioAnalysis(cacheKey: string, signature: string): PortfolioAnalysisResponse | null {
+  if (!cacheKey || !signature) return null;
+  try {
+    const raw = window.localStorage.getItem(cacheKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PortfolioAnalysisResponse;
+    return parsed.snapshotSignature === signature ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedPortfolioAnalysis(cacheKey: string, value: PortfolioAnalysisResponse): void {
+  if (!cacheKey) return;
+  try {
+    window.localStorage.setItem(cacheKey, JSON.stringify(value));
+  } catch {
+    // Ignore storage quota/private-mode failures; analysis still remains in memory.
+  }
+}
+
 function formatBrokerLabel(value: string, displayName?: string): string {
   if (displayName && displayName.trim()) return `${value}（${displayName.trim()}）`;
   if (value === 'huatai') return 'huatai（华泰）';
@@ -241,6 +373,8 @@ const PortfolioPage: React.FC = () => {
     document.title = '持仓分析 - DSA';
   }, []);
 
+  const stockIndex = useStockIndex();
+  const fundIndex = useFundIndex();
   const [accounts, setAccounts] = useState<PortfolioAccountItem[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<AccountOption>('all');
   const [showCreateAccount, setShowCreateAccount] = useState(false);
@@ -255,8 +389,12 @@ const PortfolioPage: React.FC = () => {
   });
   const [costMethod, setCostMethod] = useState<PortfolioCostMethod>('fifo');
   const [snapshot, setSnapshot] = useState<PortfolioSnapshotResponse | null>(null);
-  const [risk, setRisk] = useState<PortfolioRiskResponse | null>(null);
+  const [, setRisk] = useState<PortfolioRiskResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [portfolioAnalysis, setPortfolioAnalysis] = useState<PortfolioAnalysisResponse | null>(null);
+  const [portfolioAnalysisLoading, setPortfolioAnalysisLoading] = useState(false);
+  const [portfolioAnalysisError, setPortfolioAnalysisError] = useState<ParsedApiError | null>(null);
+  const [portfolioAnalysisDrawerOpen, setPortfolioAnalysisDrawerOpen] = useState(false);
   const [fxRefreshing, setFxRefreshing] = useState(false);
   const [fxRefreshFeedback, setFxRefreshFeedback] = useState<FxRefreshFeedback | null>(null);
   const [error, setError] = useState<ParsedApiError | null>(null);
@@ -349,6 +487,34 @@ const PortfolioPage: React.FC = () => {
   const isCryptoAccount = selectedMarket === 'crypto';
   const isBankAccount = selectedMarket === 'bank';
   const missingFxPairsText = formatMissingFxPairs(snapshot);
+  const snapshotSignature = useMemo(
+    () => buildSnapshotSignature(snapshot, selectedAccount, costMethod),
+    [costMethod, selectedAccount, snapshot],
+  );
+  const portfolioAnalysisCacheKey = snapshotSignature
+    ? `${PORTFOLIO_ANALYSIS_CACHE_PREFIX}:${selectedAccount === 'all' ? 'all' : selectedAccount}:${costMethod}:${snapshotSignature}`
+    : '';
+  const assetNameMaps = useMemo<AssetNameMaps>(() => {
+    const stockByCode = new Map<string, string>();
+    const stockAssetTypeByCode = new Map<string, string>();
+    for (const item of stockIndex.index) {
+      const canonicalCode = item.canonicalCode.toUpperCase();
+      const displayCode = item.displayCode.toUpperCase();
+      if (item.nameZh) {
+        stockByCode.set(canonicalCode, item.nameZh);
+        stockByCode.set(displayCode, item.nameZh);
+      }
+      stockAssetTypeByCode.set(canonicalCode, item.assetType);
+      stockAssetTypeByCode.set(displayCode, item.assetType);
+    }
+    const fundByCode = new Map<string, string>();
+    for (const item of fundIndex.index) {
+      if (item.fundCode && item.fundName) {
+        fundByCode.set(item.fundCode.toUpperCase(), item.fundName);
+      }
+    }
+    return { stockByCode, stockAssetTypeByCode, fundByCode };
+  }, [fundIndex.index, stockIndex.index]);
   const totalEventPages = Math.max(1, Math.ceil(eventTotal / DEFAULT_PAGE_SIZE));
   const currentEventCount = eventType === 'trade'
     ? tradeEvents.length
@@ -594,6 +760,11 @@ const PortfolioPage: React.FC = () => {
     }
   }, [writeBlocked]);
 
+  useEffect(() => {
+    setPortfolioAnalysisError(null);
+    setPortfolioAnalysis(loadCachedPortfolioAnalysis(portfolioAnalysisCacheKey, snapshotSignature));
+  }, [portfolioAnalysisCacheKey, snapshotSignature]);
+
   const positionRows: FlatPosition[] = useMemo(() => {
     if (!snapshot) return [];
     const rows: FlatPosition[] = [];
@@ -610,32 +781,6 @@ const PortfolioPage: React.FC = () => {
     return rows;
   }, [snapshot]);
 
-  const sectorPieData = useMemo(() => {
-    const sectors = risk?.sectorConcentration?.topSectors || [];
-    return sectors
-      .slice(0, 6)
-      .map((item) => ({
-        name: item.sector,
-        value: Number(item.weightPct || 0),
-      }))
-      .filter((item) => item.value > 0);
-  }, [risk]);
-
-  const positionFallbackPieData = useMemo(() => {
-    if (!risk?.concentration?.topPositions?.length) {
-      return [];
-    }
-    return risk.concentration.topPositions
-      .slice(0, 6)
-      .map((item) => ({
-        name: item.symbol,
-        value: Number(item.weightPct || 0),
-      }))
-      .filter((item) => item.value > 0);
-  }, [risk]);
-
-  const concentrationPieData = sectorPieData.length > 0 ? sectorPieData : positionFallbackPieData;
-  const concentrationMode = sectorPieData.length > 0 ? 'sector' : 'position';
   const assetBreakdownRows = Object.entries(snapshot?.assetBreakdown || {})
     .filter(([, value]) => Math.abs(Number(value || 0)) > 0.000001)
     .map(([key, value]) => ({ key, value: Number(value || 0) }));
@@ -995,6 +1140,28 @@ const PortfolioPage: React.FC = () => {
     }
   };
 
+  const handleAnalyzePortfolio = async () => {
+    if (!snapshot || !snapshotSignature || portfolioAnalysisLoading) {
+      return;
+    }
+    try {
+      setPortfolioAnalysisLoading(true);
+      setPortfolioAnalysisError(null);
+      const response = await portfolioApi.analyzePortfolio({
+        accountId: queryAccountId,
+        asOf: snapshot.asOf,
+        costMethod,
+        snapshotSignature,
+      });
+      setPortfolioAnalysis(response);
+      saveCachedPortfolioAnalysis(portfolioAnalysisCacheKey, response);
+    } catch (err) {
+      setPortfolioAnalysisError(getParsedApiError(err));
+    } finally {
+      setPortfolioAnalysisLoading(false);
+    }
+  };
+
   return (
     <div className="portfolio-page min-h-screen space-y-4 p-4 md:p-6">
       <section className="space-y-3">
@@ -1214,8 +1381,8 @@ const PortfolioPage: React.FC = () => {
         </Card>
       </section>
 
-      <section className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-        <Card className="xl:col-span-2" padding="md">
+      <section className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_340px] gap-3">
+        <Card padding="md">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-foreground">持仓明细</h2>
             <span className="text-xs text-secondary">共 {positionRows.length} 项</span>
@@ -1232,6 +1399,7 @@ const PortfolioPage: React.FC = () => {
                 <thead className="text-xs text-secondary border-b border-white/10">
                   <tr>
                     <th className="text-left py-2 pr-2">账户</th>
+                    <th className="text-left py-2 pr-2">类型</th>
                     <th className="text-left py-2 pr-2">资产</th>
                     <th className="text-right py-2 pr-2">数量</th>
                     <th className="text-right py-2 pr-2">均价</th>
@@ -1245,11 +1413,22 @@ const PortfolioPage: React.FC = () => {
                   {positionRows.map((row) => (
                     <tr key={`${row.accountId}-${row.symbol}-${row.market}-${row.productName || ''}`} className="border-b border-white/5">
                       <td className="py-2 pr-2 text-secondary">{row.accountName}</td>
+                      <td className="py-2 pr-2">
+                        <span className="inline-flex rounded-md border border-white/10 bg-white/[0.03] px-2 py-1 text-xs font-medium text-foreground">
+                          {getPositionAssetType(row, assetNameMaps)}
+                        </span>
+                      </td>
                       <td className="py-2 pr-2 text-foreground">
                         <div className={row.market === 'bank' ? '' : 'font-mono'}>{getPositionDisplayName(row)}</div>
-                        <div className="text-[11px] text-secondary">
-                          {formatMarketLabel(row.market)}{row.maturityDate ? ` · 到期 ${row.maturityDate}` : ''}
-                        </div>
+                        {(() => {
+                          const secondaryName = getPositionSecondaryName(row, assetNameMaps);
+                          if (!secondaryName && !row.maturityDate) return null;
+                          return (
+                          <div className="text-[11px] text-secondary">
+                            {secondaryName}{row.maturityDate ? `${secondaryName ? ' · ' : ''}到期 ${row.maturityDate}` : ''}
+                          </div>
+                          );
+                        })()}
                       </td>
                       <td className="py-2 pr-2 text-right">{row.market === 'bank' ? '-' : row.quantity.toFixed(4)}</td>
                       <td className="py-2 pr-2 text-right">{row.market === 'bank' ? '-' : row.avgCost.toFixed(4)}</td>
@@ -1290,35 +1469,62 @@ const PortfolioPage: React.FC = () => {
           )}
         </Card>
 
-        <Card padding="md">
-          <h2 className="text-sm font-semibold text-foreground mb-3">
-            {concentrationMode === 'sector' ? '行业集中度分布' : '持仓集中度'}
-          </h2>
-          {concentrationPieData.length > 0 ? (
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={concentrationPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90}>
-                    {concentrationPieData.map((entry, index) => (
-                      <Cell key={`cell-${entry.name}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value) => `${Number(value).toFixed(2)}%`} />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
+        <Card padding="md" className="flex flex-col">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">资产分析</h2>
+              <p className="mt-1 text-xs text-secondary">基于当前持仓快照</p>
             </div>
-          ) : (
-            <EmptyState
-              title="暂无集中度数据"
-              description="风险模块完成计算后，这里会展示行业或持仓维度的集中度分布。"
-              className="border-none bg-transparent px-4 py-10 shadow-none"
-            />
-          )}
-          <div className="mt-3 text-xs text-secondary space-y-1">
-            <div>展示口径: {concentrationMode === 'sector' ? '行业维度' : '持仓维度（降级显示）'}</div>
-            <div>集中度告警: {risk?.sectorConcentration?.alert || risk?.concentration?.alert ? '是' : '否'}</div>
-            <div>Top1 权重: {formatPct(risk?.sectorConcentration?.topWeightPct ?? risk?.concentration?.topWeightPct)}</div>
+            {portfolioAnalysis?.generatedAt ? (
+              <span className="shrink-0 text-[11px] text-muted-text">
+                {portfolioAnalysis.generatedAt.replace('T', ' ')}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="mt-4 flex-1">
+            {positionRows.length === 0 ? (
+              <EmptyState
+                title="暂无可分析持仓"
+                description="录入持仓后可生成组合结构、风险暴露与收益风险画像。"
+                className="border-none bg-transparent px-4 py-8 shadow-none"
+              />
+            ) : portfolioAnalysis ? (
+              <div className="space-y-3">
+                {portfolioAnalysis.summaryPoints.slice(0, 3).map((point, index) => (
+                  <div key={`${point}-${index}`} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                    <div className="text-[11px] font-medium text-secondary">0{index + 1}</div>
+                    <p className="mt-1 text-sm leading-6 text-foreground">{point}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-white/12 bg-white/[0.02] px-4 py-8 text-sm leading-6 text-secondary">
+                点击“重新分析”生成组合要点；结果会按当前持仓快照缓存在本地。
+              </div>
+            )}
+          </div>
+
+          {portfolioAnalysisError ? (
+            <ApiErrorAlert error={portfolioAnalysisError} className="mt-3" />
+          ) : null}
+
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              className="btn-secondary !py-2 text-sm"
+              disabled={positionRows.length === 0 || portfolioAnalysisLoading || !snapshotSignature}
+              onClick={() => void handleAnalyzePortfolio()}
+            >
+              {portfolioAnalysisLoading ? '分析中...' : '重新分析'}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary !py-2 text-sm"
+              onClick={() => setPortfolioAnalysisDrawerOpen(true)}
+            >
+              完整分析
+            </button>
           </div>
         </Card>
       </section>
@@ -1783,6 +1989,55 @@ const PortfolioPage: React.FC = () => {
           }
         }}
       />
+      <Drawer
+        isOpen={portfolioAnalysisDrawerOpen}
+        onClose={() => setPortfolioAnalysisDrawerOpen(false)}
+        title="资产完整分析"
+        width="max-w-4xl"
+        backdropClassName="bg-background/56 backdrop-blur-[2px]"
+      >
+        <div className="space-y-4">
+          <div className="flex flex-col gap-3 border-b border-white/10 pb-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-foreground">资产完整分析</h2>
+              <p className="mt-1 text-xs text-secondary">
+                {portfolioAnalysis
+                  ? `${portfolioAnalysis.asOf} · ${portfolioAnalysis.modelUsed || 'LLM'}`
+                  : '尚未生成当前快照的资产分析'}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn-secondary !px-4 !py-2 text-sm"
+              disabled={positionRows.length === 0 || portfolioAnalysisLoading || !snapshotSignature}
+              onClick={() => void handleAnalyzePortfolio()}
+            >
+              {portfolioAnalysisLoading ? '分析中...' : '重新分析'}
+            </button>
+          </div>
+
+          {portfolioAnalysis ? (
+            <div
+              className="home-markdown-prose prose prose-invert prose-sm max-w-none
+                prose-headings:text-foreground prose-headings:font-semibold prose-headings:mt-4 prose-headings:mb-2
+                prose-h2:text-lg prose-h3:text-base
+                prose-p:leading-relaxed prose-p:mb-3 prose-p:last:mb-0
+                prose-strong:text-foreground prose-strong:font-semibold
+                prose-ul:my-2 prose-ol:my-2 prose-li:my-1
+                prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none
+                prose-table:border-collapse prose-hr:my-4"
+            >
+              <Markdown remarkPlugins={[remarkGfm]}>{portfolioAnalysis.fullMarkdown}</Markdown>
+            </div>
+          ) : (
+            <EmptyState
+              title="尚未生成资产分析"
+              description="点击重新分析后，这里会展示完整的组合结构、风险暴露与收益风险画像。"
+              className="border-none bg-transparent px-4 py-10 shadow-none"
+            />
+          )}
+        </div>
+      </Drawer>
     </div>
   );
 };

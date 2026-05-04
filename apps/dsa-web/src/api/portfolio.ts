@@ -4,6 +4,8 @@ import type {
   PortfolioAccountItem,
   PortfolioAccountCreateRequest,
   PortfolioAccountListResponse,
+  PortfolioAnalysisRequest,
+  PortfolioAnalysisResponse,
   PortfolioBankLedgerCreateRequest,
   PortfolioBankLedgerListResponse,
   PortfolioCashLedgerCreateRequest,
@@ -61,6 +63,8 @@ type CorporateListQuery = EventQuery & {
   symbol?: string;
   actionType?: 'cash_dividend' | 'split_adjustment';
 };
+
+const PORTFOLIO_ANALYSIS_TIMEOUT_MS = 180000;
 
 function buildSnapshotParams(query: SnapshotQuery): Record<string, string | number> {
   const params: Record<string, string | number> = {};
@@ -138,6 +142,18 @@ export const portfolioApi = {
       params: buildSnapshotParams(query),
     });
     return toCamelCase<PortfolioRiskResponse>(response.data);
+  },
+
+  async analyzePortfolio(payload: PortfolioAnalysisRequest): Promise<PortfolioAnalysisResponse> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/analysis', {
+      account_id: payload.accountId,
+      as_of: payload.asOf,
+      cost_method: payload.costMethod,
+      snapshot_signature: payload.snapshotSignature,
+    }, {
+      timeout: PORTFOLIO_ANALYSIS_TIMEOUT_MS,
+    });
+    return toCamelCase<PortfolioAnalysisResponse>(response.data);
   },
 
   async refreshFx(query: FxRefreshQuery = {}): Promise<PortfolioFxRefreshResponse> {
