@@ -34,11 +34,23 @@ except Exception:  # pragma: no cover - optional dependency path
     yf = None
 
 EPS = 1e-8
-VALID_MARKETS = {"cn", "hk", "us", "fund", "crypto", "bank"}
+VALID_MARKETS = {"cn", "hk", "us", "fund", "crypto", "bank", "advisory"}
 VALID_COST_METHODS = {"fifo", "avg"}
 VALID_SIDES = {"buy", "sell"}
 VALID_CASH_DIRECTIONS = {"in", "out"}
-VALID_BANK_ASSET_KINDS = {"demand", "term"}
+VALID_ADVISORY_DIRECTIONS = {"subscribe", "redeem"}
+VALID_BANK_ASSET_KINDS = {"demand", "deposit", "wealth"}
+LEGACY_BANK_ASSET_KIND_ALIASES = {"term": "deposit"}
+VALID_BANK_INVESTMENT_NATURES = {
+    "fixed_income",
+    "mixed",
+    "equity",
+    "commodity_derivative",
+    "cash_management",
+    "other",
+}
+VALID_BANK_RISK_LEVELS = {"R1", "R2", "R3", "R4", "R5"}
+VALID_BANK_INCOME_MODES = {"dividend", "reinvest"}
 VALID_CORPORATE_ACTIONS = {"cash_dividend", "split_adjustment"}
 PORTFOLIO_FX_REFRESH_DISABLED_REASON = "portfolio_fx_update_disabled"
 
@@ -299,15 +311,20 @@ class PortfolioService:
         bank_name: str,
         currency: Optional[str] = None,
         product_name: Optional[str] = None,
+        registration_code: Optional[str] = None,
+        linked_entry_id: Optional[int] = None,
+        quantity: Optional[float] = None,
+        start_date: Optional[date] = None,
         maturity_date: Optional[date] = None,
-        note: Optional[str] = None,
+        annual_rate: Optional[float] = None,
+        investment_nature: Optional[str] = None,
+        risk_level: Optional[str] = None,
+        income_mode: Optional[str] = None,
     ) -> Dict[str, Any]:
         account = self._require_active_account(account_id)
         if account.market != "bank":
             raise ValueError("bank ledger can only be recorded in bank accounts")
-        asset_kind_norm = (asset_kind or "").strip().lower()
-        if asset_kind_norm not in VALID_BANK_ASSET_KINDS:
-            raise ValueError("asset_kind must be demand or term")
+        asset_kind_norm = self._normalize_bank_asset_kind(asset_kind)
         direction_norm = (direction or "").strip().lower()
         if direction_norm not in VALID_CASH_DIRECTIONS:
             raise ValueError("direction must be in or out")
@@ -316,8 +333,65 @@ class PortfolioService:
         bank_name_norm = (bank_name or "").strip()
         if not bank_name_norm:
             raise ValueError("bank_name is required")
-        if asset_kind_norm == "term" and not (product_name or "").strip():
-            raise ValueError("product_name is required for term assets")
+        product_name_norm = (product_name or "").strip() or None
+        registration_code_norm = (registration_code or "").strip().upper() or None
+        investment_nature_norm = (investment_nature or "").strip().lower() or None
+        risk_level_norm = (risk_level or "").strip().upper() or None
+        income_mode_norm = (income_mode or "").strip().lower() or None
+        linked_entry = None
+        if linked_entry_id is not None:
+            linked_entry = self.repo.get_bank_ledger_by_id(int(linked_entry_id))
+            if linked_entry is None:
+                raise ValueError("linked_entry_id is invalid")
+            if int(linked_entry.account_id) != int(account_id):
+                raise ValueError("linked_entry_id does not belong to this account")
+            if self._normalize_bank_asset_kind(linked_entry.asset_kind) != asset_kind_norm:
+                raise ValueError("linked_entry_id asset kind mismatch")
+            if linked_entry.direction != "in":
+                raise ValueError("linked_entry_id must point to an open bank purchase/deposit event")
+            if linked_entry.event_date and event_date < linked_entry.event_date:
+                raise ValueError("event_date must be >= linked entry date")
+            product_name_norm = product_name_norm or (linked_entry.product_name or None)
+            registration_code_norm = registration_code_norm or (
+                linked_entry.registration_code.strip().upper() if linked_entry.registration_code else None
+            )
+            bank_name_norm = bank_name_norm or (linked_entry.bank_name or "")
+            currency = currency or linked_entry.currency
+            start_date = start_date or linked_entry.start_date
+            maturity_date = maturity_date or linked_entry.maturity_date
+            annual_rate = annual_rate if annual_rate is not None else linked_entry.annual_rate
+            investment_nature_norm = investment_nature_norm or linked_entry.investment_nature
+            risk_level_norm = risk_level_norm or linked_entry.risk_level
+            income_mode_norm = income_mode_norm or linked_entry.income_mode
+
+        if asset_kind_norm == "deposit":
+            if not product_name_norm:
+                raise ValueError("product_name is required for deposit assets")
+            if start_date is None:
+                raise ValueError("start_date is required for deposit assets")
+            if maturity_date is None:
+                raise ValueError("maturity_date is required for deposit assets")
+            if maturity_date < start_date:
+                raise ValueError("maturity_date must be >= start_date")
+            if annual_rate is None or annual_rate < 0:
+                raise ValueError("annual_rate must be >= 0 for deposit assets")
+        elif asset_kind_norm == "wealth":
+            if not product_name_norm:
+                raise ValueError("product_name is required for wealth assets")
+            if not registration_code_norm:
+                raise ValueError("registration_code is required for wealth assets")
+            if quantity is None or quantity <= 0:
+                raise ValueError("quantity must be > 0 for wealth assets")
+            if not income_mode_norm:
+                raise ValueError("income_mode is required for wealth assets")
+            if income_mode_norm not in VALID_BANK_INCOME_MODES:
+                raise ValueError("income_mode must be dividend or reinvest")
+            if investment_nature_norm and investment_nature_norm not in VALID_BANK_INVESTMENT_NATURES:
+                raise ValueError("investment_nature is invalid")
+            if risk_level_norm and risk_level_norm not in VALID_BANK_RISK_LEVELS:
+                raise ValueError("risk_level must be R1-R5")
+            if start_date and maturity_date and maturity_date < start_date:
+                raise ValueError("maturity_date must be >= start_date")
         currency_norm = self._normalize_currency(currency or account.base_currency)
         row = self.repo.add_bank_ledger(
             account_id=account_id,
@@ -327,9 +401,16 @@ class PortfolioService:
             amount=float(amount),
             currency=currency_norm,
             bank_name=bank_name_norm,
-            product_name=(product_name or "").strip() or None,
+            product_name=product_name_norm,
+            registration_code=registration_code_norm,
+            linked_entry_id=int(linked_entry_id) if linked_entry_id is not None else None,
+            quantity=float(quantity) if quantity is not None else None,
+            start_date=start_date,
             maturity_date=maturity_date,
-            note=(note or "").strip() or None,
+            annual_rate=float(annual_rate) if annual_rate is not None else None,
+            investment_nature=investment_nature_norm,
+            risk_level=risk_level_norm,
+            income_mode=income_mode_norm,
         )
         return {"id": int(row.id)}
 
@@ -420,6 +501,78 @@ class PortfolioService:
 
     def delete_bank_ledger_event(self, entry_id: int) -> bool:
         return self.repo.delete_bank_ledger(entry_id)
+
+    def record_advisory_ledger(
+        self,
+        *,
+        account_id: int,
+        event_date: date,
+        platform: str,
+        product_name: str,
+        product_code: Optional[str],
+        direction: str,
+        amount: float,
+        quantity: float,
+        currency: Optional[str] = None,
+        risk_level: Optional[str] = None,
+        investment_style: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        account = self._require_active_account(account_id)
+        if account.market != "advisory":
+            raise ValueError("advisory ledger can only be recorded in advisory accounts")
+        direction_norm = self._normalize_advisory_direction(direction)
+        if amount <= 0:
+            raise ValueError("amount must be > 0")
+        if quantity <= 0:
+            raise ValueError("quantity must be > 0")
+        nav = amount / quantity
+        if nav <= 0:
+            raise ValueError("confirmed nav must be > 0")
+        platform_norm = (platform or "").strip()
+        if not platform_norm:
+            raise ValueError("platform is required")
+        product_name_norm = (product_name or "").strip()
+        if not product_name_norm:
+            raise ValueError("product_name is required")
+        product_code_norm = (product_code or "").strip().upper() or None
+        currency_norm = self._normalize_currency(currency or account.base_currency)
+        risk_level_norm = (risk_level or "").strip() or None
+        investment_style_norm = (investment_style or "").strip() or None
+
+        if direction_norm == "redeem":
+            available = self._held_advisory_quantity(
+                account_id=account_id,
+                product_code=product_code_norm,
+                product_name=product_name_norm,
+                currency=currency_norm,
+                as_of=event_date,
+            )
+            if quantity - available > EPS:
+                raise PortfolioOversellError(
+                    symbol=product_code_norm or product_name_norm,
+                    trade_date=event_date,
+                    requested_quantity=quantity,
+                    available_quantity=available,
+                )
+
+        row = self.repo.add_advisory_ledger(
+            account_id=account_id,
+            event_date=event_date,
+            platform=platform_norm,
+            product_name=product_name_norm,
+            product_code=product_code_norm,
+            direction=direction_norm,
+            amount=float(amount),
+            quantity=float(quantity),
+            nav=float(nav),
+            currency=currency_norm,
+            risk_level=risk_level_norm,
+            investment_style=investment_style_norm,
+        )
+        return {"id": int(row.id)}
+
+    def delete_advisory_ledger_event(self, entry_id: int) -> bool:
+        return self.repo.delete_advisory_ledger(entry_id)
 
     def list_trade_events(
         self,
@@ -565,9 +718,7 @@ class PortfolioService:
             raise ValueError("date_from must be <= date_to")
         asset_kind_norm: Optional[str] = None
         if asset_kind is not None and asset_kind.strip():
-            asset_kind_norm = asset_kind.strip().lower()
-            if asset_kind_norm not in VALID_BANK_ASSET_KINDS:
-                raise ValueError("asset_kind must be demand or term")
+            asset_kind_norm = self._normalize_bank_asset_kind(asset_kind)
         rows, total = self.repo.query_bank_ledger(
             account_id=account_id,
             date_from=date_from,
@@ -578,6 +729,41 @@ class PortfolioService:
         )
         return {
             "items": [self._bank_ledger_row_to_dict(row) for row in rows],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    def list_advisory_ledger_events(
+        self,
+        *,
+        account_id: Optional[int] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        product: Optional[str] = None,
+        direction: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        if account_id is not None:
+            self._require_active_account(account_id)
+        page, page_size = self._validate_paging(page=page, page_size=page_size)
+        if date_from is not None and date_to is not None and date_from > date_to:
+            raise ValueError("date_from must be <= date_to")
+        direction_norm: Optional[str] = None
+        if direction is not None and direction.strip():
+            direction_norm = self._normalize_advisory_direction(direction)
+        rows, total = self.repo.query_advisory_ledger(
+            account_id=account_id,
+            date_from=date_from,
+            date_to=date_to,
+            product=(product or "").strip() or None,
+            direction=direction_norm,
+            page=page,
+            page_size=page_size,
+        )
+        return {
+            "items": [self._advisory_ledger_row_to_dict(row) for row in rows],
             "total": total,
             "page": page,
             "page_size": page_size,
@@ -715,6 +901,7 @@ class PortfolioService:
             "fund": 0.0,
             "crypto": 0.0,
             "bank": 0.0,
+            "advisory": 0.0,
             "cash": 0.0,
         }
         if not has_missing_fx:
@@ -726,7 +913,7 @@ class PortfolioService:
                     to_currency=aggregate_currency,
                     as_of_date=as_of_date,
                 )
-                key = account.market if account.market in {"fund", "crypto", "bank"} else "stock"
+                key = account.market if account.market in {"fund", "crypto", "bank", "advisory"} else "stock"
                 asset_breakdown[key] += float(converted_mv.amount or 0.0)
             asset_breakdown = {key: round(value, 6) for key, value in asset_breakdown.items()}
 
@@ -870,6 +1057,7 @@ class PortfolioService:
             "fund": 0.0,
             "crypto": 0.0,
             "bank": 0.0,
+            "advisory": 0.0,
             "cash": 0.0,
         }
         if not has_missing_fx:
@@ -881,7 +1069,7 @@ class PortfolioService:
                     to_currency=aggregate_currency,
                     as_of_date=as_of_date,
                 )
-                key = account.market if account.market in {"fund", "crypto", "bank"} else "stock"
+                key = account.market if account.market in {"fund", "crypto", "bank", "advisory"} else "stock"
                 asset_breakdown[key] += float(converted_mv.amount or 0.0)
             asset_breakdown = {key: round(value, 6) for key, value in asset_breakdown.items()}
 
@@ -1075,6 +1263,33 @@ class PortfolioService:
 
         return quantity_held
 
+    def _held_advisory_quantity(
+        self,
+        *,
+        account_id: int,
+        product_code: Optional[str],
+        product_name: str,
+        currency: str,
+        as_of: date,
+    ) -> float:
+        quantity_held = 0.0
+        for row in self.repo.list_advisory_ledger(account_id, as_of=as_of):
+            row_code = (row.product_code or "").strip().upper() or None
+            row_name = str(row.product_name or "").strip()
+            row_currency = self._normalize_currency(row.currency)
+            same_product = row_currency == currency and (
+                (product_code and row_code == product_code)
+                or (not product_code and not row_code and row_name == product_name)
+            )
+            if not same_product:
+                continue
+            row_quantity = float(row.quantity or 0.0)
+            if row.direction == "subscribe":
+                quantity_held += row_quantity
+            elif row.direction == "redeem":
+                quantity_held -= row_quantity
+        return max(0.0, quantity_held)
+
     def _replay_account(
         self,
         *,
@@ -1087,6 +1302,9 @@ class PortfolioService:
         cash_ledger = self.repo.list_cash_ledger(account.id, as_of=as_of_date)
         corporate_actions = self.repo.list_corporate_actions(account.id, as_of=as_of_date)
         bank_ledger = self.repo.list_bank_ledger(account.id, as_of=as_of_date) if account.market == "bank" else []
+        advisory_ledger = (
+            self.repo.list_advisory_ledger(account.id, as_of=as_of_date) if account.market == "advisory" else []
+        )
 
         events = []
         for row in cash_ledger:
@@ -1097,9 +1315,11 @@ class PortfolioService:
             events.append(("corp", row.effective_date, row.id, row))
         for row in bank_ledger:
             events.append(("bank", row.event_date, row.id, row))
+        for row in advisory_ledger:
+            events.append(("advisory", row.event_date, row.id, row))
 
         # Same-day deterministic ordering: cash -> corporate action -> trade.
-        event_priority = {"cash": 0, "bank": 0, "corp": 1, "trade": 2}
+        event_priority = {"cash": 0, "bank": 0, "advisory": 0, "corp": 1, "trade": 2}
         events.sort(key=lambda item: (item[1], event_priority[item[0]], item[2]))
 
         cash_balances: Dict[str, float] = defaultdict(float)
@@ -1110,38 +1330,35 @@ class PortfolioService:
 
         fifo_lots: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
         avg_state: Dict[Tuple[str, str, str], _AvgState] = defaultdict(_AvgState)
-        bank_assets: Dict[Tuple[str, str, str, Optional[str], Optional[date]], Dict[str, Any]] = {}
+        bank_assets: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+        advisory_assets: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
         for event_type, event_date, _, event in events:
-            if event_type == "bank":
+            if event_type == "advisory":
                 currency = self._normalize_currency(event.currency)
                 amount = float(event.amount or 0.0)
-                signed_amount = amount if event.direction == "in" else -amount
-                if event.direction not in VALID_CASH_DIRECTIONS:
-                    raise ValueError(f"Unsupported bank ledger direction: {event.direction}")
-                if event.asset_kind == "demand":
-                    cash_balances[currency] += signed_amount
-                    continue
-                if event.asset_kind != "term":
-                    raise ValueError(f"Unsupported bank asset_kind: {event.asset_kind}")
-                key = (
-                    str(event.bank_name or "").strip(),
-                    str(event.product_name or "").strip(),
-                    currency,
-                    str(event.note or "").strip() or None,
-                    event.maturity_date,
-                )
-                item = bank_assets.setdefault(
+                quantity = float(event.quantity or 0.0)
+                nav = float(event.nav or 0.0)
+                if amount <= 0 or quantity <= 0 or nav <= 0:
+                    raise ValueError(f"Invalid advisory ledger amount, quantity or nav for {event.product_name}")
+                direction = self._normalize_advisory_direction(event.direction)
+                product_code = str(event.product_code or "").strip().upper()
+                product_name = str(event.product_name or "").strip()
+                symbol = product_code or self._make_advisory_symbol(product_name)
+                key = (symbol, currency)
+                item = advisory_assets.setdefault(
                     key,
                     {
-                        "symbol": f"BANK:{len(bank_assets) + 1}",
-                        "display_name": key[1] or key[0] or None,
-                        "market": "bank",
+                        "symbol": symbol,
+                        "display_name": product_name or symbol,
+                        "market": "advisory",
                         "currency": currency,
-                        "bank_name": key[0],
-                        "product_name": key[1],
-                        "maturity_date": key[4].isoformat() if key[4] else None,
-                        "quantity": 1.0,
+                        "platform": str(event.platform or "").strip(),
+                        "product_name": product_name,
+                        "product_code": product_code or None,
+                        "risk_level": event.risk_level,
+                        "investment_style": event.investment_style,
+                        "quantity": 0.0,
                         "avg_cost": 0.0,
                         "total_cost": 0.0,
                         "last_price": 0.0,
@@ -1149,14 +1366,175 @@ class PortfolioService:
                         "unrealized_pnl_base": 0.0,
                         "unrealized_pnl_pct": None,
                         "valuation_currency": account.base_currency,
-                        "price_source": "manual_amount",
-                        "price_provider": "bank_ledger",
+                        "price_source": "advisory_confirmed_nav",
+                        "price_provider": "advisory_ledger",
                         "price_date": event_date.isoformat(),
-                        "price_stale": False,
+                        "price_stale": event_date < as_of_date,
                         "price_available": True,
                     },
                 )
-                item["last_price"] += signed_amount
+                current_qty = float(item["quantity"] or 0.0)
+                current_cost = float(item["total_cost"] or 0.0)
+                if direction == "subscribe":
+                    cash_balances[currency] -= amount
+                    item["quantity"] = current_qty + quantity
+                    item["total_cost"] = current_cost + amount
+                    item["last_price"] = nav
+                    item["price_date"] = event_date.isoformat()
+                    item["price_stale"] = event_date < as_of_date
+                    if event.risk_level:
+                        item["risk_level"] = event.risk_level
+                    if event.investment_style:
+                        item["investment_style"] = event.investment_style
+                    continue
+                cash_balances[currency] += amount
+                if quantity - current_qty > EPS:
+                    raise PortfolioOversellError(
+                        symbol=symbol,
+                        trade_date=event_date,
+                        requested_quantity=quantity,
+                        available_quantity=current_qty,
+                    )
+                avg_cost = current_cost / current_qty if current_qty > EPS else 0.0
+                cost_basis = avg_cost * quantity
+                item["quantity"] = current_qty - quantity
+                item["total_cost"] = max(0.0, current_cost - cost_basis)
+                item["last_price"] = nav
+                item["price_date"] = event_date.isoformat()
+                item["price_stale"] = event_date < as_of_date
+                realized_conversion = self._convert_amount(
+                    amount=amount - cost_basis,
+                    from_currency=currency,
+                    to_currency=account.base_currency,
+                    as_of_date=event_date,
+                )
+                if realized_conversion.amount is not None:
+                    realized_pnl_base += realized_conversion.amount
+                fx_stale = fx_stale or realized_conversion.is_stale
+                continue
+
+            if event_type == "bank":
+                currency = self._normalize_currency(event.currency)
+                amount = float(event.amount or 0.0)
+                signed_amount = amount if event.direction == "in" else -amount
+                if event.direction not in VALID_CASH_DIRECTIONS:
+                    raise ValueError(f"Unsupported bank ledger direction: {event.direction}")
+                asset_kind = self._normalize_bank_asset_kind(event.asset_kind)
+                if asset_kind == "demand":
+                    cash_balances[currency] += signed_amount
+                    continue
+                cash_balances[currency] -= signed_amount
+                if asset_kind == "deposit":
+                    lot_id = int(event.linked_entry_id or event.id)
+                    key = ("deposit", lot_id) if event.direction == "in" or event.linked_entry_id else (
+                        "deposit",
+                        str(event.bank_name or "").strip(),
+                        str(event.product_name or "").strip(),
+                        currency,
+                        event.start_date,
+                        event.maturity_date,
+                        float(event.annual_rate or 0.0),
+                    )
+                    bank_name = str(event.bank_name or "").strip()
+                    product_name = str(event.product_name or "").strip()
+                    start = event.start_date
+                    maturity = event.maturity_date
+                    annual_rate = float(event.annual_rate or 0.0)
+                    item = bank_assets.setdefault(
+                        key,
+                        {
+                            "symbol": f"BANK:D:{lot_id}",
+                            "display_name": product_name or bank_name or None,
+                            "market": "bank",
+                            "currency": currency,
+                            "bank_name": bank_name,
+                            "product_name": product_name,
+                            "linked_entry_id": lot_id,
+                            "start_date": start.isoformat() if start else None,
+                            "maturity_date": maturity.isoformat() if maturity else None,
+                            "annual_rate": annual_rate,
+                            "quantity": 1.0,
+                            "avg_cost": 0.0,
+                            "total_cost": 0.0,
+                            "last_price": 0.0,
+                            "market_value_base": 0.0,
+                            "unrealized_pnl_base": 0.0,
+                            "unrealized_pnl_pct": None,
+                            "valuation_currency": account.base_currency,
+                            "price_source": "manual_amount",
+                            "price_provider": "bank_ledger",
+                            "price_date": event_date.isoformat(),
+                            "price_stale": False,
+                            "price_available": True,
+                        },
+                    )
+                    item["last_price"] += signed_amount
+                    item["total_cost"] += signed_amount
+                    item["market_value_base"] += signed_amount
+                    if event.direction == "out" and float(item["last_price"] or 0.0) < -EPS:
+                        raise PortfolioOversellError(
+                            symbol=item["symbol"],
+                            trade_date=event_date,
+                            requested_quantity=amount,
+                            available_quantity=amount + float(item["last_price"] or 0.0),
+                        )
+                    continue
+                if asset_kind == "wealth":
+                    registration_code = str(event.registration_code or "").strip().upper()
+                    quantity = float(event.quantity or 0.0)
+                    signed_quantity = quantity if event.direction == "in" else -quantity
+                    key = ("wealth", registration_code, currency)
+                    item = bank_assets.setdefault(
+                        key,
+                        {
+                            "symbol": registration_code,
+                            "display_name": str(event.product_name or "").strip() or registration_code,
+                            "market": "bank",
+                            "currency": currency,
+                            "bank_name": str(event.bank_name or "").strip(),
+                            "product_name": str(event.product_name or "").strip() or None,
+                            "registration_code": registration_code,
+                            "linked_entry_id": int(event.linked_entry_id or event.id),
+                            "start_date": event.start_date.isoformat() if event.start_date else None,
+                            "maturity_date": event.maturity_date.isoformat() if event.maturity_date else None,
+                            "investment_nature": event.investment_nature,
+                            "risk_level": event.risk_level,
+                            "income_mode": event.income_mode,
+                            "quantity": 0.0,
+                            "avg_cost": 0.0,
+                            "total_cost": 0.0,
+                            "last_price": 0.0,
+                            "market_value_base": 0.0,
+                            "unrealized_pnl_base": 0.0,
+                            "unrealized_pnl_pct": None,
+                            "valuation_currency": account.base_currency,
+                            "price_source": "missing",
+                            "price_provider": None,
+                            "price_date": None,
+                            "price_stale": True,
+                            "price_available": False,
+                        },
+                    )
+                    current_qty = float(item["quantity"] or 0.0)
+                    current_cost = float(item["total_cost"] or 0.0)
+                    if event.direction == "out" and quantity - current_qty > EPS:
+                        raise PortfolioOversellError(
+                            symbol=registration_code,
+                            trade_date=event_date,
+                            requested_quantity=quantity,
+                            available_quantity=current_qty,
+                        )
+                    avg_cost = current_cost / current_qty if current_qty > EPS else 0.0
+                    item["quantity"] = current_qty + signed_quantity
+                    item["total_cost"] = current_cost + amount if event.direction == "in" else current_cost - avg_cost * quantity
+                    if event.direction == "in" and quantity > EPS:
+                        item["last_price"] = amount / quantity
+                        item["price_source"] = "bank_cost_nav"
+                        item["price_provider"] = "bank_ledger"
+                        item["price_date"] = event_date.isoformat()
+                        item["price_stale"] = event_date < as_of_date
+                        item["price_available"] = True
+                    continue
                 continue
 
             if event_type == "cash":
@@ -1300,7 +1678,59 @@ class PortfolioService:
 
         bank_position_rows: List[Dict[str, Any]] = []
         for item in bank_assets.values():
+            if str(item.get("registration_code") or "").strip():
+                quantity = float(item.get("quantity") or 0.0)
+                if abs(quantity) <= EPS:
+                    continue
+                total_cost_local = max(0.0, float(item.get("total_cost") or 0.0))
+                price_info = self._get_manual_position_price(
+                    account_id=account.id,
+                    symbol=str(item["registration_code"]),
+                    market="bank",
+                    as_of_date=as_of_date,
+                )
+                if price_info is not None:
+                    item["last_price"] = price_info.price
+                    item["price_source"] = price_info.source
+                    item["price_provider"] = price_info.provider
+                    item["price_date"] = price_info.price_date.isoformat() if price_info.price_date else None
+                    item["price_stale"] = price_info.is_stale
+                    item["price_available"] = price_info.is_available
+                price_available = bool(item.get("price_available"))
+                market_local = quantity * float(item.get("last_price") or 0.0) if price_available else 0.0
+                market_conversion = self._convert_amount(
+                    amount=market_local,
+                    from_currency=item["currency"],
+                    to_currency=account.base_currency,
+                    as_of_date=as_of_date,
+                ) if price_available else _ConvertedAmount(amount=None, is_stale=False)
+                cost_conversion = self._convert_amount(
+                    amount=total_cost_local,
+                    from_currency=item["currency"],
+                    to_currency=account.base_currency,
+                    as_of_date=as_of_date,
+                )
+                market_base = market_conversion.amount
+                cost_base = cost_conversion.amount
+                fx_stale = fx_stale or market_conversion.is_stale or cost_conversion.is_stale
+                unrealized_base = (market_base - cost_base) if market_base is not None and cost_base is not None else 0.0
+                item["quantity"] = round(quantity, 8)
+                item["total_cost"] = round(total_cost_local, 8)
+                item["avg_cost"] = round(total_cost_local / quantity, 8) if quantity > EPS else 0.0
+                item["market_value_base"] = round(market_base or 0.0, 8)
+                item["unrealized_pnl_base"] = round(unrealized_base, 8)
+                item["unrealized_pnl_pct"] = round((unrealized_base / cost_base) * 100, 8) if cost_base and market_base is not None else None
+                item["last_price"] = round(float(item.get("last_price") or 0.0), 8)
+                bank_position_rows.append(item)
+                if market_base is not None:
+                    market_value_base += market_base
+                if cost_base is not None:
+                    total_cost_base += cost_base
+                continue
+
             amount_local = float(item["last_price"] or 0.0)
+            if abs(amount_local) <= EPS:
+                continue
             market_conversion = self._convert_amount(
                 amount=amount_local,
                 from_currency=item["currency"],
@@ -1318,6 +1748,58 @@ class PortfolioService:
                 market_value_base += market_base
                 total_cost_base += market_base
         position_rows.extend(bank_position_rows)
+
+        advisory_position_rows: List[Dict[str, Any]] = []
+        for item in advisory_assets.values():
+            quantity = float(item.get("quantity") or 0.0)
+            if abs(quantity) <= EPS:
+                continue
+            total_cost_local = max(0.0, float(item.get("total_cost") or 0.0))
+            price_info = self._get_manual_position_price(
+                account_id=account.id,
+                symbol=str(item["symbol"]),
+                market="advisory",
+                as_of_date=as_of_date,
+            )
+            if price_info is not None:
+                item["last_price"] = price_info.price
+                item["price_source"] = price_info.source
+                item["price_provider"] = price_info.provider
+                item["price_date"] = price_info.price_date.isoformat() if price_info.price_date else None
+                item["price_stale"] = price_info.is_stale
+                item["price_available"] = price_info.is_available
+            market_local = quantity * float(item.get("last_price") or 0.0)
+            market_conversion = self._convert_amount(
+                amount=market_local,
+                from_currency=item["currency"],
+                to_currency=account.base_currency,
+                as_of_date=as_of_date,
+            )
+            cost_conversion = self._convert_amount(
+                amount=total_cost_local,
+                from_currency=item["currency"],
+                to_currency=account.base_currency,
+                as_of_date=as_of_date,
+            )
+            market_base = market_conversion.amount
+            cost_base = cost_conversion.amount
+            fx_stale = fx_stale or market_conversion.is_stale or cost_conversion.is_stale
+            unrealized_base = (market_base - cost_base) if market_base is not None and cost_base is not None else 0.0
+            item["quantity"] = round(quantity, 8)
+            item["total_cost"] = round(total_cost_local, 8)
+            item["avg_cost"] = round(total_cost_local / quantity, 8) if quantity > EPS else 0.0
+            item["market_value_base"] = round(market_base or 0.0, 8)
+            item["unrealized_pnl_base"] = round(unrealized_base, 8)
+            item["unrealized_pnl_pct"] = (
+                round((unrealized_base / cost_base) * 100, 8) if cost_base and market_base is not None else None
+            )
+            item["last_price"] = round(float(item.get("last_price") or 0.0), 8)
+            advisory_position_rows.append(item)
+            if market_base is not None:
+                market_value_base += market_base
+            if cost_base is not None:
+                total_cost_base += cost_base
+        position_rows.extend(advisory_position_rows)
 
         total_cash_base = 0.0
         for currency, amount in cash_balances.items():
@@ -2273,14 +2755,40 @@ class PortfolioService:
             "id": int(row.id),
             "account_id": int(row.account_id),
             "event_date": row.event_date.isoformat() if row.event_date else "",
-            "asset_kind": row.asset_kind,
+            "asset_kind": PortfolioService._normalize_bank_asset_kind(row.asset_kind),
             "direction": row.direction,
             "amount": float(row.amount or 0.0),
             "currency": row.currency,
             "bank_name": row.bank_name,
             "product_name": row.product_name,
+            "registration_code": row.registration_code,
+            "linked_entry_id": int(row.linked_entry_id) if row.linked_entry_id is not None else None,
+            "quantity": float(row.quantity) if row.quantity is not None else None,
+            "start_date": row.start_date.isoformat() if row.start_date else None,
             "maturity_date": row.maturity_date.isoformat() if row.maturity_date else None,
-            "note": row.note,
+            "annual_rate": float(row.annual_rate) if row.annual_rate is not None else None,
+            "investment_nature": row.investment_nature,
+            "risk_level": row.risk_level,
+            "income_mode": row.income_mode,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+
+    @staticmethod
+    def _advisory_ledger_row_to_dict(row: Any) -> Dict[str, Any]:
+        return {
+            "id": int(row.id),
+            "account_id": int(row.account_id),
+            "event_date": row.event_date.isoformat() if row.event_date else "",
+            "platform": row.platform,
+            "product_name": row.product_name,
+            "product_code": row.product_code,
+            "direction": row.direction,
+            "amount": float(row.amount or 0.0),
+            "quantity": float(row.quantity or 0.0),
+            "nav": float(row.nav or 0.0),
+            "currency": row.currency,
+            "risk_level": row.risk_level,
+            "investment_style": row.investment_style,
             "created_at": row.created_at.isoformat() if row.created_at else None,
         }
 
@@ -2291,11 +2799,12 @@ class PortfolioService:
             "fund": 0.0,
             "crypto": 0.0,
             "bank": 0.0,
+            "advisory": 0.0,
             "cash": 0.0,
         }
         for account in accounts:
             market = str(account.get("market") or "").lower()
-            key = market if market in {"fund", "crypto", "bank"} else "stock"
+            key = market if market in {"fund", "crypto", "bank", "advisory"} else "stock"
             breakdown[key] += float(account.get("total_market_value") or 0.0)
             breakdown["cash"] += float(account.get("total_cash") or 0.0)
         return {key: round(value, 6) for key, value in breakdown.items()}
@@ -2312,7 +2821,7 @@ class PortfolioService:
     def _normalize_market(value: str) -> str:
         market = (value or "").strip().lower()
         if market not in VALID_MARKETS:
-            raise ValueError("market must be one of: cn, hk, us, fund, crypto, bank")
+            raise ValueError("market must be one of: cn, hk, us, fund, crypto, bank, advisory")
         return market
 
     @staticmethod
@@ -2328,6 +2837,26 @@ class PortfolioService:
         if method not in VALID_COST_METHODS:
             raise ValueError("cost_method must be fifo or avg")
         return method
+
+    @staticmethod
+    def _normalize_bank_asset_kind(value: str) -> str:
+        kind = (value or "").strip().lower()
+        kind = LEGACY_BANK_ASSET_KIND_ALIASES.get(kind, kind)
+        if kind not in VALID_BANK_ASSET_KINDS:
+            raise ValueError("asset_kind must be demand, deposit or wealth")
+        return kind
+
+    @staticmethod
+    def _normalize_advisory_direction(value: str) -> str:
+        direction = (value or "").strip().lower()
+        if direction not in VALID_ADVISORY_DIRECTIONS:
+            raise ValueError("direction must be subscribe or redeem")
+        return direction
+
+    @staticmethod
+    def _make_advisory_symbol(product_name: str) -> str:
+        text = "".join(ch for ch in str(product_name or "").strip().upper() if ch.isalnum())
+        return f"ADV:{text[:24] or 'PRODUCT'}"
 
     @staticmethod
     def _default_currency_for_market(market: str) -> str:

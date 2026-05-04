@@ -1189,6 +1189,260 @@ class PortfolioServiceTestCase(unittest.TestCase):
                     with repo.portfolio_write_session():
                         pass
 
+    def test_bank_account_supports_demand_deposit_and_wealth_nav(self) -> None:
+        account = self.service.create_account(name="Bank", broker="CMB", market="bank", base_currency="CNY")
+        aid = account["id"]
+
+        self.service.record_bank_ledger(
+            account_id=aid,
+            event_date=date(2026, 1, 1),
+            asset_kind="demand",
+            direction="in",
+            amount=10000,
+            bank_name="招商银行",
+            currency="CNY",
+        )
+        self.service.record_bank_ledger(
+            account_id=aid,
+            event_date=date(2026, 1, 2),
+            asset_kind="term",
+            direction="in",
+            amount=50000,
+            bank_name="招商银行",
+            currency="CNY",
+            product_name="三个月定期",
+            start_date=date(2026, 1, 2),
+            maturity_date=date(2026, 4, 2),
+            annual_rate=1.8,
+        )
+        self.service.record_bank_ledger(
+            account_id=aid,
+            event_date=date(2026, 1, 3),
+            asset_kind="wealth",
+            direction="in",
+            amount=100000,
+            bank_name="招商银行",
+            currency="CNY",
+            product_name="稳健理财",
+            registration_code="CMB-W001",
+            quantity=100000,
+            income_mode="reinvest",
+            investment_nature="fixed_income",
+            risk_level="R2",
+        )
+
+        initial = self.service.get_portfolio_snapshot(
+            account_id=aid,
+            as_of=date(2026, 1, 3),
+            refresh_prices=True,
+        )
+        bank_account = initial["accounts"][0]
+        self.assertAlmostEqual(bank_account["total_cash"], -140000.0, places=6)
+        self.assertAlmostEqual(bank_account["total_market_value"], 150000.0, places=6)
+        positions = {item["product_name"]: item for item in bank_account["positions"]}
+        self.assertEqual(positions["三个月定期"]["annual_rate"], 1.8)
+        self.assertEqual(positions["三个月定期"]["start_date"], "2026-01-02")
+        self.assertEqual(positions["稳健理财"]["registration_code"], "CMB-W001")
+        self.assertEqual(positions["稳健理财"]["price_source"], "bank_cost_nav")
+
+        self.service.upsert_manual_price(
+            account_id=aid,
+            symbol="CMB-W001",
+            market="bank",
+            price_date=date(2026, 1, 4),
+            price=1.01,
+            currency="CNY",
+        )
+        updated = self.service.get_portfolio_snapshot(
+            account_id=aid,
+            as_of=date(2026, 1, 4),
+            refresh_prices=True,
+        )
+        wealth = next(item for item in updated["accounts"][0]["positions"] if item.get("registration_code") == "CMB-W001")
+        self.assertEqual(wealth["price_source"], "manual_price")
+        self.assertAlmostEqual(wealth["last_price"], 1.01, places=6)
+        self.assertAlmostEqual(wealth["market_value_base"], 101000.0, places=6)
+        self.assertAlmostEqual(wealth["unrealized_pnl_base"], 1000.0, places=6)
+
+        self.service.record_bank_ledger(
+            account_id=aid,
+            event_date=date(2026, 1, 5),
+            asset_kind="wealth",
+            direction="out",
+            amount=50500,
+            bank_name="招商银行",
+            currency="CNY",
+            product_name="稳健理财",
+            registration_code="CMB-W001",
+            quantity=50000,
+            income_mode="reinvest",
+        )
+        redeemed = self.service.get_portfolio_snapshot(
+            account_id=aid,
+            as_of=date(2026, 1, 5),
+            refresh_prices=True,
+        )
+        wealth_after_redeem = next(
+            item for item in redeemed["accounts"][0]["positions"] if item.get("registration_code") == "CMB-W001"
+        )
+        self.assertAlmostEqual(wealth_after_redeem["quantity"], 50000.0, places=6)
+        self.assertAlmostEqual(wealth_after_redeem["total_cost"], 50000.0, places=6)
+        self.assertAlmostEqual(wealth_after_redeem["market_value_base"], 50500.0, places=6)
+        self.assertAlmostEqual(redeemed["accounts"][0]["total_cash"], -89500.0, places=6)
+
+    def test_bank_deposit_with_same_terms_redeems_by_linked_entry(self) -> None:
+        account = self.service.create_account(name="Bank", broker="CMB", market="bank", base_currency="CNY")
+        aid = account["id"]
+
+        first = self.service.record_bank_ledger(
+            account_id=aid,
+            event_date=date(2026, 1, 1),
+            asset_kind="deposit",
+            direction="in",
+            amount=30000,
+            bank_name="招商银行",
+            currency="CNY",
+            product_name="一年定期",
+            start_date=date(2026, 1, 1),
+            maturity_date=date(2027, 1, 1),
+            annual_rate=2.0,
+        )
+        second = self.service.record_bank_ledger(
+            account_id=aid,
+            event_date=date(2026, 1, 1),
+            asset_kind="deposit",
+            direction="in",
+            amount=50000,
+            bank_name="招商银行",
+            currency="CNY",
+            product_name="一年定期",
+            start_date=date(2026, 1, 1),
+            maturity_date=date(2027, 1, 1),
+            annual_rate=2.0,
+        )
+
+        initial = self.service.get_portfolio_snapshot(
+            account_id=aid,
+            as_of=date(2026, 1, 1),
+            refresh_prices=True,
+        )
+        deposits = [
+            item for item in initial["accounts"][0]["positions"]
+            if item.get("product_name") == "一年定期"
+        ]
+        self.assertEqual(len(deposits), 2)
+        self.assertEqual({item["linked_entry_id"] for item in deposits}, {first["id"], second["id"]})
+
+        self.service.record_bank_ledger(
+            account_id=aid,
+            event_date=date(2026, 6, 1),
+            asset_kind="deposit",
+            direction="out",
+            amount=10000,
+            bank_name="招商银行",
+            currency="CNY",
+            linked_entry_id=first["id"],
+        )
+        redeemed = self.service.get_portfolio_snapshot(
+            account_id=aid,
+            as_of=date(2026, 6, 1),
+            refresh_prices=True,
+        )
+        remaining_by_entry = {
+            item["linked_entry_id"]: item["market_value_base"]
+            for item in redeemed["accounts"][0]["positions"]
+            if item.get("product_name") == "一年定期"
+        }
+        self.assertAlmostEqual(remaining_by_entry[first["id"]], 20000.0, places=6)
+        self.assertAlmostEqual(remaining_by_entry[second["id"]], 50000.0, places=6)
+        self.assertAlmostEqual(redeemed["accounts"][0]["total_cash"], -70000.0, places=6)
+
+    def test_advisory_account_supports_product_nav_and_redemption(self) -> None:
+        account = self.service.create_account(name="Advisory", broker="陆基金", market="advisory", base_currency="CNY")
+        aid = account["id"]
+
+        self.service.record_advisory_ledger(
+            account_id=aid,
+            event_date=date(2026, 1, 1),
+            platform="陆基金/陆金所",
+            product_name="稳健投顾组合",
+            product_code="LJTG001",
+            direction="subscribe",
+            amount=100000,
+            quantity=100000,
+            currency="CNY",
+            risk_level="R3",
+            investment_style="稳健",
+        )
+        initial = self.service.get_portfolio_snapshot(
+            account_id=aid,
+            as_of=date(2026, 1, 1),
+            refresh_prices=True,
+        )
+        account_snapshot = initial["accounts"][0]
+        self.assertAlmostEqual(account_snapshot["total_cash"], -100000.0, places=6)
+        self.assertAlmostEqual(account_snapshot["total_market_value"], 100000.0, places=6)
+        position = account_snapshot["positions"][0]
+        self.assertEqual(position["market"], "advisory")
+        self.assertEqual(position["platform"], "陆基金/陆金所")
+        self.assertEqual(position["product_name"], "稳健投顾组合")
+        self.assertEqual(position["product_code"], "LJTG001")
+        self.assertEqual(position["price_source"], "advisory_confirmed_nav")
+
+        self.service.upsert_manual_price(
+            account_id=aid,
+            symbol="LJTG001",
+            market="advisory",
+            price_date=date(2026, 1, 2),
+            price=1.05,
+            currency="CNY",
+        )
+        updated = self.service.get_portfolio_snapshot(
+            account_id=aid,
+            as_of=date(2026, 1, 2),
+            refresh_prices=False,
+        )
+        updated_position = updated["accounts"][0]["positions"][0]
+        self.assertEqual(updated_position["price_source"], "manual_price")
+        self.assertAlmostEqual(updated_position["market_value_base"], 105000.0, places=6)
+        self.assertAlmostEqual(updated_position["unrealized_pnl_base"], 5000.0, places=6)
+        self.assertAlmostEqual(updated["asset_breakdown"]["advisory"], 105000.0, places=6)
+
+        self.service.record_advisory_ledger(
+            account_id=aid,
+            event_date=date(2026, 1, 3),
+            platform="陆基金/陆金所",
+            product_name="稳健投顾组合",
+            product_code="LJTG001",
+            direction="redeem",
+            amount=52500,
+            quantity=50000,
+            currency="CNY",
+        )
+        redeemed = self.service.get_portfolio_snapshot(
+            account_id=aid,
+            as_of=date(2026, 1, 3),
+            refresh_prices=True,
+        )
+        redeemed_position = redeemed["accounts"][0]["positions"][0]
+        self.assertAlmostEqual(redeemed_position["quantity"], 50000.0, places=6)
+        self.assertAlmostEqual(redeemed_position["total_cost"], 50000.0, places=6)
+        self.assertAlmostEqual(redeemed["accounts"][0]["realized_pnl"], 2500.0, places=6)
+        self.assertAlmostEqual(redeemed["accounts"][0]["total_cash"], -47500.0, places=6)
+
+        with self.assertRaises(PortfolioOversellError):
+            self.service.record_advisory_ledger(
+                account_id=aid,
+                event_date=date(2026, 1, 4),
+                platform="陆基金/陆金所",
+                product_name="稳健投顾组合",
+                product_code="LJTG001",
+                direction="redeem",
+                amount=60000,
+                quantity=60000,
+                currency="CNY",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

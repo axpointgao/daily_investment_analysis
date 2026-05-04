@@ -11,17 +11,18 @@ from contextlib import contextmanager
 from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from sqlalchemy import and_, delete, desc, func, select
+from sqlalchemy import and_, delete, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from src.storage import (
     DatabaseManager,
     PortfolioAccount,
+    PortfolioAdvisoryLedger,
+    PortfolioBankLedger,
     PortfolioCashLedger,
     PortfolioCorporateAction,
     PortfolioDailySnapshot,
     PortfolioFxRate,
-    PortfolioBankLedger,
     PortfolioManualPrice,
     PortfolioPosition,
     PortfolioPositionLot,
@@ -423,6 +424,11 @@ class PortfolioRepository:
                 row.price = price
                 row.note = note
                 row.updated_at = datetime.now()
+            self._invalidate_account_cache_in_session(
+                session=session,
+                account_id=account_id,
+                from_date=date.min,
+            )
             session.commit()
             session.refresh(row)
             return row
@@ -462,7 +468,15 @@ class PortfolioRepository:
         currency: str,
         bank_name: str,
         product_name: Optional[str] = None,
+        registration_code: Optional[str] = None,
+        linked_entry_id: Optional[int] = None,
+        quantity: Optional[float] = None,
+        start_date: Optional[date] = None,
         maturity_date: Optional[date] = None,
+        annual_rate: Optional[float] = None,
+        investment_nature: Optional[str] = None,
+        risk_level: Optional[str] = None,
+        income_mode: Optional[str] = None,
         note: Optional[str] = None,
     ) -> PortfolioBankLedger:
         with self.portfolio_write_session() as session:
@@ -475,7 +489,15 @@ class PortfolioRepository:
                 currency=currency,
                 bank_name=bank_name,
                 product_name=product_name,
+                registration_code=registration_code,
+                linked_entry_id=linked_entry_id,
+                quantity=quantity,
+                start_date=start_date,
                 maturity_date=maturity_date,
+                annual_rate=annual_rate,
+                investment_nature=investment_nature,
+                risk_level=risk_level,
+                income_mode=income_mode,
                 note=note,
             )
             session.add(row)
@@ -487,6 +509,13 @@ class PortfolioRepository:
             session.flush()
             session.refresh(row)
             session.expunge(row)
+            return row
+
+    def get_bank_ledger_by_id(self, entry_id: int) -> Optional[PortfolioBankLedger]:
+        with self.db.get_session() as session:
+            row = session.get(PortfolioBankLedger, entry_id)
+            if row is not None:
+                session.expunge(row)
             return row
 
     def query_bank_ledger(
@@ -544,6 +573,125 @@ class PortfolioRepository:
         with self.portfolio_write_session() as session:
             row = session.execute(
                 select(PortfolioBankLedger).where(PortfolioBankLedger.id == entry_id).limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return False
+            account_id = int(row.account_id)
+            event_date = row.event_date
+            session.delete(row)
+            self._invalidate_account_cache_in_session(
+                session=session,
+                account_id=account_id,
+                from_date=event_date,
+            )
+            return True
+
+    def add_advisory_ledger(
+        self,
+        *,
+        account_id: int,
+        event_date: date,
+        platform: str,
+        product_name: str,
+        product_code: Optional[str],
+        direction: str,
+        amount: float,
+        quantity: float,
+        nav: float,
+        currency: str,
+        risk_level: Optional[str] = None,
+        investment_style: Optional[str] = None,
+    ) -> PortfolioAdvisoryLedger:
+        with self.portfolio_write_session() as session:
+            row = PortfolioAdvisoryLedger(
+                account_id=account_id,
+                event_date=event_date,
+                platform=platform,
+                product_name=product_name,
+                product_code=product_code,
+                direction=direction,
+                amount=amount,
+                quantity=quantity,
+                nav=nav,
+                currency=currency,
+                risk_level=risk_level,
+                investment_style=investment_style,
+            )
+            session.add(row)
+            self._invalidate_account_cache_in_session(
+                session=session,
+                account_id=account_id,
+                from_date=event_date,
+            )
+            session.flush()
+            session.refresh(row)
+            session.expunge(row)
+            return row
+
+    def query_advisory_ledger(
+        self,
+        *,
+        account_id: Optional[int],
+        date_from: Optional[date],
+        date_to: Optional[date],
+        product: Optional[str],
+        direction: Optional[str],
+        page: int,
+        page_size: int,
+    ) -> Tuple[List[PortfolioAdvisoryLedger], int]:
+        with self.db.get_session() as session:
+            conditions = []
+            if account_id is not None:
+                conditions.append(PortfolioAdvisoryLedger.account_id == account_id)
+            if date_from is not None:
+                conditions.append(PortfolioAdvisoryLedger.event_date >= date_from)
+            if date_to is not None:
+                conditions.append(PortfolioAdvisoryLedger.event_date <= date_to)
+            if product:
+                product_like = f"%{product}%"
+                conditions.append(
+                    or_(
+                        PortfolioAdvisoryLedger.product_name.like(product_like),
+                        PortfolioAdvisoryLedger.product_code.like(product_like),
+                    )
+                )
+            if direction:
+                conditions.append(PortfolioAdvisoryLedger.direction == direction)
+
+            data_query = select(PortfolioAdvisoryLedger)
+            count_query = select(func.count()).select_from(PortfolioAdvisoryLedger)
+            if conditions:
+                where_clause = and_(*conditions)
+                data_query = data_query.where(where_clause)
+                count_query = count_query.where(where_clause)
+
+            total = int(session.execute(count_query).scalar_one() or 0)
+            rows = session.execute(
+                data_query
+                .order_by(PortfolioAdvisoryLedger.event_date.desc(), PortfolioAdvisoryLedger.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            ).scalars().all()
+            return list(rows), total
+
+    def list_advisory_ledger(self, account_id: int, as_of: date) -> List[PortfolioAdvisoryLedger]:
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(PortfolioAdvisoryLedger)
+                .where(
+                    and_(
+                        PortfolioAdvisoryLedger.account_id == account_id,
+                        PortfolioAdvisoryLedger.event_date <= as_of,
+                    )
+                )
+                .order_by(PortfolioAdvisoryLedger.event_date.asc(), PortfolioAdvisoryLedger.id.asc())
+            ).scalars().all()
+            return list(rows)
+
+    def delete_advisory_ledger(self, entry_id: int) -> bool:
+        with self.portfolio_write_session() as session:
+            row = session.execute(
+                select(PortfolioAdvisoryLedger).where(PortfolioAdvisoryLedger.id == entry_id).limit(1)
             ).scalar_one_or_none()
             if row is None:
                 return False
@@ -736,8 +884,16 @@ class PortfolioRepository:
                     )
                 )
             ).scalar_one()
+            first_advisory = session.execute(
+                select(func.min(PortfolioAdvisoryLedger.event_date)).where(
+                    and_(
+                        PortfolioAdvisoryLedger.account_id == account_id,
+                        PortfolioAdvisoryLedger.event_date <= as_of,
+                    )
+                )
+            ).scalar_one()
 
-            candidates = [item for item in (first_trade, first_cash, first_action) if item is not None]
+            candidates = [item for item in (first_trade, first_cash, first_action, first_advisory) if item is not None]
             if not candidates:
                 return None
             return min(candidates)

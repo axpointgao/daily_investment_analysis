@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-PortfolioMarket = Literal["cn", "hk", "us", "fund", "crypto", "bank"]
+PortfolioMarket = Literal["cn", "hk", "us", "fund", "crypto", "bank", "advisory"]
 
 
 class PortfolioAccountCreateRequest(BaseModel):
@@ -108,14 +108,28 @@ class PortfolioManualPriceItem(BaseModel):
 class PortfolioBankLedgerCreateRequest(BaseModel):
     account_id: int
     event_date: date
-    asset_kind: Literal["demand", "term"]
+    asset_kind: Literal["demand", "deposit", "wealth", "term"]
     direction: Literal["in", "out"]
     amount: float = Field(..., gt=0)
     currency: Optional[str] = Field(None, min_length=3, max_length=8)
     bank_name: str = Field(..., min_length=1, max_length=64)
     product_name: Optional[str] = Field(None, max_length=128)
+    registration_code: Optional[str] = Field(None, max_length=64)
+    linked_entry_id: Optional[int] = Field(None, gt=0)
+    quantity: Optional[float] = Field(None, gt=0)
+    start_date: Optional[date] = None
     maturity_date: Optional[date] = None
-    note: Optional[str] = Field(None, max_length=255)
+    annual_rate: Optional[float] = Field(None, ge=0)
+    investment_nature: Optional[Literal[
+        "fixed_income",
+        "mixed",
+        "equity",
+        "commodity_derivative",
+        "cash_management",
+        "other",
+    ]] = None
+    risk_level: Optional[Literal["R1", "R2", "R3", "R4", "R5"]] = None
+    income_mode: Optional[Literal["dividend", "reinvest"]] = None
 
 
 class PortfolioBankLedgerListItem(BaseModel):
@@ -128,13 +142,58 @@ class PortfolioBankLedgerListItem(BaseModel):
     currency: str
     bank_name: str
     product_name: Optional[str] = None
+    registration_code: Optional[str] = None
+    linked_entry_id: Optional[int] = None
+    quantity: Optional[float] = None
+    start_date: Optional[str] = None
     maturity_date: Optional[str] = None
-    note: Optional[str] = None
+    annual_rate: Optional[float] = None
+    investment_nature: Optional[str] = None
+    risk_level: Optional[str] = None
+    income_mode: Optional[str] = None
     created_at: Optional[str] = None
 
 
 class PortfolioBankLedgerListResponse(BaseModel):
     items: List[PortfolioBankLedgerListItem] = Field(default_factory=list)
+    total: int
+    page: int
+    page_size: int
+
+
+class PortfolioAdvisoryLedgerCreateRequest(BaseModel):
+    account_id: int
+    event_date: date
+    platform: str = Field(..., min_length=1, max_length=64)
+    product_name: str = Field(..., min_length=1, max_length=128)
+    product_code: Optional[str] = Field(None, max_length=64)
+    direction: Literal["subscribe", "redeem"]
+    amount: float = Field(..., gt=0)
+    quantity: float = Field(..., gt=0)
+    currency: Optional[str] = Field(None, min_length=3, max_length=8)
+    risk_level: Optional[str] = Field(None, max_length=16)
+    investment_style: Optional[str] = Field(None, max_length=32)
+
+
+class PortfolioAdvisoryLedgerListItem(BaseModel):
+    id: int
+    account_id: int
+    event_date: str
+    platform: str
+    product_name: str
+    product_code: Optional[str] = None
+    direction: str
+    amount: float
+    quantity: float
+    nav: float
+    currency: str
+    risk_level: Optional[str] = None
+    investment_style: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class PortfolioAdvisoryLedgerListResponse(BaseModel):
+    items: List[PortfolioAdvisoryLedgerListItem] = Field(default_factory=list)
     total: int
     page: int
     page_size: int
@@ -227,7 +286,17 @@ class PortfolioPositionItem(BaseModel):
     price_available: bool = True
     bank_name: Optional[str] = None
     product_name: Optional[str] = None
+    registration_code: Optional[str] = None
+    linked_entry_id: Optional[int] = None
+    start_date: Optional[str] = None
     maturity_date: Optional[str] = None
+    annual_rate: Optional[float] = None
+    investment_nature: Optional[str] = None
+    risk_level: Optional[str] = None
+    income_mode: Optional[str] = None
+    platform: Optional[str] = None
+    product_code: Optional[str] = None
+    investment_style: Optional[str] = None
 
 
 class PortfolioAccountSnapshot(BaseModel):

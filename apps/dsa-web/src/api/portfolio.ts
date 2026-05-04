@@ -4,6 +4,8 @@ import type {
   PortfolioAccountItem,
   PortfolioAccountCreateRequest,
   PortfolioAccountListResponse,
+  PortfolioAdvisoryLedgerCreateRequest,
+  PortfolioAdvisoryLedgerListResponse,
   PortfolioAnalysisRequest,
   PortfolioAnalysisResponse,
   PortfolioBankLedgerCreateRequest,
@@ -57,7 +59,12 @@ type CashListQuery = EventQuery & {
 };
 
 type BankLedgerListQuery = EventQuery & {
-  assetKind?: 'demand' | 'term';
+  assetKind?: 'demand' | 'deposit' | 'wealth';
+};
+
+type AdvisoryLedgerListQuery = EventQuery & {
+  product?: string;
+  direction?: 'subscribe' | 'redeem';
 };
 
 type CorporateListQuery = EventQuery & {
@@ -225,14 +232,43 @@ export const portfolioApi = {
       currency: payload.currency,
       bank_name: payload.bankName,
       product_name: payload.productName,
+      registration_code: payload.registrationCode,
+      linked_entry_id: payload.linkedEntryId,
+      quantity: payload.quantity,
+      start_date: payload.startDate,
       maturity_date: payload.maturityDate,
-      note: payload.note,
+      annual_rate: payload.annualRate,
+      investment_nature: payload.investmentNature,
+      risk_level: payload.riskLevel,
+      income_mode: payload.incomeMode,
     });
     return toCamelCase<PortfolioEventCreatedResponse>(response.data);
   },
 
   async deleteBankLedger(entryId: number): Promise<PortfolioDeleteResponse> {
     const response = await apiClient.delete<Record<string, unknown>>(`/api/v1/portfolio/bank-ledger/${entryId}`);
+    return toCamelCase<PortfolioDeleteResponse>(response.data);
+  },
+
+  async createAdvisoryLedger(payload: PortfolioAdvisoryLedgerCreateRequest): Promise<PortfolioEventCreatedResponse> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/advisory-ledger', {
+      account_id: payload.accountId,
+      event_date: payload.eventDate,
+      platform: payload.platform,
+      product_name: payload.productName,
+      product_code: payload.productCode,
+      direction: payload.direction,
+      amount: payload.amount,
+      quantity: payload.quantity,
+      currency: payload.currency,
+      risk_level: payload.riskLevel,
+      investment_style: payload.investmentStyle,
+    });
+    return toCamelCase<PortfolioEventCreatedResponse>(response.data);
+  },
+
+  async deleteAdvisoryLedger(entryId: number): Promise<PortfolioDeleteResponse> {
+    const response = await apiClient.delete<Record<string, unknown>>(`/api/v1/portfolio/advisory-ledger/${entryId}`);
     return toCamelCase<PortfolioDeleteResponse>(response.data);
   },
 
@@ -289,6 +325,18 @@ export const portfolioApi = {
     }
     const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/bank-ledger', { params });
     return toCamelCase<PortfolioBankLedgerListResponse>(response.data);
+  },
+
+  async listAdvisoryLedger(query: AdvisoryLedgerListQuery = {}): Promise<PortfolioAdvisoryLedgerListResponse> {
+    const params = buildEventParams(query);
+    if (query.product) {
+      params.product = query.product;
+    }
+    if (query.direction) {
+      params.direction = query.direction;
+    }
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/advisory-ledger', { params });
+    return toCamelCase<PortfolioAdvisoryLedgerListResponse>(response.data);
   },
 
   async listCorporateActions(query: CorporateListQuery = {}): Promise<PortfolioCorporateActionListResponse> {

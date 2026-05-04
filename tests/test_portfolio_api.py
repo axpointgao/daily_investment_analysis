@@ -533,6 +533,68 @@ class PortfolioApiTestCase(unittest.TestCase):
         detail = resp.json()
         self.assertEqual(detail.get("error"), "portfolio_busy")
 
+    def test_advisory_ledger_api_flow(self) -> None:
+        create_resp = self.client.post(
+            "/api/v1/portfolio/accounts",
+            json={"name": "投顾账户", "broker": "陆基金", "market": "advisory", "base_currency": "CNY"},
+        )
+        self.assertEqual(create_resp.status_code, 200)
+        account_id = create_resp.json()["id"]
+
+        ledger_resp = self.client.post(
+            "/api/v1/portfolio/advisory-ledger",
+            json={
+                "account_id": account_id,
+                "event_date": "2026-01-01",
+                "platform": "陆基金/陆金所",
+                "product_name": "稳健投顾组合",
+                "product_code": "LJTG001",
+                "direction": "subscribe",
+                "amount": 100000,
+                "quantity": 100000,
+                "currency": "CNY",
+                "risk_level": "R3",
+                "investment_style": "稳健",
+            },
+        )
+        self.assertEqual(ledger_resp.status_code, 200)
+
+        list_resp = self.client.get(
+            "/api/v1/portfolio/advisory-ledger",
+            params={"account_id": account_id, "direction": "subscribe"},
+        )
+        self.assertEqual(list_resp.status_code, 200)
+        self.assertEqual(list_resp.json()["total"], 1)
+        self.assertEqual(list_resp.json()["items"][0]["product_code"], "LJTG001")
+        self.assertAlmostEqual(list_resp.json()["items"][0]["nav"], 1.0, places=6)
+
+        price_resp = self.client.post(
+            "/api/v1/portfolio/manual-prices",
+            json={
+                "account_id": account_id,
+                "symbol": "LJTG001",
+                "market": "advisory",
+                "price_date": "2026-01-02",
+                "price": 1.02,
+                "currency": "CNY",
+            },
+        )
+        self.assertEqual(price_resp.status_code, 200)
+
+        snapshot_resp = self.client.get(
+            "/api/v1/portfolio/snapshot",
+            params={"account_id": account_id, "as_of": "2026-01-02"},
+        )
+        self.assertEqual(snapshot_resp.status_code, 200)
+        position = snapshot_resp.json()["accounts"][0]["positions"][0]
+        self.assertEqual(position["market"], "advisory")
+        self.assertEqual(position["price_source"], "manual_price")
+        self.assertAlmostEqual(position["market_value_base"], 102000.0, places=6)
+
+        delete_resp = self.client.delete(f"/api/v1/portfolio/advisory-ledger/{ledger_resp.json()['id']}")
+        self.assertEqual(delete_resp.status_code, 200)
+        self.assertEqual(delete_resp.json()["deleted"], 1)
+
     def test_csv_broker_list_endpoint(self) -> None:
         resp = self.client.get("/api/v1/portfolio/imports/csv/brokers")
         self.assertEqual(resp.status_code, 200)

@@ -15,6 +15,8 @@ from api.v1.schemas.portfolio import (
     PortfolioAccountItem,
     PortfolioAccountListResponse,
     PortfolioAccountUpdateRequest,
+    PortfolioAdvisoryLedgerCreateRequest,
+    PortfolioAdvisoryLedgerListResponse,
     PortfolioAnalysisRequest,
     PortfolioAnalysisResponse,
     PortfolioBankLedgerCreateRequest,
@@ -325,7 +327,7 @@ def upsert_manual_price(request: PortfolioManualPriceUpsertRequest) -> Portfolio
     "/bank-ledger",
     response_model=PortfolioEventCreatedResponse,
     responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
-    summary="Record bank demand or term ledger event",
+    summary="Record bank demand, deposit or wealth ledger event",
 )
 def create_bank_ledger(request: PortfolioBankLedgerCreateRequest) -> PortfolioEventCreatedResponse:
     service = PortfolioService()
@@ -339,8 +341,15 @@ def create_bank_ledger(request: PortfolioBankLedgerCreateRequest) -> PortfolioEv
             currency=request.currency,
             bank_name=request.bank_name,
             product_name=request.product_name,
+            registration_code=request.registration_code,
+            linked_entry_id=request.linked_entry_id,
+            quantity=request.quantity,
+            start_date=request.start_date,
             maturity_date=request.maturity_date,
-            note=request.note,
+            annual_rate=request.annual_rate,
+            investment_nature=request.investment_nature,
+            risk_level=request.risk_level,
+            income_mode=request.income_mode,
         )
         return PortfolioEventCreatedResponse(**data)
     except PortfolioBusyError as exc:
@@ -361,7 +370,7 @@ def list_bank_ledger(
     account_id: Optional[int] = Query(None, description="Optional account id"),
     date_from: Optional[date] = Query(None, description="Bank event date from"),
     date_to: Optional[date] = Query(None, description="Bank event date to"),
-    asset_kind: Optional[str] = Query(None, description="Optional kind: demand/term"),
+    asset_kind: Optional[str] = Query(None, description="Optional kind: demand/deposit/wealth"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> PortfolioBankLedgerListResponse:
@@ -404,6 +413,96 @@ def delete_bank_ledger(entry_id: int) -> PortfolioDeleteResponse:
         raise
     except Exception as exc:
         raise _internal_error("Delete bank ledger event failed", exc)
+
+
+@router.post(
+    "/advisory-ledger",
+    response_model=PortfolioEventCreatedResponse,
+    responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Record advisory product subscription or redemption",
+)
+def create_advisory_ledger(request: PortfolioAdvisoryLedgerCreateRequest) -> PortfolioEventCreatedResponse:
+    service = PortfolioService()
+    try:
+        data = service.record_advisory_ledger(
+            account_id=request.account_id,
+            event_date=request.event_date,
+            platform=request.platform,
+            product_name=request.product_name,
+            product_code=request.product_code,
+            direction=request.direction,
+            amount=request.amount,
+            quantity=request.quantity,
+            currency=request.currency,
+            risk_level=request.risk_level,
+            investment_style=request.investment_style,
+        )
+        return PortfolioEventCreatedResponse(**data)
+    except PortfolioBusyError as exc:
+        raise _conflict_error(error="portfolio_busy", message=str(exc))
+    except PortfolioOversellError as exc:
+        raise _conflict_error(error="portfolio_oversell", message=str(exc))
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Create advisory ledger event failed", exc)
+
+
+@router.get(
+    "/advisory-ledger",
+    response_model=PortfolioAdvisoryLedgerListResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="List advisory product ledger events",
+)
+def list_advisory_ledger(
+    account_id: Optional[int] = Query(None, description="Optional account id"),
+    date_from: Optional[date] = Query(None, description="Advisory event date from"),
+    date_to: Optional[date] = Query(None, description="Advisory event date to"),
+    product: Optional[str] = Query(None, description="Optional product name or code filter"),
+    direction: Optional[str] = Query(None, description="Optional direction: subscribe/redeem"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> PortfolioAdvisoryLedgerListResponse:
+    service = PortfolioService()
+    try:
+        data = service.list_advisory_ledger_events(
+            account_id=account_id,
+            date_from=date_from,
+            date_to=date_to,
+            product=product,
+            direction=direction,
+            page=page,
+            page_size=page_size,
+        )
+        return PortfolioAdvisoryLedgerListResponse(**data)
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("List advisory ledger events failed", exc)
+
+
+@router.delete(
+    "/advisory-ledger/{entry_id}",
+    response_model=PortfolioDeleteResponse,
+    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Delete advisory product ledger event",
+)
+def delete_advisory_ledger(entry_id: int) -> PortfolioDeleteResponse:
+    service = PortfolioService()
+    try:
+        ok = service.delete_advisory_ledger_event(entry_id)
+        if not ok:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "not_found", "message": f"Advisory ledger entry not found: {entry_id}"},
+            )
+        return PortfolioDeleteResponse(deleted=1)
+    except PortfolioBusyError as exc:
+        raise _conflict_error(error="portfolio_busy", message=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _internal_error("Delete advisory ledger event failed", exc)
 
 
 @router.get(

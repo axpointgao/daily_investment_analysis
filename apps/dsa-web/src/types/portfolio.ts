@@ -2,8 +2,18 @@ export type PortfolioCostMethod = 'fifo' | 'avg';
 export type PortfolioSide = 'buy' | 'sell';
 export type PortfolioCashDirection = 'in' | 'out';
 export type PortfolioCorporateActionType = 'cash_dividend' | 'split_adjustment';
-export type PortfolioMarket = 'cn' | 'hk' | 'us' | 'fund' | 'crypto' | 'bank';
-export type PortfolioBankAssetKind = 'demand' | 'term';
+export type PortfolioMarket = 'cn' | 'hk' | 'us' | 'fund' | 'crypto' | 'bank' | 'advisory';
+export type PortfolioBankAssetKind = 'demand' | 'deposit' | 'wealth';
+export type PortfolioAdvisoryDirection = 'subscribe' | 'redeem';
+export type PortfolioBankInvestmentNature =
+  | 'fixed_income'
+  | 'mixed'
+  | 'equity'
+  | 'commodity_derivative'
+  | 'cash_management'
+  | 'other';
+export type PortfolioBankRiskLevel = 'R1' | 'R2' | 'R3' | 'R4' | 'R5';
+export type PortfolioBankIncomeMode = 'dividend' | 'reinvest';
 
 export interface PortfolioAccountItem {
   id: number;
@@ -49,7 +59,17 @@ export interface PortfolioPositionItem {
   priceAvailable?: boolean;
   bankName?: string | null;
   productName?: string | null;
+  registrationCode?: string | null;
+  linkedEntryId?: number | null;
+  startDate?: string | null;
   maturityDate?: string | null;
+  annualRate?: number | null;
+  investmentNature?: string | null;
+  riskLevel?: string | null;
+  incomeMode?: string | null;
+  platform?: string | null;
+  productCode?: string | null;
+  investmentStyle?: string | null;
 }
 
 export interface PortfolioAccountSnapshot {
@@ -242,8 +262,15 @@ export interface PortfolioBankLedgerCreateRequest {
   currency?: string;
   bankName: string;
   productName?: string;
+  registrationCode?: string;
+  linkedEntryId?: number;
+  quantity?: number;
+  startDate?: string;
   maturityDate?: string;
-  note?: string;
+  annualRate?: number;
+  investmentNature?: PortfolioBankInvestmentNature;
+  riskLevel?: PortfolioBankRiskLevel;
+  incomeMode?: PortfolioBankIncomeMode;
 }
 
 export interface PortfolioDeleteResponse {
@@ -302,13 +329,58 @@ export interface PortfolioBankLedgerListItem {
   currency: string;
   bankName: string;
   productName?: string | null;
+  registrationCode?: string | null;
+  linkedEntryId?: number | null;
+  quantity?: number | null;
+  startDate?: string | null;
   maturityDate?: string | null;
-  note?: string | null;
+  annualRate?: number | null;
+  investmentNature?: string | null;
+  riskLevel?: string | null;
+  incomeMode?: string | null;
   createdAt?: string | null;
 }
 
 export interface PortfolioBankLedgerListResponse {
   items: PortfolioBankLedgerListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface PortfolioAdvisoryLedgerCreateRequest {
+  accountId: number;
+  eventDate: string;
+  platform: string;
+  productName: string;
+  productCode?: string;
+  direction: PortfolioAdvisoryDirection;
+  amount: number;
+  quantity: number;
+  currency?: string;
+  riskLevel?: string;
+  investmentStyle?: string;
+}
+
+export interface PortfolioAdvisoryLedgerListItem {
+  id: number;
+  accountId: number;
+  eventDate: string;
+  platform: string;
+  productName: string;
+  productCode?: string | null;
+  direction: PortfolioAdvisoryDirection;
+  amount: number;
+  quantity: number;
+  nav: number;
+  currency: string;
+  riskLevel?: string | null;
+  investmentStyle?: string | null;
+  createdAt?: string | null;
+}
+
+export interface PortfolioAdvisoryLedgerListResponse {
+  items: PortfolioAdvisoryLedgerListItem[];
   total: number;
   page: number;
   pageSize: number;

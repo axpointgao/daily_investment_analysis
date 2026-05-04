@@ -18,10 +18,12 @@ import json
 import logging
 import re
 import time
+import threading
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any, TYPE_CHECKING, Tuple, Callable, TypeVar
 
 import pandas as pd
+from sqlalchemy import inspect, text
 from sqlalchemy import (
     create_engine,
     Column,
@@ -661,26 +663,60 @@ class PortfolioManualPrice(Base):
 
 
 class PortfolioBankLedger(Base):
-    """Bank demand deposit and simple fixed-term asset ledger."""
+    """Bank demand deposit, fixed-term deposit and wealth-product ledger."""
 
     __tablename__ = 'portfolio_bank_ledger'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
     event_date = Column(Date, nullable=False, index=True)
-    asset_kind = Column(String(16), nullable=False, default='demand')  # demand/term
+    asset_kind = Column(String(16), nullable=False, default='demand')  # demand/deposit/wealth
     direction = Column(String(8), nullable=False)  # in/out
     amount = Column(Float, nullable=False)
     currency = Column(String(8), nullable=False, default='CNY')
     bank_name = Column(String(64), nullable=False)
     product_name = Column(String(128))
+    registration_code = Column(String(64), index=True)
+    linked_entry_id = Column(Integer, ForeignKey('portfolio_bank_ledger.id'), index=True)
+    quantity = Column(Float)
+    start_date = Column(Date)
     maturity_date = Column(Date)
+    annual_rate = Column(Float)
+    investment_nature = Column(String(32))
+    risk_level = Column(String(8))
+    income_mode = Column(String(16))
     note = Column(String(255))
     created_at = Column(DateTime, default=datetime.now, index=True)
 
     __table_args__ = (
         Index('ix_portfolio_bank_account_date', 'account_id', 'event_date'),
         Index('ix_portfolio_bank_account_kind', 'account_id', 'asset_kind'),
+    )
+
+
+class PortfolioAdvisoryLedger(Base):
+    """Advisory product subscription and redemption ledger."""
+
+    __tablename__ = 'portfolio_advisory_ledger'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
+    event_date = Column(Date, nullable=False, index=True)
+    platform = Column(String(64), nullable=False)
+    product_name = Column(String(128), nullable=False)
+    product_code = Column(String(64), index=True)
+    direction = Column(String(16), nullable=False)  # subscribe/redeem
+    amount = Column(Float, nullable=False)
+    quantity = Column(Float, nullable=False)
+    nav = Column(Float, nullable=False)
+    currency = Column(String(8), nullable=False, default='CNY')
+    risk_level = Column(String(16))
+    investment_style = Column(String(32))
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+    __table_args__ = (
+        Index('ix_portfolio_advisory_account_date', 'account_id', 'event_date'),
+        Index('ix_portfolio_advisory_account_product', 'account_id', 'product_code', 'product_name'),
     )
 
 
@@ -724,14 +760,16 @@ class DatabaseManager:
     """
     
     _instance: Optional['DatabaseManager'] = None
+    _instance_lock = threading.RLock()
     _initialized: bool = False
     
     def __new__(cls, *args, **kwargs):
         """单例模式实现"""
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
+        with cls._instance_lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
+                cls._instance._initialized = False
+            return cls._instance
     
     def __init__(self, db_url: Optional[str] = None):
         """
@@ -740,68 +778,76 @@ class DatabaseManager:
         Args:
             db_url: 数据库连接 URL（可选，默认从配置读取）
         """
-        if getattr(self, '_initialized', False):
-            return
+        with self.__class__._instance_lock:
+            if getattr(self, '_initialized', False):
+                return
 
-        config = get_config()
-        if db_url is None:
-            db_url = config.get_db_url()
+            config = get_config()
+            if db_url is None:
+                db_url = config.get_db_url()
 
-        self._db_url = db_url
-        self._sqlite_wal_enabled = config.sqlite_wal_enabled
-        self._sqlite_busy_timeout_ms = config.sqlite_busy_timeout_ms
-        self._sqlite_write_retry_max = config.sqlite_write_retry_max
-        self._sqlite_write_retry_base_delay = config.sqlite_write_retry_base_delay
+            self._db_url = db_url
+            self._sqlite_wal_enabled = config.sqlite_wal_enabled
+            self._sqlite_busy_timeout_ms = config.sqlite_busy_timeout_ms
+            self._sqlite_write_retry_max = config.sqlite_write_retry_max
+            self._sqlite_write_retry_base_delay = config.sqlite_write_retry_base_delay
 
-        engine_kwargs = {
-            "echo": False,
-            "pool_pre_ping": True,
-        }
-        if str(db_url).startswith("sqlite:") and self._sqlite_busy_timeout_ms > 0:
-            engine_kwargs["connect_args"] = {
-                "timeout": self._sqlite_busy_timeout_ms / 1000,
+            engine_kwargs = {
+                "echo": False,
+                "pool_pre_ping": True,
             }
+            if str(db_url).startswith("sqlite:") and self._sqlite_busy_timeout_ms > 0:
+                engine_kwargs["connect_args"] = {
+                    "timeout": self._sqlite_busy_timeout_ms / 1000,
+                }
 
-        # 创建数据库引擎
-        self._engine = create_engine(
-            db_url,
-            **engine_kwargs,
-        )
-        self._is_sqlite_engine = self._engine.url.get_backend_name() == 'sqlite'
-        self._sqlite_file_db = self._is_sqlite_engine and self._is_file_sqlite_database()
-        self._install_sqlite_pragma_handler()
-        
-        # 创建 Session 工厂
-        self._SessionLocal = sessionmaker(
-            bind=self._engine,
-            autocommit=False,
-            autoflush=False,
-        )
-        
-        # 创建所有表
-        Base.metadata.create_all(self._engine)
+            # 创建数据库引擎
+            self._engine = create_engine(
+                db_url,
+                **engine_kwargs,
+            )
+            self._is_sqlite_engine = self._engine.url.get_backend_name() == 'sqlite'
+            self._sqlite_file_db = self._is_sqlite_engine and self._is_file_sqlite_database()
+            self._install_sqlite_pragma_handler()
 
-        self._initialized = True
-        logger.info(f"数据库初始化完成: {db_url}")
+            # 创建 Session 工厂
+            self._SessionLocal = sessionmaker(
+                bind=self._engine,
+                autocommit=False,
+                autoflush=False,
+            )
 
-        # 注册退出钩子，确保程序退出时关闭数据库连接
-        atexit.register(DatabaseManager._cleanup_engine, self._engine)
+            # 创建所有表
+            Base.metadata.create_all(self._engine)
+            self._upgrade_schema_compat()
+
+            self._initialized = True
+            logger.info(f"数据库初始化完成: {db_url}")
+
+            # 注册退出钩子，确保程序退出时关闭数据库连接
+            atexit.register(DatabaseManager._cleanup_engine, self._engine)
     
     @classmethod
     def get_instance(cls) -> 'DatabaseManager':
         """获取单例实例"""
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
+        with cls._instance_lock:
+            if (
+                cls._instance is None
+                or not getattr(cls._instance, '_initialized', False)
+                or not hasattr(cls._instance, '_SessionLocal')
+            ):
+                cls._instance = cls()
+            return cls._instance
     
     @classmethod
     def reset_instance(cls) -> None:
         """重置单例（用于测试）"""
-        if cls._instance is not None:
-            if hasattr(cls._instance, '_engine') and cls._instance._engine is not None:
-                cls._instance._engine.dispose()
-            cls._instance._initialized = False
-            cls._instance = None
+        with cls._instance_lock:
+            if cls._instance is not None:
+                if hasattr(cls._instance, '_engine') and cls._instance._engine is not None:
+                    cls._instance._engine.dispose()
+                cls._instance._initialized = False
+                cls._instance = None
 
     @classmethod
     def _cleanup_engine(cls, engine) -> None:
@@ -895,6 +941,35 @@ class DatabaseManager:
                 "database table is locked",
             )
         )
+
+    def _upgrade_schema_compat(self) -> None:
+        """Apply lightweight additive schema upgrades for existing SQLite DBs."""
+        if not self._is_sqlite_engine:
+            return
+
+        inspector = inspect(self._engine)
+        table_names = set(inspector.get_table_names())
+        if "portfolio_bank_ledger" not in table_names:
+            return
+
+        existing_columns = {column["name"] for column in inspector.get_columns("portfolio_bank_ledger")}
+        additions = {
+            "registration_code": "VARCHAR(64)",
+            "linked_entry_id": "INTEGER",
+            "quantity": "FLOAT",
+            "start_date": "DATE",
+            "annual_rate": "FLOAT",
+            "investment_nature": "VARCHAR(32)",
+            "risk_level": "VARCHAR(8)",
+            "income_mode": "VARCHAR(16)",
+        }
+        with self._engine.begin() as connection:
+            for column_name, column_type in additions.items():
+                if column_name in existing_columns:
+                    continue
+                connection.execute(
+                    text(f"ALTER TABLE portfolio_bank_ledger ADD COLUMN {column_name} {column_type}")
+                )
 
     @staticmethod
     def _normalize_daily_date(value: Any) -> Any:
