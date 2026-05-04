@@ -115,6 +115,17 @@ def _safe_float(value: Any) -> Optional[float]:
         return None
 
 
+def _looks_like_index_or_etf(stock_code: str, stock_name: str = "") -> bool:
+    """Cheap ETF/index detection to avoid slow company-fundamental lookups."""
+    try:
+        from src.search_service import SearchService
+
+        return SearchService.is_index_or_etf(stock_code, stock_name)
+    except Exception:
+        code = str(stock_code or "").strip().split(".")[0]
+        return code.isdigit() and len(code) == 6 and code.startswith(("51", "52", "56", "58", "15", "16", "18"))
+
+
 def _compact_fundamental_context(fundamental_context: dict) -> dict:
     """Reduce token footprint for tool responses while keeping key semantics."""
     if not isinstance(fundamental_context, dict):
@@ -460,6 +471,32 @@ get_analysis_context_tool = ToolDefinition(
 def _handle_get_stock_info(stock_code: str) -> dict:
     """Get stock fundamental information through unified fundamental context."""
     manager = _get_fetcher_manager()
+    stock_name = stock_code.upper()
+    try:
+        stock_name = manager.get_stock_name(stock_code, allow_realtime=False) or stock_name
+    except Exception:
+        pass
+
+    if _looks_like_index_or_etf(stock_code, stock_name):
+        return {
+            "code": stock_code.upper(),
+            "name": stock_name,
+            "asset_type": "index_or_etf",
+            "status": "not_supported",
+            "note": (
+                "Index/ETF symbols do not have company fundamentals or sector boards. "
+                "Use latest close, daily history, trend analysis and portfolio snapshot instead."
+            ),
+            "fundamental_context": {
+                "status": "not_supported",
+                "market": None,
+                "coverage": {"fundamentals": "not_supported"},
+            },
+            "belong_boards": [],
+            "boards": [],
+            "sector_rankings": {},
+        }
+
     try:
         fundamental_context = manager.get_fundamental_context(stock_code)
     except Exception as e:
@@ -470,12 +507,6 @@ def _handle_get_stock_info(stock_code: str) -> dict:
     valuation = compact_context.get("valuation", {}).get("data", {})
     sector_rankings = compact_context.get("boards", {}).get("data", {})
     belong_boards = manager.get_belong_boards(stock_code)
-
-    stock_name = stock_code.upper()
-    try:
-        stock_name = manager.get_stock_name(stock_code) or stock_name
-    except Exception:
-        pass
 
     return {
         "code": stock_code.upper(),
@@ -497,7 +528,9 @@ get_stock_info_tool = ToolDefinition(
     name="get_stock_info",
     description="Get stock fundamental information: valuation, growth, earnings, institution flow, "
                 "stock sector membership (belong_boards; boards is compatibility alias) and "
-                "sector rankings. Returns a compact fundamental_context to reduce token usage.",
+                "sector rankings. For ETFs/indices, returns a lightweight not_supported block "
+                "instead of slow company fundamental lookups. Returns a compact "
+                "fundamental_context to reduce token usage.",
     parameters=[
         ToolParameter(
             name="stock_code",

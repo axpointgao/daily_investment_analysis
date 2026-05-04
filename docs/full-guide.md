@@ -1164,6 +1164,8 @@ A: 检查是否启用了 Actions，以及 cron 表达式是否正确（注意是
 - `get_daily_history` 会先尝试复用本地 `stock_daily` 日线缓存；缓存新鲜且至少覆盖首页默认的 30 条记录时，不再重复请求外部数据源。
 - 当 Agent 请求的天数多于本地缓存记录数时，工具会返回实际可用记录，并通过 `partial_cache=true`、`requested_days`、`actual_records` 标明这是部分缓存命中。
 - 缓存缺失或过期时，工具仍会按原逻辑从数据源获取日线数据；获取成功后会 best-effort 写回 `stock_daily`，保存失败不会阻断 Agent 回复。
+- `get_stock_info` 遇到 ETF/指数代码时只返回轻量的 `not_supported` 结构，不再尝试公司基本面、板块归属等股票专用数据源；这类问题应优先结合最新收盘价、日线、趋势分析和持仓快照回答。
+- 持仓、组合配置、ETF 替换或调仓类问答默认不调用 `search_stock_news`；只有用户明确要求“最新消息/资讯/公告/催化/风险事件”时才扩展新闻搜索。
 - `search_stock_news` 与 `search_comprehensive_intel` 成功返回后会 best-effort 写入 `news_intel`，复用现有 URL / fallback key 去重逻辑。
 - `get_realtime_quote` 不复用 `stock_daily` 作为实时行情缓存，也不会把盘中实时行情写入日线表；如需实时行情缓存，应单独设计实时行情存储。
 

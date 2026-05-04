@@ -487,13 +487,25 @@ async def agent_chat_stream(request: ChatRequest):
     async def event_generator():
         # Start executor in a thread so we don't block the event loop
         fut = loop.run_in_executor(None, run_sync)
+        heartbeat_count = 0
         try:
             while True:
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=300.0)
+                    event = await asyncio.wait_for(queue.get(), timeout=15.0)
                 except asyncio.TimeoutError:
-                    yield "data: " + json.dumps({"type": "error", "message": "分析超时"}, ensure_ascii=False) + "\n\n"
-                    break
+                    heartbeat_count += 1
+                    if heartbeat_count >= 40:
+                        yield "data: " + json.dumps({"type": "error", "message": "分析超时"}, ensure_ascii=False) + "\n\n"
+                        break
+                    yield "data: " + json.dumps(
+                        {
+                            "type": "thinking",
+                            "message": "分析仍在进行，正在等待工具或模型返回...",
+                        },
+                        ensure_ascii=False,
+                    ) + "\n\n"
+                    continue
+                heartbeat_count = 0
                 yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
                 if event.get("type") in ("done", "error"):
                     break

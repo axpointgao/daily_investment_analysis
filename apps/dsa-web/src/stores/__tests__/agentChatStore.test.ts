@@ -186,6 +186,69 @@ describe('agentChatStore.startStream', () => {
     });
   });
 
+  it('loads persisted assistant response when stream ends after progress without done event', async () => {
+    vi.mocked(agentApi.chatStream).mockResolvedValue(
+      createStreamResponse([
+        'data: {"type":"thinking","step":1,"message":"分析中"}',
+      ]),
+    );
+    vi.mocked(agentApi.getChatSessionMessages).mockResolvedValue([
+      {
+        id: 'm1',
+        role: 'user',
+        content: '分析茅台',
+        created_at: '2026-05-01T00:00:00Z',
+      },
+      {
+        id: 'm2',
+        role: 'assistant',
+        content: '后台完成的分析结果',
+        created_at: '2026-05-01T00:03:00Z',
+      },
+    ]);
+
+    await useAgentChatStore
+      .getState()
+      .startStream({ message: '分析茅台', session_id: 'session-test' }, { skillName: '趋势技能' });
+
+    const state = useAgentChatStore.getState();
+    expect(agentApi.getChatSessionMessages).toHaveBeenCalledWith('session-test');
+    expect(state.chatError).toBeNull();
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[1]).toMatchObject({
+      role: 'assistant',
+      content: '后台完成的分析结果',
+    });
+  });
+
+  it('uses persisted assistant response instead of showing a stream failure', async () => {
+    vi.mocked(agentApi.chatStream).mockResolvedValue(
+      createStreamResponse([
+        'data: {"type":"error","message":"分析超时"}',
+      ]),
+    );
+    vi.mocked(agentApi.getChatSessionMessages).mockResolvedValue([
+      {
+        id: 'm1',
+        role: 'assistant',
+        content: '后台稍后写入的结果',
+        created_at: '2026-05-01T00:03:00Z',
+      },
+    ]);
+
+    await useAgentChatStore
+      .getState()
+      .startStream({ message: '分析茅台', session_id: 'session-test' }, { skillName: '趋势技能' });
+
+    const state = useAgentChatStore.getState();
+    expect(state.chatError).toBeNull();
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[1]).toMatchObject({
+      role: 'assistant',
+      content: '后台稍后写入的结果',
+    });
+  });
+
   it('loads fund sessions independently and prefixes new fund session ids', async () => {
     vi.mocked(agentApi.getChatSessions).mockResolvedValue([
       {

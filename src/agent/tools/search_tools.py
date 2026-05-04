@@ -113,7 +113,10 @@ search_stock_news_tool = ToolDefinition(
     name="search_stock_news",
     description="Search for the latest news articles about a specific stock. "
                 "Requires both stock_code and stock_name for accurate search. "
-                "Returns news titles, snippets, sources, and URLs.",
+                "Returns news titles, snippets, sources, and URLs. "
+                "For portfolio allocation, holding comparison, or ETF replacement questions, "
+                "skip this tool unless the user explicitly asks for latest news,资讯,消息,公告, "
+                "or catalyst/risk events.",
     parameters=[
         ToolParameter(
             name="stock_code",

@@ -90,6 +90,10 @@ function getStreamFailureError(
   );
 }
 
+function isFailureAssistantMessage(content: string): boolean {
+  return /^\s*\[分析失败\]/.test(content || '');
+}
+
 interface AgentChatState {
   messages: Message[];
   loading: boolean;
@@ -313,23 +317,25 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
       const decoder = new TextDecoder();
       let buf = '';
       let finalContent: string | null = null;
+      let streamHadEvents = false;
       const currentProgressSteps: ProgressStep[] = [];
-        const processLine = (line: string) => {
-          if (!line.startsWith('data: ')) return;
+      const processLine = (line: string) => {
+        if (!line.startsWith('data: ')) return;
 
-          const event = JSON.parse(line.slice(6)) as ProgressStep;
-          if (event.type === 'done') {
-            const doneEvent = event as unknown as StreamFailureEvent;
-            if (doneEvent.success === false) {
-              throw getStreamFailureError(doneEvent, '大模型调用出错，请检查 API Key 配置');
-            }
-            finalContent = doneEvent.content ?? '';
-            return;
+        streamHadEvents = true;
+        const event = JSON.parse(line.slice(6)) as ProgressStep;
+        if (event.type === 'done') {
+          const doneEvent = event as unknown as StreamFailureEvent;
+          if (doneEvent.success === false) {
+            throw getStreamFailureError(doneEvent, '分析未完成，请稍后查看会话历史或重试');
           }
+          finalContent = doneEvent.content ?? '';
+          return;
+        }
 
-          if (event.type === 'error') {
-            throw getStreamFailureError(event as unknown as StreamFailureEvent, '分析出错');
-          }
+        if (event.type === 'error') {
+          throw getStreamFailureError(event as unknown as StreamFailureEvent, '分析出错');
+        }
 
         currentProgressSteps.push(event);
         set((s) => ({ progressSteps: [...s.progressSteps, event] }));
@@ -360,6 +366,16 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
           if (isParsedApiError(parseErr) || isApiRequestError(parseErr)) {
             throw parseErr;
           }
+        }
+      }
+
+      if (!finalContent && streamHadEvents && !ac.signal.aborted) {
+        const persistedMessages = await agentApi.getChatSessionMessages(streamSessionId).catch(() => []);
+        const latestAssistant = [...persistedMessages]
+          .reverse()
+          .find((message) => message.role === 'assistant' && !isFailureAssistantMessage(message.content));
+        if (latestAssistant?.content) {
+          finalContent = latestAssistant.content;
         }
       }
 
@@ -401,7 +417,29 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
       if (error instanceof Error && error.name === 'AbortError') {
         // User-initiated abort: silent, no badge
       } else {
-        set({ chatError: getParsedApiError(error) });
+        const persistedMessages = await agentApi.getChatSessionMessages(streamSessionId).catch(() => []);
+        const latestAssistant = [...persistedMessages]
+          .reverse()
+          .find((message) => message.role === 'assistant' && !isFailureAssistantMessage(message.content));
+        if (latestAssistant?.content && get().sessionId === streamSessionId) {
+          set((s) => ({
+            messages: [
+              ...s.messages,
+              {
+                id: latestAssistant.id,
+                role: 'assistant',
+                content: latestAssistant.content,
+                skills: streamPayload.skills,
+                skill: streamPayload.skills?.[0],
+                skillNames,
+                skillName,
+              },
+            ],
+            chatError: null,
+          }));
+        } else {
+          set({ chatError: getParsedApiError(error) });
+        }
         const { currentRoute } = get();
         const activeRoute = assetType === 'fund' ? '/fund-chat' : '/chat';
         if (currentRoute !== activeRoute) {

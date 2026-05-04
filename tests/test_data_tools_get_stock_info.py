@@ -6,7 +6,7 @@ Contract tests for get_stock_info tool output semantics.
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -60,7 +60,7 @@ class _DummyManager:
     def get_belong_boards(self, _stock_code: str):
         return self._belong_boards
 
-    def get_stock_name(self, _stock_code: str):
+    def get_stock_name(self, _stock_code: str, allow_realtime: bool = True):
         return "贵州茅台"
 
 
@@ -85,6 +85,25 @@ class TestGetStockInfoContract(unittest.TestCase):
             result["fundamental_context"]["boards"]["data"],
             result["sector_rankings"],
         )
+
+    def test_get_stock_info_uses_lightweight_result_for_etf(self) -> None:
+        manager = Mock()
+        manager.get_stock_name.return_value = "沪深300ETF"
+
+        with patch("src.agent.tools.data_tools._get_fetcher_manager", return_value=manager):
+            result = _handle_get_stock_info("510300")
+
+        manager.get_stock_name.assert_called_once_with("510300", allow_realtime=False)
+        manager.get_fundamental_context.assert_not_called()
+        manager.get_belong_boards.assert_not_called()
+
+        self.assertEqual(result["code"], "510300")
+        self.assertEqual(result["name"], "沪深300ETF")
+        self.assertEqual(result["asset_type"], "index_or_etf")
+        self.assertEqual(result["status"], "not_supported")
+        self.assertEqual(result["belong_boards"], [])
+        self.assertEqual(result["boards"], [])
+        self.assertEqual(result["sector_rankings"], {})
 
 
 if __name__ == "__main__":
