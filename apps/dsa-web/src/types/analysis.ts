@@ -233,6 +233,7 @@ export interface TaskInfo {
   startedAt?: string;
   completedAt?: string;
   error?: string;
+  notificationError?: string;
   originalQuery?: string;
   selectionSource?: string;
 }

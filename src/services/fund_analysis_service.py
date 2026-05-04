@@ -92,6 +92,20 @@ def _as_date(value: Any) -> Optional[str]:
     return text or None
 
 
+def _format_fund_period_label(value: Any) -> str:
+    text = str(value or "").strip()
+    return {
+        "Z": "近1周",
+        "Y": "近1月",
+        "3Y": "近3月",
+        "6Y": "近6月",
+        "1N": "近1年",
+        "2N": "近2年",
+        "3N": "近3年",
+        "5N": "近5年",
+    }.get(text, text)
+
+
 def _datas(payload: Dict[str, Any]) -> Any:
     return payload.get("Datas") if isinstance(payload, dict) else None
 
@@ -102,6 +116,7 @@ class FundAnalysisService:
     def __init__(self, db_manager: Optional[DatabaseManager] = None):
         self.db = db_manager or DatabaseManager.get_instance()
         self.last_error: Optional[str] = None
+        self.last_notification_error: Optional[str] = None
 
     def analyze_fund(
         self,
@@ -113,8 +128,8 @@ class FundAnalysisService:
         query_id: Optional[str] = None,
         notify: bool = True,
         progress_callback: Optional[Callable[[int, str], None]] = None,
-    ) -> Optional[Dict[str, Any]]:
-        void = (force_refresh, notify)
+        ) -> Optional[Dict[str, Any]]:
+        void = force_refresh
         del void
         code = normalize_fund_code(fund_code)
         query_id = query_id or datetime.now().strftime("%Y%m%d%H%M%S%f")
@@ -128,6 +143,7 @@ class FundAnalysisService:
 
         try:
             self.last_error = None
+            self.last_notification_error = None
             emit(15, f"{code}：正在连接天天基金数据源")
             client = TiantianFundClient()
 
@@ -181,18 +197,68 @@ class FundAnalysisService:
                 data_snapshot=data_snapshot,
             )
 
+            notification_status = {"requested": bool(notify), "sent": False, "error": None}
+            if notify:
+                emit(97, f"{profile['fundName']}：正在发送基金诊断通知")
+                notification_status = self._send_notification(
+                    fund_code=code,
+                    fund_name=profile["fundName"],
+                    report=report,
+                    report_type=report_type,
+                )
+
             emit(100, f"{profile['fundName']}：基金分析完成")
             return {
                 "query_id": query_id,
                 "fund_code": code,
                 "fund_name": profile["fundName"],
                 "report": report,
+                "notification": notification_status,
                 "created_at": datetime.now().isoformat(),
             }
         except Exception as exc:
             self.last_error = str(exc)
             logger.error("基金分析失败: %s", exc, exc_info=True)
             return None
+
+    def _send_notification(
+        self,
+        *,
+        fund_code: str,
+        fund_name: str,
+        report: Dict[str, Any],
+        report_type: str,
+    ) -> Dict[str, Any]:
+        from src.enums import ReportType
+        from src.notification import NotificationService
+
+        notifier = NotificationService()
+        if not notifier.is_available():
+            message = "未配置有效的通知渠道"
+            self.last_notification_error = message
+            logger.warning("基金 %s 通知未发送: %s", fund_code, message)
+            return {"requested": True, "sent": False, "error": message}
+
+        payload = {
+            "fund_code": fund_code,
+            "fund_name": fund_name,
+            "report": report,
+        }
+        normalized_type = ReportType.from_str(report_type)
+        content = notifier.generate_fund_report([payload], report_type=normalized_type)
+        try:
+            if notifier.send(content):
+                logger.info("基金 %s 通知发送成功", fund_code)
+                return {"requested": True, "sent": True, "error": None}
+            message = "所有通知渠道均发送失败"
+            self.last_notification_error = message
+            logger.warning("基金 %s 通知发送失败", fund_code)
+            return {"requested": True, "sent": False, "error": message}
+        except Exception as exc:
+            message = str(exc)
+            self.last_notification_error = message
+            logger.error("基金 %s 通知发送异常: %s", fund_code, exc, exc_info=True)
+            return {"requested": True, "sent": False, "error": message}
 
     def _fetch_profile(self, client: TiantianFundClient, code: str, fund_name: Optional[str]) -> Dict[str, Any]:
         detail_payload = client.get("/fundMNDetailInformation", {"FCODE": code})
@@ -259,7 +325,7 @@ class FundAnalysisService:
         for row in rows:
             if isinstance(row, dict):
                 result.append({
-                    "period": row.get("title"),
+                    "period": _format_fund_period_label(row.get("title")),
                     "returnPct": _as_float(row.get("syl")),
                     "peerAvgPct": _as_float(row.get("avg")),
                     "hs300Pct": _as_float(row.get("hs300")),

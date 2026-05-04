@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { analysisApi, DuplicateTaskError } from '../../api/analysis';
+import { fundAnalysisApi } from '../../api/fundAnalysis';
 import { historyApi } from '../../api/history';
 import { useStockPoolStore } from '../stockPoolStore';
 
 vi.mock('../../api/history', () => ({
   historyApi: {
-    getList: vi.fn(),
-    getDetail: vi.fn(),
-    deleteRecords: vi.fn(),
+    getMixedList: vi.fn(),
+    getMixedDetail: vi.fn(),
+    deleteMixedRecords: vi.fn(),
   },
 }));
 
@@ -17,6 +18,17 @@ vi.mock('../../api/analysis', async () => {
     ...actual,
     analysisApi: {
       analyzeAsync: vi.fn(),
+    },
+  };
+});
+
+vi.mock('../../api/fundAnalysis', async () => {
+  const actual = await vi.importActual<typeof import('../../api/fundAnalysis')>('../../api/fundAnalysis');
+  return {
+    ...actual,
+    fundAnalysisApi: {
+      analyzeAsync: vi.fn(),
+      getTaskStreamUrl: vi.fn(() => '/api/v1/fund-analysis/tasks/stream'),
     },
   };
 });
@@ -65,13 +77,13 @@ describe('stockPoolStore', () => {
   });
 
   it('loads initial history and auto-selects the first report', async () => {
-    vi.mocked(historyApi.getList).mockResolvedValue({
+    vi.mocked(historyApi.getMixedList).mockResolvedValue({
       total: 1,
       page: 1,
       limit: 20,
       items: [historyItem],
     });
-    vi.mocked(historyApi.getDetail).mockResolvedValue(historyReport);
+    vi.mocked(historyApi.getMixedDetail).mockResolvedValue(historyReport);
 
     await useStockPoolStore.getState().loadInitialHistory();
 
@@ -82,6 +94,40 @@ describe('stockPoolStore', () => {
     expect(state.isLoadingReport).toBe(false);
   });
 
+  it('shows report loading when switching between history records', async () => {
+    const deferred = createDeferred<typeof historyReport>();
+
+    useStockPoolStore.setState({
+      historyItems: [
+        historyItem,
+        { ...historyItem, id: 2, queryId: 'q-2', stockCode: 'AAPL', stockName: 'Apple' },
+      ],
+      selectedReport: historyReport,
+    });
+
+    vi.mocked(historyApi.getMixedDetail).mockImplementation(() => deferred.promise);
+
+    const selectPromise = useStockPoolStore.getState().selectHistoryItem(2);
+
+    expect(useStockPoolStore.getState().isLoadingReport).toBe(true);
+
+    deferred.resolve({
+      ...historyReport,
+      meta: {
+        ...historyReport.meta,
+        id: 2,
+        queryId: 'q-2',
+        stockCode: 'AAPL',
+        stockName: 'Apple',
+      },
+    });
+
+    await selectPromise;
+
+    expect(useStockPoolStore.getState().selectedReport?.meta.id).toBe(2);
+    expect(useStockPoolStore.getState().isLoadingReport).toBe(false);
+  });
+
   it('deletes selected history and clears the selected report when nothing remains', async () => {
     useStockPoolStore.setState({
       historyItems: [historyItem],
@@ -89,8 +135,8 @@ describe('stockPoolStore', () => {
       selectedReport: historyReport,
     });
 
-    vi.mocked(historyApi.deleteRecords).mockResolvedValue({ deleted: 1 });
-    vi.mocked(historyApi.getList).mockResolvedValue({
+    vi.mocked(historyApi.deleteMixedRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(historyApi.getMixedList).mockResolvedValue({
       total: 0,
       page: 1,
       limit: 20,
@@ -103,7 +149,7 @@ describe('stockPoolStore', () => {
     expect(state.historyItems).toHaveLength(0);
     expect(state.selectedHistoryIds).toHaveLength(0);
     expect(state.selectedReport).toBeNull();
-    expect(historyApi.getList).toHaveBeenCalledTimes(1);
+    expect(historyApi.getMixedList).toHaveBeenCalledTimes(1);
   });
 
   it('falls back to the next history report after deleting the currently selected item', async () => {
@@ -131,14 +177,14 @@ describe('stockPoolStore', () => {
       selectedReport: historyReport,
     });
 
-    vi.mocked(historyApi.deleteRecords).mockResolvedValue({ deleted: 1 });
-    vi.mocked(historyApi.getList).mockResolvedValue({
+    vi.mocked(historyApi.deleteMixedRecords).mockResolvedValue({ deleted: 1 });
+    vi.mocked(historyApi.getMixedList).mockResolvedValue({
       total: 1,
       page: 1,
       limit: 20,
       items: [nextHistoryItem],
     });
-    vi.mocked(historyApi.getDetail).mockResolvedValue(nextHistoryReport);
+    vi.mocked(historyApi.getMixedDetail).mockResolvedValue(nextHistoryReport);
 
     await useStockPoolStore.getState().deleteSelectedHistory();
 
@@ -209,7 +255,7 @@ describe('stockPoolStore', () => {
       hasMore: true,
     });
 
-    vi.mocked(historyApi.getList).mockResolvedValue({
+    vi.mocked(historyApi.getMixedList).mockResolvedValue({
       total: 2,
       page: 1,
       limit: 20,
@@ -226,6 +272,36 @@ describe('stockPoolStore', () => {
     expect(state.currentPage).toBe(1);
   });
 
+  it('updates existing history item metadata during silent refresh', async () => {
+    useStockPoolStore.setState({
+      historyItems: [historyItem],
+      currentPage: 1,
+      hasMore: true,
+    });
+
+    vi.mocked(historyApi.getMixedList).mockResolvedValue({
+      total: 1,
+      page: 1,
+      limit: 20,
+      items: [
+        {
+          ...historyItem,
+          stockName: '贵州茅台股份',
+          sentimentScore: 91,
+          operationAdvice: '继续持有',
+        },
+      ],
+    });
+
+    await useStockPoolStore.getState().refreshHistory(true);
+
+    const state = useStockPoolStore.getState();
+    expect(state.historyItems).toHaveLength(1);
+    expect(state.historyItems[0].stockName).toBe('贵州茅台股份');
+    expect(state.historyItems[0].sentimentScore).toBe(91);
+    expect(state.historyItems[0].operationAdvice).toBe('继续持有');
+  });
+
   it('ignores late history responses after dashboard reset', async () => {
     const deferred = createDeferred<{
       total: number;
@@ -234,7 +310,7 @@ describe('stockPoolStore', () => {
       items: typeof historyItem[];
     }>();
 
-    vi.mocked(historyApi.getList).mockImplementation(() => deferred.promise);
+    vi.mocked(historyApi.getMixedList).mockImplementation(() => deferred.promise);
 
     const loadPromise = useStockPoolStore.getState().loadInitialHistory();
     useStockPoolStore.getState().resetDashboardState();
@@ -252,6 +328,45 @@ describe('stockPoolStore', () => {
     expect(state.historyItems).toHaveLength(0);
     expect(state.isLoadingHistory).toBe(false);
     expect(state.currentPage).toBe(1);
+  });
+
+  it('ignores late report responses after dashboard reset', async () => {
+    const deferred = createDeferred<typeof historyReport>();
+
+    vi.mocked(historyApi.getMixedDetail).mockImplementation(() => deferred.promise);
+
+    const selectPromise = useStockPoolStore.getState().selectHistoryItem(1);
+    useStockPoolStore.getState().resetDashboardState();
+
+    deferred.resolve(historyReport);
+
+    await selectPromise;
+
+    const state = useStockPoolStore.getState();
+    expect(state.selectedReport).toBeNull();
+    expect(state.isLoadingReport).toBe(false);
+  });
+
+  it('ignores late analysis responses after dashboard reset', async () => {
+    const deferred = createDeferred<never>();
+
+    vi.mocked(analysisApi.analyzeAsync).mockImplementation(() => deferred.promise);
+
+    useStockPoolStore.getState().setQuery('600519');
+    const submitPromise = useStockPoolStore.getState().submitAnalysis();
+    useStockPoolStore.getState().resetDashboardState();
+
+    deferred.resolve({
+      taskId: 'task-late-1',
+      status: 'pending',
+    } as never);
+
+    await submitPromise;
+
+    const state = useStockPoolStore.getState();
+    expect(state.query).toBe('');
+    expect(state.isAnalyzing).toBe(false);
+    expect(state.error).toBeNull();
   });
 
   it('tracks task lifecycle updates and resets all dashboard state', () => {
@@ -382,5 +497,24 @@ describe('stockPoolStore', () => {
       stockCode: '600519',
       forceRefresh: true,
     }));
+  });
+
+  it('submits fund analysis through the fund API only', async () => {
+    vi.mocked(fundAnalysisApi.analyzeAsync).mockResolvedValue({
+      taskId: 'fund-task-1',
+      status: 'pending',
+    });
+
+    useStockPoolStore.getState().setEntryType('fund');
+    useStockPoolStore.getState().setQuery('000001');
+
+    await useStockPoolStore.getState().submitAnalysis();
+
+    expect(fundAnalysisApi.analyzeAsync).toHaveBeenCalledWith(expect.objectContaining({
+      fundCode: '000001',
+      reportType: 'detailed',
+      notify: true,
+    }));
+    expect(analysisApi.analyzeAsync).not.toHaveBeenCalled();
   });
 });

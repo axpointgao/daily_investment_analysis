@@ -52,12 +52,12 @@ export function sanitizeFollowUpStockName(stockName: string | null): string | nu
 }
 
 export function parseFollowUpRecordId(recordId: string | null): number | undefined {
-  if (!recordId || !/^\d+$/.test(recordId)) {
+  if (!recordId || !/^-?\d+$/.test(recordId)) {
     return undefined;
   }
 
   const parsed = Number(recordId);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+  if (!Number.isSafeInteger(parsed) || parsed === 0) {
     return undefined;
   }
 

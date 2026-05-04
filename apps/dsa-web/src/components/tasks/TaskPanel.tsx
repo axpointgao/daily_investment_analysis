@@ -10,43 +10,73 @@ interface TaskItemProps {
   task: TaskInfo;
 }
 
-/**
- * 单个任务项
- */
+type ActiveTaskStatus = 'pending' | 'processing';
+
+const isActiveTask = (task: TaskInfo): task is TaskInfo & { status: ActiveTaskStatus } => (
+  task.status === 'pending' || task.status === 'processing'
+);
+
+const getTaskStatusMeta = (status: ActiveTaskStatus) => {
+  if (status === 'processing') {
+    return {
+      label: '分析中',
+      badgeVariant: 'info' as const,
+      tone: 'info' as const,
+    };
+  }
+
+  return {
+    label: '等待中',
+    badgeVariant: 'default' as const,
+    tone: 'neutral' as const,
+  };
+};
+
+const getTaskDisplayInfo = (task: TaskInfo) => {
+  if (task.type === 'fund') {
+    return {
+      code: task.fundCode,
+      name: task.fundName,
+    };
+  }
+
+  return {
+    code: task.stockCode,
+    name: task.stockName,
+  };
+};
+
 const TaskItem: React.FC<TaskItemProps> = ({ task }) => {
-  const isPending = task.status === 'pending';
-  const isProcessing = task.status === 'processing';
-  const statusLabel = isProcessing ? '分析中' : '等待中';
-  const statusVariant = isProcessing ? 'info' : 'default';
-  const statusTone = isProcessing ? 'info' : 'neutral';
+  if (!isActiveTask(task)) {
+    return null;
+  }
+
+  const statusMeta = getTaskStatusMeta(task.status);
   const progress = Math.max(0, Math.min(100, task.progress || 0));
-  const displayCode = task.type === 'fund' ? task.fundCode : task.stockCode;
-  const displayName = task.type === 'fund' ? task.fundName : task.stockName;
+  const displayInfo = getTaskDisplayInfo(task);
 
   return (
     <div className="home-subpanel flex items-center gap-3 px-3 py-2.5">
-      {/* 状态图标 */}
       <div className="shrink-0">
-        {isProcessing ? (
+        {task.status === 'processing' ? (
           <StatusDot tone="info" pulse className="h-2.5 w-2.5" aria-label="任务进行中" />
-        ) : isPending ? (
+        ) : (
           <StatusDot tone="neutral" className="h-2.5 w-2.5" aria-label="任务等待中" />
-        ) : null}
+        )}
       </div>
 
-      {/* 任务信息 */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-foreground truncate">
-            {displayName || displayCode}
+            {displayInfo.name || displayInfo.code}
           </span>
           <span className="text-xs text-muted-text">
-            {displayCode}
+            {displayInfo.code}
           </span>
         </div>
-        {task.message && (
+        {(task.message || task.notificationError) && (
           <p className="text-xs text-secondary-text truncate mt-0.5">
-            {task.message}
+            {task.notificationError ? `通知失败：${task.notificationError}` : task.message}
           </p>
         )}
         <div className="mt-2 flex items-center gap-2">
@@ -62,15 +92,14 @@ const TaskItem: React.FC<TaskItemProps> = ({ task }) => {
         </div>
       </div>
 
-      {/* 状态标签 */}
       <div className="flex-shrink-0">
         <Badge
-          variant={statusVariant}
+          variant={statusMeta.badgeVariant}
           className="min-w-[4.75rem] justify-center gap-1.5 shadow-none"
-          aria-label={`任务状态：${statusLabel}`}
+          aria-label={`任务状态：${statusMeta.label}`}
         >
-          <StatusDot tone={statusTone} pulse={isProcessing} className="h-1.5 w-1.5" />
-          {statusLabel}
+          <StatusDot tone={statusMeta.tone} pulse={task.status === 'processing'} className="h-1.5 w-1.5" />
+          {statusMeta.label}
         </Badge>
       </div>
     </div>
@@ -101,18 +130,14 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
   title = '分析任务',
   className = '',
 }) => {
-  // 筛选活跃任务（pending 和 processing）
-  const activeTasks = tasks.filter(
-    (t) => t.status === 'pending' || t.status === 'processing'
-  );
+  const activeTasks = tasks.filter(isActiveTask);
 
-  // 无任务或不可见时不渲染
   if (!visible || activeTasks.length === 0) {
     return null;
   }
 
-  const pendingCount = activeTasks.filter((t) => t.status === 'pending').length;
-  const processingCount = activeTasks.filter((t) => t.status === 'processing').length;
+  const pendingCount = activeTasks.filter((task) => task.status === 'pending').length;
+  const processingCount = activeTasks.length - pendingCount;
 
   return (
     <Card

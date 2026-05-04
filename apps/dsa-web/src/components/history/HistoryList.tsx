@@ -10,10 +10,10 @@ interface HistoryListProps {
   isLoading: boolean;
   isLoadingMore: boolean;
   hasMore: boolean;
-  selectedId?: number;  // 当前选中的历史记录 ID
+  selectedId?: number;
   selectedIds: Set<number>;
   isDeleting?: boolean;
-  onItemClick: (recordId: number) => void;  // 点击记录的回调
+  onItemClick: (recordId: number) => void;
   onLoadMore: () => void;
   onToggleItemSelection: (recordId: number) => void;
   onToggleSelectAll: () => void;
@@ -21,10 +21,6 @@ interface HistoryListProps {
   className?: string;
 }
 
-/**
- * 历史记录列表组件 (升级版)
- * 使用新设计系统组件实现，支持批量选择和滚动加载
- */
 export const HistoryList: React.FC<HistoryListProps> = ({
   items,
   isLoading,
@@ -49,7 +45,6 @@ export const HistoryList: React.FC<HistoryListProps> = ({
   const allVisibleSelected = items.length > 0 && selectedCount === items.length;
   const someVisibleSelected = selectedCount > 0 && !allVisibleSelected;
 
-  // 使用 IntersectionObserver 检测滚动到底部
   const handleObserver = useCallback(
     (entries: IntersectionObserverEntry[]) => {
       const target = entries[0];
@@ -60,7 +55,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
         }
       }
     },
-    [hasMore, isLoading, isLoadingMore, onLoadMore]
+    [hasMore, isLoading, isLoadingMore, onLoadMore],
   );
 
   useEffect(() => {

@@ -125,6 +125,7 @@ def get_fund_task_list(
                 started_at=task.started_at.isoformat() if task.started_at else None,
                 completed_at=task.completed_at.isoformat() if task.completed_at else None,
                 error=task.error,
+                notification_error=task.notification_error,
             )
             for task in tasks
         ],
@@ -153,6 +154,7 @@ def get_fund_task_status(task_id: str) -> FundTaskStatus:
         progress=task.progress,
         result=result,
         error=task.error,
+        notification_error=task.notification_error,
         fund_name=task.fund_name,
     )
 

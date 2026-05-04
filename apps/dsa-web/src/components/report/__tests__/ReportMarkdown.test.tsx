@@ -6,6 +6,7 @@ import { ReportMarkdown } from '../ReportMarkdown';
 vi.mock('../../../api/history', () => ({
   historyApi: {
     getMarkdown: vi.fn(),
+    getMixedMarkdown: vi.fn(),
   },
 }));
 

@@ -76,6 +76,7 @@ vi.mock('../../utils/chatExport', () => ({
 vi.mock('../../api/history', () => ({
   historyApi: {
     getDetail: vi.fn().mockResolvedValue({}),
+    getMixedDetail: vi.fn().mockResolvedValue({}),
   },
 }));
 
@@ -426,6 +427,7 @@ describe('ChatPage', () => {
     expect(mockClearCompletionBadge).toHaveBeenCalledWith('fund');
     expect(mockGetSkills).toHaveBeenCalledWith('fund');
     expect(historyApi.getDetail).not.toHaveBeenCalled();
+    expect(historyApi.getMixedDetail).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByPlaceholderText(/诊断 000001/), {
       target: { value: '诊断 000001' },
@@ -442,6 +444,77 @@ describe('ChatPage', () => {
         }),
         expect.objectContaining({
           skillNames: ['通用基金诊断'],
+          skillName: '通用基金诊断',
+        }),
+      );
+    });
+  });
+
+  it('hydrates fund follow-up context and sends it to fund chat', async () => {
+    mockGetSkills.mockResolvedValue({
+      skills: [
+        { id: 'fund_general', name: '通用基金诊断', description: '基金诊断' },
+      ],
+      default_skill_id: 'fund_general',
+    });
+    vi.mocked(historyApi.getMixedDetail).mockResolvedValue({
+      meta: {
+        id: -7,
+        assetType: 'fund',
+        queryId: 'fund-q-7',
+        fundCode: '110011',
+        fundName: '易方达中小盘',
+        reportType: 'detailed',
+        createdAt: '2026-05-01T10:00:00Z',
+        latestNav: 5.4321,
+        navDate: '2026-04-30',
+        dailyReturnPct: 0.35,
+        fundType: '混合型',
+      },
+      summary: {
+        analysisSummary: '长期风格稳定',
+        allocationRating: '谨慎持有',
+        holdingAdvice: '控制仓位',
+        riskSummary: '回撤需要关注',
+      },
+      metrics: {
+        risk: { maxDrawdownPct: -18.5 },
+        performance: [{ period: '近1年', returnPct: 12.3 }],
+        profile: { fundCompany: '易方达基金' },
+        manager: [{ managerNames: '张三' }],
+      },
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/fund-chat?fundCode=110011&fundName=%E6%98%93%E6%96%B9%E8%BE%BE%E4%B8%AD%E5%B0%8F%E7%9B%98&recordId=-7']}>
+        <ChatPage assetType="fund" />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByDisplayValue('请基于上一份基金诊断继续分析 易方达中小盘(110011)')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.queryByText('正在加载历史分析上下文；现在可直接发送追问。')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => {
+      expect(mockStartStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '请基于上一份基金诊断继续分析 易方达中小盘(110011)',
+          asset_type: 'fund',
+          context: expect.objectContaining({
+            fund_code: '110011',
+            fund_name: '易方达中小盘',
+            fund_type: '混合型',
+            latest_nav: 5.4321,
+            previous_allocation_rating: '谨慎持有',
+            previous_holding_advice: '控制仓位',
+            previous_risk_summary: '回撤需要关注',
+          }),
+        }),
+        expect.objectContaining({
           skillName: '通用基金诊断',
         }),
       );

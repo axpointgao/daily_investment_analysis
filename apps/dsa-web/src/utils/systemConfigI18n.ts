@@ -24,6 +24,7 @@ const categoryDescriptionMap: Partial<Record<SystemConfigCategory, string>> = {
 
 const fieldTitleMap: Record<string, string> = {
   STOCK_LIST: '自选股列表',
+  FUND_LIST: '场外基金列表',
   TUSHARE_TOKEN: 'Tushare Token',
   BOCHA_API_KEYS: 'Bocha API Keys',
   TAVILY_API_KEYS: 'Tavily API Keys',
@@ -35,6 +36,7 @@ const fieldTitleMap: Record<string, string> = {
   MINIMAX_API_KEYS: 'MiniMax API Keys',
   NEWS_STRATEGY_PROFILE: '新闻策略窗口档位',
   NEWS_MAX_AGE_DAYS: '新闻最大时效（天）',
+  ENABLE_REALTIME_QUOTE: '启用实时行情',
   REALTIME_SOURCE_PRIORITY: '实时数据源优先级',
   ENABLE_REALTIME_TECHNICAL_INDICATORS: '盘中实时技术面',
   LITELLM_MODEL: '主模型',
@@ -87,6 +89,7 @@ const fieldTitleMap: Record<string, string> = {
 
 const fieldDescriptionMap: Record<string, string> = {
   STOCK_LIST: '使用逗号分隔股票代码，例如：600519,300750。',
+  FUND_LIST: '使用逗号分隔 6 位场外基金代码，例如：000001,110011。',
   TUSHARE_TOKEN: '用于接入 Tushare Pro 数据服务的凭据。',
   BOCHA_API_KEYS: '用于新闻检索的 Bocha 密钥，支持逗号分隔多个（最高优先级）。',
   TAVILY_API_KEYS: '用于新闻检索的 Tavily 密钥，支持逗号分隔多个。',
@@ -98,8 +101,9 @@ const fieldDescriptionMap: Record<string, string> = {
   MINIMAX_API_KEYS: '用于新闻检索的 MiniMax 密钥，支持逗号分隔多个（最低优先级）。',
   NEWS_STRATEGY_PROFILE: '新闻窗口档位：ultra_short=1天，short=3天，medium=7天，long=30天。',
   NEWS_MAX_AGE_DAYS: '新闻最大时效上限。实际窗口 = min(策略档位天数, NEWS_MAX_AGE_DAYS)。例如 ultra_short + 7 仍为 1 天。',
-  REALTIME_SOURCE_PRIORITY: '按逗号分隔填写数据源调用优先级。',
-  ENABLE_REALTIME_TECHNICAL_INDICATORS: '盘中分析时用实时价计算 MA5/MA10/MA20 与多头排列（Issue #234）；关闭则用昨日收盘。',
+  ENABLE_REALTIME_QUOTE: '仅用于持仓实时估值、价格提醒等实时场景；问股分析和日报默认使用最新交易日收盘价。',
+  REALTIME_SOURCE_PRIORITY: '按逗号分隔填写实时场景的数据源调用优先级。',
+  ENABLE_REALTIME_TECHNICAL_INDICATORS: '盘中分析时用实时价计算 MA5/MA10/MA20 与多头排列；当前问股分析和日报默认使用收盘价口径。',
   LITELLM_MODEL: '主模型，格式 provider/model（如 gemini/gemini-2.5-flash）。配置渠道后自动推断。',
   AGENT_LITELLM_MODEL: 'Agent 专用主模型。留空时继承主模型；无 provider 前缀时会按 openai/<model> 解析。',
   LITELLM_FALLBACK_MODELS: '备选模型，逗号分隔，主模型失败时按序尝试。',

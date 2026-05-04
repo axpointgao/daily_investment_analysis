@@ -102,6 +102,11 @@ export const historyApi = {
     return response.data.content;
   },
 
+  getMixedMarkdown: async (recordId: number): Promise<string> => {
+    const response = await apiClient.get<{ content: string }>(`/api/v1/history/mixed/${recordId}/markdown`);
+    return response.data.content;
+  },
+
   /**
    * 批量删除历史记录
    * @param recordIds 分析历史记录主键 ID 列表

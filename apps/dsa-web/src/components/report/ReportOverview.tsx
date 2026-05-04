@@ -70,6 +70,44 @@ const buildBoardSignalMap = (details?: ReportDetailsType): Map<string, BoardSign
   return signalMap;
 };
 
+const getPriceChangeStyle = (changePct: number | undefined): React.CSSProperties | undefined => {
+  if (changePct === undefined || changePct === null) {
+    return undefined;
+  }
+
+  if (changePct > 0) {
+    return { color: 'var(--home-price-up)' };
+  }
+
+  if (changePct < 0) {
+    return { color: 'var(--home-price-down)' };
+  }
+
+  return undefined;
+};
+
+const formatChangePct = (changePct: number | undefined): string => {
+  if (changePct === undefined || changePct === null) {
+    return '--';
+  }
+  const sign = changePct > 0 ? '+' : '';
+  return `${sign}${changePct.toFixed(2)}%`;
+};
+
+const getBoardStatusLabel = (status: BoardStatus, text: ReturnType<typeof getReportText>): string => {
+  if (status === 'leading') {
+    return text.leadingBoard;
+  }
+  return text.laggingBoard;
+};
+
+const getBoardStatusVariant = (status: BoardStatus): 'success' | 'danger' => {
+  if (status === 'leading') {
+    return 'success';
+  }
+  return 'danger';
+};
+
 /**
  * 报告概览区组件 - 终端风格
  */
@@ -85,42 +123,6 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
     .slice(0, 3);
   const boardSignals = buildBoardSignalMap(details);
 
-  const getPriceChangeStyle = (changePct: number | undefined): React.CSSProperties | undefined => {
-    if (changePct === undefined || changePct === null) {
-      return undefined;
-    }
-
-    if (changePct > 0) {
-      return { color: 'var(--home-price-up)' };
-    }
-
-    if (changePct < 0) {
-      return { color: 'var(--home-price-down)' };
-    }
-
-    return undefined;
-  };
-
-  const formatChangePct = (changePct: number | undefined): string => {
-    if (changePct === undefined || changePct === null) return '--';
-    const sign = changePct > 0 ? '+' : '';
-    return `${sign}${changePct.toFixed(2)}%`;
-  };
-
-  const getBoardStatusLabel = (status: BoardStatus): string => {
-    if (status === 'leading') {
-      return text.leadingBoard;
-    }
-    return text.laggingBoard;
-  };
-
-  const getBoardStatusVariant = (status: BoardStatus): 'success' | 'danger' => {
-    if (status === 'leading') {
-      return 'success';
-    }
-    return 'danger';
-  };
-
   return (
     <div className="space-y-5">
       {/* 主信息区 - 两列布局，items-stretch 确保右侧与左侧同高 */}
@@ -129,25 +131,15 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
         <div className="lg:col-span-2 space-y-5">
           {/* 股票头部 */}
           <Card variant="gradient" padding="md" className="home-report-hero">
-            <div className="flex items-start justify-between mb-5">
-              <div className="flex-1">
-                <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
+              <div className="flex-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-3">
                   <h2 className="text-[28px] font-bold leading-tight text-foreground">
                     {meta.stockName || meta.stockCode}
                   </h2>
-                  {/* 价格和涨跌幅 */}
-                  {meta.currentPrice != null && (
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-xl font-bold font-mono" style={getPriceChangeStyle(meta.changePct)}>
-                        {meta.currentPrice.toFixed(2)}
-                      </span>
-                      <span className="text-sm font-semibold font-mono" style={getPriceChangeStyle(meta.changePct)}>
-                        {formatChangePct(meta.changePct)}
-                      </span>
-                    </div>
-                  )}
+                  <Badge variant="info" className="shadow-none">股票</Badge>
                 </div>
-                <div className="flex items-center gap-2 mt-1.5">
+                <div className="flex flex-wrap items-center gap-2 mt-1.5">
                   <span className="home-accent-chip px-2 py-0.5 font-mono text-xs">
                     {meta.stockCode}
                   </span>
@@ -159,12 +151,21 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                   </span>
                 </div>
               </div>
+              <div className="text-right">
+                <p className="text-xs text-muted-text">收盘价</p>
+                <p className="mt-1 text-xl font-bold font-mono text-foreground" style={getPriceChangeStyle(meta.changePct)}>
+                  {meta.currentPrice != null ? meta.currentPrice.toFixed(2) : '--'}
+                </p>
+                <p className="text-xs font-mono" style={getPriceChangeStyle(meta.changePct)}>
+                  {formatChangePct(meta.changePct)}
+                </p>
+              </div>
             </div>
 
             {/* 关键结论 */}
             <div className="home-divider border-t pt-5">
               <span className="label-uppercase">{text.keyInsights}</span>
-              <p className="mt-2 max-w-[62ch] whitespace-pre-wrap text-left text-[15px] leading-7 text-foreground">
+              <p className="mt-2 w-full whitespace-pre-wrap text-left text-[15px] leading-7 text-foreground">
                 {summary.analysisSummary || text.noAnalysisSummary}
               </p>
             </div>
@@ -226,14 +227,14 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                 <h3 className="mt-0.5 text-base font-semibold text-foreground">{text.relatedBoards}</h3>
               </div>
 
-              <div className="space-y-2.5">
+              <div className="flex flex-wrap items-center gap-2.5">
                 {relatedBoards.map((board, index) => {
                   const boardName = normalizeBoardName(board.name);
                   const signal = boardSignals.get(boardName);
                   return (
                     <div
                       key={`${boardName}-${board.code || index}`}
-                      className="flex flex-wrap items-center gap-2 text-sm"
+                      className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-subtle bg-surface/40 px-2.5 py-1.5 text-sm"
                     >
                       <span className="home-accent-chip px-2 py-0.5 text-xs font-medium">
                         {boardName}
@@ -248,7 +249,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                           variant={getBoardStatusVariant(signal.status)}
                           className="home-board-status-badge shadow-none"
                         >
-                          {getBoardStatusLabel(signal.status)}
+                          {getBoardStatusLabel(signal.status, text)}
                         </Badge>
                       )}
                       {signal && signal.changePct !== undefined && signal.changePct !== null && (

@@ -268,6 +268,35 @@ class AnalysisHistoryTestCase(unittest.TestCase):
         self.assertEqual(report.meta.current_price, 200.0)
         self.assertEqual(report.meta.change_pct, 1.23)
 
+    def test_history_detail_reads_latest_close_from_raw_result(self) -> None:
+        """新收盘价链路不再写 enhanced_context.realtime，也应展示分析价格。"""
+        if get_history_detail is None:
+            self.skipTest("fastapi is not installed in this test environment")
+
+        result = self._build_result()
+        result.current_price = 137.41
+        result.change_pct = -0.48
+        query_id = "query_latest_close_raw_result"
+        saved = self.db.save_analysis_history(
+            result=result,
+            query_id=query_id,
+            report_type="simple",
+            news_content="新闻摘要",
+            context_snapshot={"enhanced_context": {"today": {"close": 137.41, "pct_chg": -0.48}}},
+            save_snapshot=True,
+        )
+        self.assertEqual(saved, 1)
+
+        with self.db.get_session() as session:
+            row = session.query(AnalysisHistory).filter(AnalysisHistory.query_id == query_id).first()
+            if row is None:
+                self.fail("未找到保存的历史记录")
+            record_id = row.id
+
+        report = get_history_detail(str(record_id), db_manager=self.db)
+        self.assertEqual(report.meta.current_price, 137.41)
+        self.assertEqual(report.meta.change_pct, -0.48)
+
     @patch("src.auth.is_auth_enabled", return_value=False)
     def test_history_detail_ignores_non_dict_realtime_quote_raw(self, mock_auth) -> None:
         """GET /api/v1/history/{id} should tolerate truthy non-dict realtime_quote_raw."""
@@ -703,6 +732,111 @@ class AnalysisHistoryTestCase(unittest.TestCase):
         self.assertIsNotNone(markdown)
         self.assertIn("✅Safe", markdown)
         self.assertNotIn("🚨Safe", markdown)
+
+    def test_fund_history_markdown_uses_saved_analysis_data(self) -> None:
+        """Fund markdown should render from saved fund history without live data calls."""
+        saved = self.db.save_fund_analysis_history(
+            query_id="fund_markdown_001",
+            fund_code="110011",
+            fund_name="易方达中小盘",
+            report_type="detailed",
+            allocation_rating="谨慎持有",
+            suitability_score=72,
+            analysis_summary="长期风格稳定",
+            risk_summary="回撤需要关注",
+            raw_result={
+                "meta": {
+                    "assetType": "fund",
+                    "fundCode": "110011",
+                    "fundName": "易方达中小盘",
+                    "reportType": "detailed",
+                    "createdAt": "2026-05-01T10:00:00",
+                    "latestNav": 5.4321,
+                    "navDate": "2026-04-30",
+                    "dailyReturnPct": 0.35,
+                    "fundType": "混合型",
+                },
+                "summary": {
+                    "allocationRating": "谨慎持有",
+                    "suitabilityScore": 72,
+                    "analysisSummary": "长期风格稳定",
+                    "holdingAdvice": "控制仓位",
+                    "riskSummary": "回撤需要关注",
+                    "suitableFor": "长期投资者",
+                },
+                "metrics": {
+                    "profile": {
+                        "fundCompany": "易方达基金",
+                        "fundType": "混合型",
+                        "establishDate": "2008-06-19",
+                        "latestScale": "120亿元",
+                        "benchmark": "沪深300",
+                    },
+                    "risk": {
+                        "totalReturnPct": 20.5,
+                        "annualReturnPct": 8.8,
+                        "maxDrawdownPct": -18.5,
+                        "annualVolatilityPct": 16.2,
+                        "startDate": "2025-01-01",
+                        "endDate": "2026-04-30",
+                    },
+                    "performance": [
+                        {"period": "1N", "returnPct": 12.3, "peerAvgPct": 8.1, "hs300Pct": 6.2, "rank": 30, "peerCount": 300}
+                    ],
+                    "manager": [{"managerNames": "张三"}],
+                },
+                "details": {
+                    "advantages": ["风格稳定"],
+                    "risks": ["波动较高"],
+                    "watchItems": ["关注规模变化"],
+                    "dataCoverage": {"profile": True, "manager": True},
+                },
+            },
+            data_snapshot={"dataCoverage": {"profile": True, "manager": True}},
+        )
+        self.assertEqual(saved, 1)
+
+        markdown = HistoryService(self.db).get_fund_markdown_report(1)
+
+        self.assertIsNotNone(markdown)
+        self.assertIn("基金诊断报告：易方达中小盘 (110011)", markdown)
+        self.assertIn("配置建议：谨慎持有", markdown)
+        self.assertIn("| 近1年 | +12.30% | +8.10% | +6.20% | 30/300 |", markdown)
+        self.assertIn("| 基金经理 | 张三 |", markdown)
+        self.assertIn("本报告基于历史基金诊断时保存的数据生成", markdown)
+
+    def test_mixed_history_markdown_api_returns_fund_markdown(self) -> None:
+        """Mixed markdown endpoint should support negative fund history IDs."""
+        if TestClient is None or create_app is None:
+            self.skipTest("fastapi is not installed in this test environment")
+
+        saved = self.db.save_fund_analysis_history(
+            query_id="fund_mixed_markdown_001",
+            fund_code="110011",
+            fund_name="易方达中小盘",
+            report_type="detailed",
+            allocation_rating="谨慎持有",
+            suitability_score=72,
+            analysis_summary="长期风格稳定",
+            risk_summary="回撤需要关注",
+            raw_result={
+                "meta": {"assetType": "fund", "fundCode": "110011", "fundName": "易方达中小盘", "reportType": "detailed"},
+                "summary": {"allocationRating": "谨慎持有", "analysisSummary": "长期风格稳定"},
+                "metrics": {},
+                "details": {},
+            },
+            data_snapshot={},
+        )
+        self.assertEqual(saved, 1)
+
+        static_dir = Path(self._temp_dir.name) / "empty-static"
+        static_dir.mkdir(exist_ok=True)
+        client = TestClient(create_app(static_dir=static_dir))
+
+        response = client.get("/api/v1/history/mixed/-1/markdown")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("基金诊断报告：易方达中小盘 (110011)", response.json().get("content", ""))
 
     def test_delete_analysis_history_records_also_cleans_backtests(self) -> None:
         """删除历史记录时应一并清理关联回测结果。"""

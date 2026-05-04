@@ -496,6 +496,30 @@ class HistoryService:
                 record_id=record_id
             ) from e
 
+    def get_fund_markdown_report(self, record_id: int) -> Optional[str]:
+        """Generate a Markdown report for a stored fund analysis history record."""
+        record = self.db.get_fund_analysis_history_by_id(abs(int(record_id)))
+        if not record:
+            logger.warning("get_fund_markdown_report: record not found for %s", record_id)
+            return None
+
+        raw_result = parse_json_field(record.raw_result)
+        data_snapshot = parse_json_field(record.data_snapshot)
+        if not isinstance(raw_result, dict) or not raw_result:
+            raise MarkdownReportGenerationError(
+                f"raw_result is empty or invalid for fund record {record_id}",
+                record_id=str(record_id),
+            )
+
+        try:
+            return self._generate_single_fund_markdown(raw_result, data_snapshot, record)
+        except Exception as e:
+            logger.error("get_fund_markdown_report: failed to generate markdown for %s: %s", record_id, e, exc_info=True)
+            raise MarkdownReportGenerationError(
+                f"Failed to generate fund markdown report: {str(e)}",
+                record_id=str(record_id),
+            ) from e
+
     def _rebuild_analysis_result(
         self,
         raw_result: Dict[str, Any],
@@ -868,6 +892,172 @@ class HistoryService:
             except (ValueError, TypeError):
                 return value
         return str(value)
+
+    @staticmethod
+    def _format_fund_percent(value: Any) -> str:
+        if value is None or value == "":
+            return "N/A"
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+        sign = "+" if number > 0 else ""
+        return f"{sign}{number:.2f}%"
+
+    @staticmethod
+    def _format_fund_value(value: Any) -> str:
+        if value is None or value == "":
+            return "N/A"
+        if isinstance(value, float):
+            return f"{value:.4f}".rstrip("0").rstrip(".")
+        return str(value)
+
+    @staticmethod
+    def _format_fund_period_label(value: Any) -> str:
+        text = str(value or "").strip()
+        return {
+            "Z": "近1周",
+            "Y": "近1月",
+            "3Y": "近3月",
+            "6Y": "近6月",
+            "1N": "近1年",
+            "2N": "近2年",
+            "3N": "近3年",
+            "5N": "近5年",
+        }.get(text, text or "N/A")
+
+    @staticmethod
+    def _append_fund_list(lines: List[str], title: str, items: Any) -> None:
+        if not isinstance(items, list) or not items:
+            return
+        lines.extend([f"### {title}", ""])
+        for item in items:
+            if item is not None and str(item).strip():
+                lines.append(f"- {str(item).strip()}")
+        lines.append("")
+
+    def _generate_single_fund_markdown(
+        self,
+        report: Dict[str, Any],
+        data_snapshot: Dict[str, Any],
+        record,
+    ) -> str:
+        """Generate a Markdown report for a single fund analysis."""
+        meta = report.get("meta") if isinstance(report.get("meta"), dict) else {}
+        summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+        metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
+        details = report.get("details") if isinstance(report.get("details"), dict) else {}
+        profile = metrics.get("profile") if isinstance(metrics.get("profile"), dict) else {}
+        risk = metrics.get("risk") if isinstance(metrics.get("risk"), dict) else {}
+        performance = metrics.get("performance") if isinstance(metrics.get("performance"), list) else []
+        managers = metrics.get("manager") if isinstance(metrics.get("manager"), list) else []
+        data_coverage = details.get("dataCoverage")
+        if not isinstance(data_coverage, dict) and isinstance(data_snapshot, dict):
+            data_coverage = data_snapshot.get("dataCoverage")
+        if not isinstance(data_coverage, dict):
+            data_coverage = {}
+
+        fund_code = meta.get("fundCode") or getattr(record, "fund_code", "")
+        fund_name = meta.get("fundName") or getattr(record, "fund_name", "") or fund_code
+        report_date = record.created_at.strftime("%Y-%m-%d") if record.created_at else datetime.now().strftime("%Y-%m-%d")
+        report_time = record.created_at.strftime("%H:%M:%S") if record.created_at else datetime.now().strftime("%H:%M:%S")
+
+        manager_names: List[str] = []
+        for manager in managers:
+            if isinstance(manager, dict):
+                name = manager.get("managerNames") or manager.get("name") or manager.get("managerName")
+                if name:
+                    manager_names.append(str(name))
+
+        lines = [
+            f"# 基金诊断报告：{self._escape_md(str(fund_name))} ({self._escape_md(str(fund_code))})",
+            "",
+            f"> 分析日期：**{report_date}** | 报告生成时间：{report_time}",
+            "",
+            "---",
+            "",
+            "## 基本信息",
+            "",
+            "| 项目 | 内容 |",
+            "|------|------|",
+            f"| 基金代码 | {self._escape_md(str(fund_code))} |",
+            f"| 基金名称 | {self._escape_md(str(fund_name))} |",
+            f"| 基金类型 | {self._escape_md(str(meta.get('fundType') or profile.get('fundType') or 'N/A'))} |",
+            f"| 最新净值 | {self._format_fund_value(meta.get('latestNav'))} |",
+            f"| 净值日期 | {self._escape_md(str(meta.get('navDate') or 'N/A'))} |",
+            f"| 日涨跌幅 | {self._format_fund_percent(meta.get('dailyReturnPct'))} |",
+            "",
+            "## 关键结论",
+            "",
+            f"- 配置建议：{self._escape_md(str(summary.get('allocationRating') or getattr(record, 'allocation_rating', None) or 'N/A'))}",
+            f"- 适配评分：{self._format_fund_value(summary.get('suitabilityScore') or getattr(record, 'suitability_score', None))}",
+            f"- 分析摘要：{self._escape_md(str(summary.get('analysisSummary') or getattr(record, 'analysis_summary', None) or 'N/A'))}",
+            f"- 持有建议：{self._escape_md(str(summary.get('holdingAdvice') or 'N/A'))}",
+            f"- 风险说明：{self._escape_md(str(summary.get('riskSummary') or getattr(record, 'risk_summary', None) or 'N/A'))}",
+            f"- 适合人群：{self._escape_md(str(summary.get('suitableFor') or 'N/A'))}",
+            "",
+            "## 风险收益指标",
+            "",
+            "| 指标 | 数值 |",
+            "|------|------|",
+            f"| 累计收益 | {self._format_fund_percent(risk.get('totalReturnPct'))} |",
+            f"| 年化收益 | {self._format_fund_percent(risk.get('annualReturnPct'))} |",
+            f"| 最大回撤 | {self._format_fund_percent(risk.get('maxDrawdownPct'))} |",
+            f"| 当前回撤 | {self._format_fund_percent(risk.get('currentDrawdownPct'))} |",
+            f"| 年化波动 | {self._format_fund_percent(risk.get('annualVolatilityPct'))} |",
+            f"| Sharpe | {self._format_fund_value(risk.get('sharpe'))} |",
+            f"| Calmar | {self._format_fund_value(risk.get('calmar'))} |",
+            f"| 样本区间 | {self._escape_md(str(risk.get('startDate') or 'N/A'))} 至 {self._escape_md(str(risk.get('endDate') or 'N/A'))} |",
+            "",
+        ]
+
+        if risk.get("reason"):
+            lines.extend(["### 风险指标说明", "", self._escape_md(str(risk["reason"])), ""])
+
+        rows = [item for item in performance if isinstance(item, dict) and item.get("period")][:8]
+        if rows:
+            lines.extend([
+                "## 阶段收益",
+                "",
+                "| 区间 | 收益 | 同类均值 | 沪深300 | 排名 |",
+                "|------|------|------|------|------|",
+            ])
+            for item in rows:
+                rank = f"{item.get('rank')}/{item.get('peerCount')}" if item.get("rank") and item.get("peerCount") else "N/A"
+                lines.append(
+                    f"| {self._escape_md(self._format_fund_period_label(item.get('period')))} | "
+                    f"{self._format_fund_percent(item.get('returnPct'))} | "
+                    f"{self._format_fund_percent(item.get('peerAvgPct'))} | "
+                    f"{self._format_fund_percent(item.get('hs300Pct'))} | "
+                    f"{self._escape_md(rank)} |"
+                )
+            lines.append("")
+
+        lines.extend([
+            "## 基金资料",
+            "",
+            "| 项目 | 内容 |",
+            "|------|------|",
+            f"| 基金公司 | {self._escape_md(str(profile.get('fundCompany') or 'N/A'))} |",
+            f"| 基金经理 | {self._escape_md(' / '.join(manager_names) or str(profile.get('managerNames') or 'N/A'))} |",
+            f"| 成立日期 | {self._escape_md(str(profile.get('establishDate') or 'N/A'))} |",
+            f"| 基金规模 | {self._escape_md(str(profile.get('latestScale') or 'N/A'))} |",
+            f"| 业绩基准 | {self._escape_md(str(profile.get('benchmark') or 'N/A'))} |",
+            "",
+        ])
+
+        self._append_fund_list(lines, "优势", details.get("advantages"))
+        self._append_fund_list(lines, "风险", details.get("risks"))
+        self._append_fund_list(lines, "观察项", details.get("watchItems"))
+
+        if data_coverage:
+            lines.extend(["## 数据覆盖情况", "", "| 数据项 | 状态 |", "|------|------|"])
+            for key, value in data_coverage.items():
+                lines.append(f"| {self._escape_md(str(key))} | {'可用' if value else '缺失'} |")
+            lines.append("")
+
+        lines.extend(["---", "", "*本报告基于历史基金诊断时保存的数据生成，不代表实时净值更新。*"])
+        return "\n".join(lines)
 
     @staticmethod
     def _append_market_snapshot_to_report(

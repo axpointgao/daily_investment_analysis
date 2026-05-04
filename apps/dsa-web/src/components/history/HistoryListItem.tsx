@@ -5,8 +5,8 @@ import { formatDateTime } from '../../utils/format';
 
 interface HistoryListItemProps {
   item: HistoryItem;
-  isViewing: boolean; // Indicates if this report is currently being viewed in the right panel
-  isChecked: boolean; // Indicates if the checkbox is checked for bulk operations
+  isViewing: boolean;
+  isChecked: boolean;
   isDeleting: boolean;
   onToggleChecked: (recordId: number) => void;
   onClick: (recordId: number) => void;

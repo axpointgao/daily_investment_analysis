@@ -3,12 +3,28 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ApiErrorAlert, ConfirmDialog, Button, EmptyState, InlineAlert } from '../components/common';
 import { DashboardStateBlock } from '../components/dashboard';
+import { FundAutocomplete } from '../components/FundAutocomplete';
 import { StockAutocomplete } from '../components/StockAutocomplete';
 import { HistoryList } from '../components/history';
 import { ReportMarkdown, ReportSummary } from '../components/report';
 import { TaskPanel } from '../components/tasks';
 import { useDashboardLifecycle, useHomeDashboardState } from '../hooks';
 import { getReportText, normalizeReportLanguage } from '../utils/reportLanguage';
+import type { AnalysisEntryType } from '../types/analysis';
+
+type SelectionSource = 'manual' | 'autocomplete' | 'import' | 'image';
+
+const getReportAssetType = (assetType?: AnalysisEntryType): AnalysisEntryType => (
+  assetType === 'fund' ? 'fund' : 'stock'
+);
+
+const buildFundChatPath = (recordId: number, fundCode: string, fundName = ''): string => (
+  `/fund-chat?fundCode=${encodeURIComponent(fundCode)}&fundName=${encodeURIComponent(fundName)}&recordId=${recordId}`
+);
+
+const buildStockChatPath = (recordId: number, stockCode = '', stockName = ''): string => (
+  `/chat?stock=${encodeURIComponent(stockCode)}&name=${encodeURIComponent(stockName)}&recordId=${recordId}`
+);
 
 const HomePage: React.FC = () => {
   const navigate = useNavigate();
@@ -59,7 +75,7 @@ const HomePage: React.FC = () => {
   }, []);
   const reportLanguage = normalizeReportLanguage(selectedReport?.meta.reportLanguage);
   const reportText = getReportText(reportLanguage);
-  const selectedReportType = selectedReport?.meta.assetType === 'fund' ? 'fund' : 'stock';
+  const selectedReportType = getReportAssetType(selectedReport?.meta.assetType);
 
   useDashboardLifecycle({
     loadInitialHistory,
@@ -79,12 +95,23 @@ const HomePage: React.FC = () => {
     (
       stockCode?: string,
       stockName?: string,
-      selectionSource?: 'manual' | 'autocomplete' | 'import' | 'image',
+      selectionSource?: SelectionSource,
+      fundCode?: string,
+      fundName?: string,
     ) => {
+      if (entryType === 'fund') {
+        void submitAnalysis({
+          fundCode: fundCode ?? query,
+          fundName,
+          originalQuery: query,
+          selectionSource: selectionSource ?? 'manual',
+        });
+        return;
+      }
+
       void submitAnalysis({
         stockCode,
         stockName,
-        fundCode: entryType === 'fund' ? query : undefined,
         originalQuery: query,
         selectionSource: selectionSource ?? 'manual',
       });
@@ -98,13 +125,15 @@ const HomePage: React.FC = () => {
     }
 
     if (selectedReport.meta.assetType === 'fund') {
+      const code = selectedReport.meta.fundCode || '';
+      if (!code) {
+        return;
+      }
+      navigate(buildFundChatPath(selectedReport.meta.id, code, selectedReport.meta.fundName));
       return;
     }
 
-    const code = selectedReport.meta.stockCode || '';
-    const name = selectedReport.meta.stockName || '';
-    const rid = selectedReport.meta.id;
-    navigate(`/chat?stock=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&recordId=${rid}`);
+    navigate(buildStockChatPath(selectedReport.meta.id, selectedReport.meta.stockCode, selectedReport.meta.stockName));
   }, [navigate, selectedReport]);
 
   const handleReanalyze = useCallback(() => {
@@ -112,12 +141,25 @@ const HomePage: React.FC = () => {
       return;
     }
 
+    if (selectedReport.meta.assetType === 'fund') {
+      if (!selectedReport.meta.fundCode) {
+        return;
+      }
+
+      void submitAnalysis({
+        fundCode: selectedReport.meta.fundCode,
+        fundName: selectedReport.meta.fundName,
+        originalQuery: selectedReport.meta.fundCode,
+        selectionSource: 'manual',
+        forceRefresh: true,
+      });
+      return;
+    }
+
     void submitAnalysis({
       stockCode: selectedReport.meta.stockCode,
       stockName: selectedReport.meta.stockName,
-      fundCode: selectedReport.meta.assetType === 'fund' ? selectedReport.meta.fundCode : undefined,
-      fundName: selectedReport.meta.assetType === 'fund' ? selectedReport.meta.fundName : undefined,
-      originalQuery: selectedReport.meta.stockCode || selectedReport.meta.fundCode,
+      originalQuery: selectedReport.meta.stockCode,
       selectionSource: 'manual',
       forceRefresh: true,
     });
@@ -170,7 +212,7 @@ const HomePage: React.FC = () => {
       data-testid="home-dashboard"
       className="flex h-[calc(100vh-5rem)] w-full flex-col overflow-hidden md:flex-row sm:h-[calc(100vh-5.5rem)] lg:h-[calc(100vh-2rem)]"
     >
-      <div className="flex-1 flex flex-col min-h-0 min-w-0 max-w-full lg:max-w-6xl mx-auto w-full">
+      <div className="flex-1 flex flex-col min-h-0 min-w-0 max-w-full w-full">
         <header className="flex min-w-0 flex-shrink-0 items-center overflow-hidden px-3 py-3 md:px-4 md:py-4">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5 md:flex-nowrap">
             <button
@@ -205,17 +247,15 @@ const HomePage: React.FC = () => {
                   className={`!h-10 ${inputError ? 'border-danger/50' : ''}`}
                 />
               ) : (
-                <input
+                <FundAutocomplete
                   value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      handleSubmitAnalysis();
-                    }
+                  onChange={setQuery}
+                  onSubmit={(fundCode, fundName, selectionSource) => {
+                    handleSubmitAnalysis(undefined, undefined, selectionSource, fundCode, fundName);
                   }}
-                  placeholder="输入基金代码，如 000001"
+                  placeholder="输入基金代码或名称，如 000001、华夏成长"
                   disabled={isAnalyzing}
-                  className={`input-surface input-focus-glow h-10 w-full rounded-xl border bg-transparent px-4 text-sm outline-none transition-all disabled:cursor-not-allowed disabled:opacity-60 ${inputError ? 'border-danger/50' : ''}`}
+                  className={`!h-10 ${inputError ? 'border-danger/50' : ''}`}
                 />
               )}
             </div>
@@ -300,7 +340,7 @@ const HomePage: React.FC = () => {
                 <DashboardStateBlock title="加载报告中..." loading />
               </div>
             ) : selectedReport ? (
-              <div className="max-w-4xl space-y-4 pb-8">
+              <div className="w-full space-y-4 pb-8">
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   <Button
                     variant="home-action-ai"
@@ -316,7 +356,7 @@ const HomePage: React.FC = () => {
                   <Button
                     variant="home-action-ai"
                     size="sm"
-                    disabled={selectedReport.meta.id === undefined || selectedReportType === 'fund'}
+                    disabled={selectedReport.meta.id === undefined || (selectedReportType === 'fund' && !selectedReport.meta.fundCode)}
                     onClick={handleAskFollowUp}
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -327,7 +367,7 @@ const HomePage: React.FC = () => {
                   <Button
                     variant="home-action-ai"
                     size="sm"
-                    disabled={selectedReport.meta.id === undefined || selectedReportType === 'fund'}
+                    disabled={selectedReport.meta.id === undefined}
                     onClick={openMarkdownDrawer}
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -361,6 +401,9 @@ const HomePage: React.FC = () => {
           recordId={selectedReport.meta.id}
           stockName={selectedReport.meta.stockName || ''}
           stockCode={selectedReport.meta.stockCode || ''}
+          displayName={selectedReport.meta.assetType === 'fund' ? selectedReport.meta.fundName : selectedReport.meta.stockName}
+          displayCode={selectedReport.meta.assetType === 'fund' ? selectedReport.meta.fundCode : selectedReport.meta.stockCode}
+          assetType={selectedReportType}
           reportLanguage={reportLanguage}
           onClose={closeMarkdownDrawer}
         />

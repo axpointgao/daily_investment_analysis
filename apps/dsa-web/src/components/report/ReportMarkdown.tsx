@@ -6,13 +6,16 @@ import { historyApi } from '../../api/history';
 import { Drawer } from '../common/Drawer';
 import { Tooltip } from '../common/Tooltip';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
-import type { ReportLanguage } from '../../types/analysis';
+import type { AnalysisEntryType, ReportLanguage } from '../../types/analysis';
 import { markdownToPlainText } from '../../utils/markdown';
 
 interface ReportMarkdownProps {
   recordId: number;
-  stockName: string;
-  stockCode: string;
+  stockName?: string;
+  stockCode?: string;
+  displayName?: string;
+  displayCode?: string;
+  assetType?: AnalysisEntryType;
   onClose: () => void;
   reportLanguage?: ReportLanguage;
 }
@@ -25,6 +28,9 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
   recordId,
   stockName,
   stockCode,
+  displayName,
+  displayCode,
+  assetType = 'stock',
   onClose,
   reportLanguage = 'zh',
 }) => {
@@ -35,6 +41,7 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(true);
   const [copiedType, setCopiedType] = useState<'markdown' | 'text' | null>(null);
+  const headerTitle = displayName || stockName || displayCode || stockCode || '';
 
   // Handle close with animation
   const handleClose = useCallback(() => {
@@ -75,7 +82,9 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
       setIsLoading(true);
       setError(null);
       try {
-        const markdownContent = await historyApi.getMarkdown(recordId);
+        const markdownContent = assetType === 'fund'
+          ? await historyApi.getMixedMarkdown(recordId)
+          : await historyApi.getMarkdown(recordId);
         if (isMounted) {
           setContent(markdownContent);
         }
@@ -95,13 +104,13 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [recordId, loadReportFailedText]);
+  }, [assetType, recordId, loadReportFailedText]);
 
   return (
     <Drawer
       isOpen={isOpen}
       onClose={handleClose}
-      width="max-w-3xl"
+      width="max-w-5xl"
       zIndex={100}
       backdropClassName="bg-background/56 backdrop-blur-[2px]"
     >
@@ -115,7 +124,7 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
             </svg>
           </div>
           <div>
-            <h2 className="text-base font-semibold text-foreground">{stockName || stockCode}</h2>
+            <h2 className="text-base font-semibold text-foreground">{headerTitle}</h2>
             <p className="text-xs text-muted-text">{text.fullReport}</p>
           </div>
         </div>

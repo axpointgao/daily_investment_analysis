@@ -34,6 +34,21 @@ let analyzeRequestSeq = 0;
 let historyRequestSeq = 0;
 const dismissedTaskIds = new Set<string>();
 
+const nextReportRequestId = () => {
+  reportRequestSeq += 1;
+  return reportRequestSeq;
+};
+
+const nextAnalyzeRequestId = () => {
+  analyzeRequestSeq += 1;
+  return analyzeRequestSeq;
+};
+
+const nextHistoryRequestId = () => {
+  historyRequestSeq += 1;
+  return historyRequestSeq;
+};
+
 export interface StockPoolState {
   entryType: AnalysisEntryType;
   query: string;
@@ -107,6 +122,16 @@ function buildHistoryParams(page: number) {
   };
 }
 
+function mergeSilentHistoryItems(existingItems: HistoryItem[], latestItems: HistoryItem[]): HistoryItem[] {
+  const latestItemsById = new Map(latestItems.map((item) => [item.id, item]));
+  const existingIds = new Set(existingItems.map((item) => item.id));
+
+  return [
+    ...latestItems.filter((item) => !existingIds.has(item.id)),
+    ...existingItems.map((item) => latestItemsById.get(item.id) ?? item),
+  ];
+}
+
 async function fetchHistory(
   get: () => StockPoolState,
   set: (partial: Partial<StockPoolState>) => void,
@@ -115,7 +140,7 @@ async function fetchHistory(
   const { autoSelectFirst = false, reset = true, silent = false } = options;
   const currentState = get();
   const page = reset ? 1 : currentState.currentPage + 1;
-  const requestId = ++historyRequestSeq;
+  const requestId = nextHistoryRequestId();
 
   if (!silent) {
     set(
@@ -131,11 +156,7 @@ async function fetchHistory(
     }
 
     if (silent && reset) {
-      const existingIds = new Set(get().historyItems.map((item) => item.id));
-      const newItems = response.items.filter((item) => !existingIds.has(item.id));
-      if (newItems.length > 0) {
-        set({ historyItems: [...newItems, ...get().historyItems] });
-      }
+      set({ historyItems: mergeSilentHistoryItems(get().historyItems, response.items) });
     } else if (reset) {
       set({
         historyItems: response.items,
@@ -228,10 +249,10 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
   },
 
   selectHistoryItem: async (recordId) => {
-    const requestId = ++reportRequestSeq;
-    const shouldShowInitialLoading = !get().selectedReport;
+    const requestId = nextReportRequestId();
+    const shouldShowLoading = get().selectedReport?.meta.id !== recordId;
 
-    if (shouldShowInitialLoading) {
+    if (shouldShowLoading) {
       set({ isLoadingReport: true });
     }
 
@@ -341,7 +362,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
         isAnalyzing: true,
       });
 
-      const requestId = ++analyzeRequestSeq;
+      const requestId = nextAnalyzeRequestId();
       try {
         await fundAnalysisApi.analyzeAsync({
           fundCode,
@@ -410,7 +431,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
       isAnalyzing: true,
     });
 
-    const requestId = ++analyzeRequestSeq;
+    const requestId = nextAnalyzeRequestId();
     try {
       await analysisApi.analyzeAsync({
         stockCode: normalizedStockCode,
@@ -483,9 +504,9 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
   },
 
   resetDashboardState: () => {
-    historyRequestSeq += 1;
-    reportRequestSeq = 0;
-    analyzeRequestSeq = 0;
+    nextHistoryRequestId();
+    nextReportRequestId();
+    nextAnalyzeRequestId();
     dismissedTaskIds.clear();
     set({ ...initialState });
   },

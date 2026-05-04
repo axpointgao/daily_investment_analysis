@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { analysisApi, DuplicateTaskError } from '../../api/analysis';
+import { fundAnalysisApi } from '../../api/fundAnalysis';
 import { historyApi } from '../../api/history';
 import { useStockPoolStore } from '../../stores';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
@@ -20,10 +21,14 @@ vi.mock('react-router-dom', async () => {
 vi.mock('../../api/history', () => ({
   historyApi: {
     getList: vi.fn(),
+    getMixedList: vi.fn(),
     getDetail: vi.fn(),
+    getMixedDetail: vi.fn(),
     deleteRecords: vi.fn(),
+    deleteMixedRecords: vi.fn(),
     getNews: vi.fn().mockResolvedValue({ total: 0, items: [] }),
     getMarkdown: vi.fn().mockResolvedValue('# report'),
+    getMixedMarkdown: vi.fn().mockResolvedValue('# report'),
   },
 }));
 
@@ -33,6 +38,17 @@ vi.mock('../../api/analysis', async () => {
     ...actual,
     analysisApi: {
       analyzeAsync: vi.fn(),
+    },
+  };
+});
+
+vi.mock('../../api/fundAnalysis', async () => {
+  const actual = await vi.importActual<typeof import('../../api/fundAnalysis')>('../../api/fundAnalysis');
+  return {
+    ...actual,
+    fundAnalysisApi: {
+      analyzeAsync: vi.fn(),
+      getTaskStreamUrl: vi.fn(() => '/api/v1/fund-analysis/tasks/stream'),
     },
   };
 });
@@ -69,11 +85,47 @@ const historyReport = {
   },
 };
 
+const fundHistoryItem = {
+  id: 2,
+  type: 'fund' as const,
+  queryId: 'fund-q-1',
+  fundCode: '000001',
+  fundName: '华夏成长混合',
+  displayCode: '000001',
+  displayName: '华夏成长混合',
+  sentimentScore: 64,
+  operationAdvice: '适合配置',
+  createdAt: '2026-03-19T08:00:00Z',
+};
+
+const fundHistoryReport = {
+  meta: {
+    id: 2,
+    assetType: 'fund' as const,
+    queryId: 'fund-q-1',
+    fundCode: '000001',
+    fundName: '华夏成长混合',
+    reportType: 'detailed' as const,
+    reportLanguage: 'zh' as const,
+    createdAt: '2026-03-19T08:00:00Z',
+    latestNav: 1.2345,
+    navDate: '2026-03-18',
+  },
+  summary: {
+    analysisSummary: '基金配置价值中性偏积极',
+    allocationRating: '适合配置',
+    suitabilityScore: 68,
+  },
+};
+
 describe('HomePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     navigateMock.mockReset();
     useStockPoolStore.getState().resetDashboardState();
+    vi.mocked(historyApi.getMixedList).mockImplementation((...args) => historyApi.getList(...args));
+    vi.mocked(historyApi.getMixedDetail).mockImplementation((recordId) => historyApi.getDetail(recordId));
+    vi.mocked(historyApi.deleteMixedRecords).mockImplementation((recordIds) => historyApi.deleteRecords(recordIds));
   });
 
   it('renders the dashboard workspace and auto-loads the first report', async () => {
@@ -126,7 +178,7 @@ describe('HomePage', () => {
 
     expect(await screen.findByText('开始分析')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '开始分析', level: 3 })).toBeInTheDocument();
-    expect(screen.getByText('输入股票代码进行分析，或从左侧选择历史报告查看。')).toBeInTheDocument();
+    expect(screen.getByText('输入股票或场外基金代码进行分析，或从左侧选择历史报告查看。')).toBeInTheDocument();
     expect(screen.getByText('暂无历史分析记录')).toBeInTheDocument();
   });
 
@@ -311,5 +363,77 @@ describe('HomePage', () => {
       originalQuery: '600519',
       forceRefresh: true,
     }));
+  });
+
+  it('submits fund analysis without sending stock analysis params', async () => {
+    vi.mocked(historyApi.getList).mockResolvedValue({
+      total: 0,
+      page: 1,
+      limit: 20,
+      items: [],
+    });
+    vi.mocked(fundAnalysisApi.analyzeAsync).mockResolvedValue({
+      taskId: 'fund-task-1',
+      status: 'pending',
+    });
+
+    render(
+      <MemoryRouter>
+        <HomePage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(await screen.findByLabelText('分析类型'), { target: { value: 'fund' } });
+    const input = screen.getByPlaceholderText('输入基金代码，如 000001');
+    fireEvent.change(input, { target: { value: '000001' } });
+    fireEvent.click(screen.getByRole('button', { name: '分析' }));
+
+    await waitFor(() => {
+      expect(fundAnalysisApi.analyzeAsync).toHaveBeenCalledWith(expect.objectContaining({
+        fundCode: '000001',
+        reportType: 'detailed',
+        notify: true,
+      }));
+    });
+    expect(analysisApi.analyzeAsync).not.toHaveBeenCalled();
+  });
+
+  it('reanalyzes and opens chat for fund reports through the fund flow', async () => {
+    vi.mocked(historyApi.getList).mockResolvedValue({
+      total: 1,
+      page: 1,
+      limit: 20,
+      items: [fundHistoryItem],
+    });
+    vi.mocked(historyApi.getDetail).mockResolvedValue(fundHistoryReport);
+    vi.mocked(fundAnalysisApi.analyzeAsync).mockResolvedValue({
+      taskId: 'fund-task-re-1',
+      status: 'pending',
+    });
+
+    render(
+      <MemoryRouter>
+        <HomePage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('基金配置价值中性偏积极');
+
+    fireEvent.click(screen.getByRole('button', { name: '追问 AI' }));
+
+    expect(navigateMock).toHaveBeenCalledWith(
+      '/fund-chat?fundCode=000001&fundName=%E5%8D%8E%E5%A4%8F%E6%88%90%E9%95%BF%E6%B7%B7%E5%90%88&recordId=2',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '重新分析' }));
+
+    await waitFor(() => {
+      expect(fundAnalysisApi.analyzeAsync).toHaveBeenCalledWith(expect.objectContaining({
+        fundCode: '000001',
+        fundName: '华夏成长混合',
+        forceRefresh: true,
+      }));
+    });
+    expect(analysisApi.analyzeAsync).not.toHaveBeenCalled();
   });
 });

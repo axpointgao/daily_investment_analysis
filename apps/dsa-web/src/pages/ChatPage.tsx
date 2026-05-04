@@ -23,6 +23,13 @@ import {
   sanitizeFollowUpStockCode,
   sanitizeFollowUpStockName,
 } from '../utils/chatFollowUp';
+import type { FundChatFollowUpContext } from '../utils/fundChatFollowUp';
+import {
+  buildFundFollowUpPrompt,
+  resolveFundChatFollowUpContext,
+  sanitizeFollowUpFundCode,
+  sanitizeFollowUpFundName,
+} from '../utils/fundChatFollowUp';
 import { isNearBottom } from '../utils/chatScroll';
 import { getReportText } from '../utils/reportLanguage';
 
@@ -43,6 +50,8 @@ const FUND_QUICK_QUESTIONS = [
   { label: '分析一只基金的持仓风格', skill: 'fund_holding_style' },
   { label: '这只基金适合做核心仓位吗', skill: 'fund_core_satellite' },
 ];
+
+type FollowUpContext = ChatFollowUpContext | FundChatFollowUpContext;
 
 type QuickQuestion = {
   label: string;
@@ -100,7 +109,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
   const isMountedRef = useRef(true);
   const sendToastTimerRef = useRef<number | null>(null);
   const followUpHydrationTokenRef = useRef(0);
-  const followUpContextRef = useRef<ChatFollowUpContext | null>(null);
+  const followUpContextRef = useRef<FollowUpContext | null>(null);
   const shouldStickToBottomRef = useRef(true);
   const pendingScrollBehaviorRef = useRef<ScrollBehavior>('auto');
 
@@ -285,12 +294,53 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
     setDeleteConfirmId(null);
   }, [assetType, deleteConfirmId, sessionId, loadSessions, handleStartNewChat]);
 
-  // Handle follow-up from report page: ?stock=600519&name=贵州茅台&recordId=xxx
+  // Handle follow-up from report page.
   useEffect(() => {
     if (isFundMode) {
-      if (searchParams.toString()) {
-        setSearchParams({}, { replace: true });
+      const fundCode = sanitizeFollowUpFundCode(searchParams.get('fundCode'));
+      const fundName = sanitizeFollowUpFundName(searchParams.get('fundName'));
+      const recordId = parseFollowUpRecordId(searchParams.get('recordId'));
+
+      if (!fundCode) {
+        if (searchParams.toString()) {
+          setSearchParams({}, { replace: true });
+        }
+        return;
       }
+
+      const hydrationToken = ++followUpHydrationTokenRef.current;
+      setInput(buildFundFollowUpPrompt(fundCode, fundName));
+      followUpContextRef.current = {
+        fund_code: fundCode,
+        fund_name: fundName,
+      };
+      if (recordId !== undefined) {
+        setIsFollowUpContextLoading(true);
+      }
+      void resolveFundChatFollowUpContext({
+        fundCode,
+        fundName,
+        recordId,
+      }).then((context) => {
+        if (!isMountedRef.current || followUpHydrationTokenRef.current !== hydrationToken) {
+          return;
+        }
+        followUpContextRef.current = context;
+      }).catch(() => {
+        if (!isMountedRef.current || followUpHydrationTokenRef.current !== hydrationToken) {
+          return;
+        }
+        followUpContextRef.current = {
+          fund_code: fundCode,
+          fund_name: fundName,
+          context_error: '基金历史上下文加载失败，请基于基金代码继续诊断并说明数据缺口。',
+        };
+      }).finally(() => {
+        if (isMountedRef.current && followUpHydrationTokenRef.current === hydrationToken) {
+          setIsFollowUpContextLoading(false);
+        }
+      });
+      setSearchParams({}, { replace: true });
       return;
     }
 
@@ -341,7 +391,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
         session_id: sessionId,
         asset_type: assetType,
         ...(usedSkillIds.length > 0 ? { skills: usedSkillIds } : {}),
-        context: !isFundMode ? followUpContextRef.current ?? undefined : undefined,
+        context: followUpContextRef.current ?? undefined,
       };
       followUpHydrationTokenRef.current += 1;
       followUpContextRef.current = null;

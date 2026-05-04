@@ -48,6 +48,7 @@ from src.utils.data_processing import (
     extract_fundamental_detail_fields,
     extract_board_detail_fields,
 )
+from src.utils.analysis_price import extract_price_fields
 
 logger = logging.getLogger(__name__)
 
@@ -359,6 +360,44 @@ def get_mixed_history_detail(
 
 
 @router.get(
+    "/mixed/{record_id}/markdown",
+    response_model=MarkdownReportResponse,
+    responses={200: {"description": "Markdown 格式报告"}, 404: {"description": "报告不存在", "model": ErrorResponse}},
+    summary="获取股票/场外基金混合历史 Markdown 报告",
+)
+def get_mixed_history_markdown(
+    record_id: int,
+    db_manager: DatabaseManager = Depends(get_database_manager)
+) -> MarkdownReportResponse:
+    service = HistoryService(db_manager)
+    try:
+        markdown_content = (
+            service.get_markdown_report(str(record_id))
+            if record_id > 0
+            else service.get_fund_markdown_report(abs(record_id))
+        )
+    except MarkdownReportGenerationError as e:
+        logger.error("Mixed markdown report generation failed for %s: %s", record_id, e.message)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "generation_failed", "message": f"生成 Markdown 报告失败: {e.message}"},
+        )
+    except Exception as e:
+        logger.error("获取混合 Markdown 报告失败: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "internal_error", "message": f"获取 Markdown 报告失败: {str(e)}"},
+        )
+
+    if markdown_content is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "not_found", "message": f"未找到 id={record_id} 的分析记录"},
+        )
+    return MarkdownReportResponse(content=markdown_content)
+
+
+@router.get(
     "/{record_id}",
     response_model=AnalysisReport,
     responses={
@@ -404,33 +443,14 @@ def get_history_detail(
                 }
             )
         
-        # 从 context_snapshot 中提取价格信息
-        # 注意：使用 `is None` 而非 `or`，避免把 0.0（平盘）误判为缺失值；
-        # 同时不混用 `change_60d`（60 日累计涨跌幅）作为日内 change_pct 的兜底。
-        current_price = None
-        change_pct = None
         context_snapshot = result.get("context_snapshot")
-        if context_snapshot and isinstance(context_snapshot, dict):
-            # 优先从 enhanced_context.realtime 获取
-            enhanced_context = context_snapshot.get("enhanced_context") or {}
-            realtime = enhanced_context.get("realtime") or {}
-            current_price = realtime.get("price")
-            change_pct = realtime.get("change_pct")
-
-            # 缺失时再从 realtime_quote_raw 兜底
-            realtime_quote_raw = context_snapshot.get("realtime_quote_raw")
-            if not isinstance(realtime_quote_raw, dict):
-                realtime_quote_raw = {}
-            if current_price is None:
-                current_price = realtime_quote_raw.get("price")
-            if change_pct is None:
-                change_pct = realtime_quote_raw.get("change_pct")
-            if change_pct is None:
-                change_pct = realtime_quote_raw.get("pct_chg")
-        
         raw_result = result.get("raw_result")
         if not isinstance(raw_result, dict):
             raw_result = {}
+        # 从 raw_result / context_snapshot 中提取价格信息。
+        # 注意：使用 `is None` 而非 `or`，避免把 0.0（平盘）误判为缺失值；
+        # 同时不混用 `change_60d`（60 日累计涨跌幅）作为日内 change_pct 的兜底。
+        current_price, change_pct = extract_price_fields(raw_result, context_snapshot)
         report_language = normalize_report_language(
             result.get("report_language")
             or raw_result.get("report_language")

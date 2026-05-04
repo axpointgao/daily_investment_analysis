@@ -12,13 +12,13 @@ class FundAnalyzeRequest(BaseModel):
     fund_code: str = Field(..., description="6 位场外基金代码", example="000001", pattern=r"^\d{6}$")
     fund_name: Optional[str] = Field(None, description="基金名称（可选）", example="华夏成长混合")
     report_type: str = Field(
-        "detailed",
-        description="报告类型：simple(精简) / detailed(完整) / full(完整) / brief(简洁)",
+        "simple",
+        description="报告类型：brief(极简摘要) / simple(标准诊断摘要) / full(完整诊断)",
         pattern="^(simple|detailed|full|brief)$",
     )
     force_refresh: bool = Field(False, description="是否强制刷新")
     async_mode: bool = Field(False, description="是否使用异步模式")
-    notify: bool = Field(True, description="是否发送通知；基金首版暂不发送")
+    notify: bool = Field(True, description="是否发送通知")
 
 
 class FundAnalysisResultResponse(BaseModel):
@@ -47,6 +47,7 @@ class FundTaskStatus(BaseModel):
     progress: Optional[int] = Field(None, description="进度百分比", ge=0, le=100)
     result: Optional[FundAnalysisResultResponse] = Field(None, description="分析结果")
     error: Optional[str] = Field(None, description="错误信息")
+    notification_error: Optional[str] = Field(None, description="通知发送失败原因")
     fund_name: Optional[str] = Field(None, description="基金名称")
 
 

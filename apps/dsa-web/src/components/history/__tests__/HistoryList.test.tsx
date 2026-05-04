@@ -63,7 +63,8 @@ describe('HistoryList', () => {
     );
 
     expect(screen.getByText('已选 1')).toBeInTheDocument();
-    expect(screen.getByText('买入 82')).toBeInTheDocument();
+    expect(screen.getByText('买入')).toBeInTheDocument();
+    expect(screen.getByText('82')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /贵州茅台/i }));
     expect(onItemClick).toHaveBeenCalledWith(1);
@@ -94,7 +95,7 @@ describe('HistoryList', () => {
     expect(screen.getByRole('button', { name: '删除' })).toBeDisabled();
   });
 
-  it('truncates long stock names with trailing dot', () => {
+  it('keeps long stock names accessible while relying on CSS truncation', () => {
     render(
       <HistoryList
         {...baseProps}
@@ -102,12 +103,11 @@ describe('HistoryList', () => {
       />,
     );
 
-    // '贵州茅台股票股份有限公司' (12 Chinese chars) should be truncated to '贵州茅台股票股份.' (8 chars + dot)
-    // The full name exists in a hidden span, visible on hover
-    expect(screen.getByText('贵州茅台股票股份.')).toBeInTheDocument();
-    const fullNameHidden = screen.queryByText('贵州茅台股票股份有限公司');
-    expect(fullNameHidden).toBeInTheDocument();
-    expect(fullNameHidden).toHaveClass('hidden');
+    expect(screen.getByRole('button', { name: /贵州茅台股票股份有限公司/i })).toHaveAttribute(
+      'title',
+      '贵州茅台股票股份有限公司',
+    );
+    expect(screen.getByText('贵州茅台股票股份有限公司')).toHaveClass('truncate');
   });
 
   it('generates unique select-all ids across multiple instances', () => {

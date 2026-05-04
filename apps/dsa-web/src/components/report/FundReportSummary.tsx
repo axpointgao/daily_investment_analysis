@@ -1,7 +1,9 @@
 import type React from 'react';
+import { CircleHelp } from 'lucide-react';
 import type { AnalysisReport, FundPerformanceItem } from '../../types/analysis';
-import { Badge, Card, ScoreGauge } from '../common';
+import { Badge, Card, ScoreGauge, Tooltip } from '../common';
 import { formatDateTime } from '../../utils/format';
+import { formatFundPeriodLabel } from '../../utils/fundPeriod';
 
 interface FundReportSummaryProps {
   report: AnalysisReport;
@@ -25,14 +27,42 @@ const valueColor = (value?: number): React.CSSProperties | undefined => {
   return undefined;
 };
 
-const MetricCard: React.FC<{ label: string; value: string; muted?: string; tone?: React.CSSProperties }> = ({
+const formatRiskRange = (startDate?: string, endDate?: string): string => {
+  if (!startDate && !endDate) return '统计区间暂无数据';
+  if (!startDate) return `统计区间：-- 至 ${endDate}`;
+  if (!endDate) return `统计区间：${startDate} 至 --`;
+  return `统计区间：${startDate} 至 ${endDate}`;
+};
+
+const ANNUAL_RETURN_TIP = '按当前区间折算的一年收益率，用于横向比较；短期数据可能失真。';
+const MAX_DRAWDOWN_TIP = '衡量基金抗跌能力。越接近 0，下跌控制越好；越负，极端下跌风险越高。参考：债券型 0%~-5%较低，混合型 -10%~-20%常见，股票型/指数型低于 -30%需关注。';
+const ANNUAL_VOLATILITY_TIP = '衡量基金上下波动的剧烈程度。数值越高，涨跌越不稳定；数值越低，走势越平稳。参考：5%以内较平稳，10%-20%中等，超过25%波动较高。';
+
+const MetricHelp: React.FC<{ content: string }> = ({ content }) => (
+  <Tooltip content={content}>
+    <span
+      className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-text transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      role="button"
+      tabIndex={0}
+      aria-label="指标说明"
+    >
+      <CircleHelp className="h-3.5 w-3.5" aria-hidden="true" />
+    </span>
+  </Tooltip>
+);
+
+const MetricCard: React.FC<{ label: string; value: string; muted?: string; tone?: React.CSSProperties; tooltip?: string }> = ({
   label,
   value,
   muted,
   tone,
+  tooltip,
 }) => (
   <Card variant="bordered" padding="sm" className="home-panel-card">
-    <span className="label-uppercase">{label}</span>
+    <span className="label-uppercase inline-flex items-center gap-1.5">
+      {label}
+      {tooltip ? <MetricHelp content={tooltip} /> : null}
+    </span>
     <p className="mt-2 text-xl font-semibold text-foreground font-mono" style={tone}>
       {value}
     </p>
@@ -77,7 +107,7 @@ const PerformanceTable: React.FC<{ items?: FundPerformanceItem[] }> = ({ items =
           <tbody>
             {rows.map((item, index) => (
               <tr key={`${item.period}-${index}`} className="border-b border-subtle/60 last:border-0">
-                <td className="py-2 pr-4 text-foreground">{item.period}</td>
+                <td className="py-2 pr-4 text-foreground">{formatFundPeriodLabel(item.period)}</td>
                 <td className="py-2 pr-4 font-mono" style={valueColor(item.returnPct)}>
                   {formatPercent(item.returnPct)}
                 </td>
@@ -100,6 +130,7 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
   const risk = metrics?.risk || {};
   const profile = metrics?.profile || {};
   const managers = Array.isArray(metrics?.manager) ? metrics.manager : [];
+  const riskRangeTip = formatRiskRange(risk.startDate, risk.endDate);
   const managerNames = managers
     .map((item) => formatValue(item.managerNames))
     .filter((item) => item !== '--')
@@ -144,7 +175,7 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
 
             <div className="home-divider border-t pt-5">
               <span className="label-uppercase">关键结论</span>
-              <p className="mt-2 max-w-[62ch] whitespace-pre-wrap text-left text-[15px] leading-7 text-foreground">
+              <p className="mt-2 w-full whitespace-pre-wrap text-left text-[15px] leading-7 text-foreground">
                 {summary.analysisSummary || '暂无分析结论。'}
               </p>
             </div>
@@ -195,10 +226,10 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard label="累计收益" value={formatPercent(risk.totalReturnPct)} tone={valueColor(risk.totalReturnPct)} />
-        <MetricCard label="年化收益" value={formatPercent(risk.annualReturnPct)} tone={valueColor(risk.annualReturnPct)} />
-        <MetricCard label="最大回撤" value={formatPercent(risk.maxDrawdownPct)} tone={valueColor(risk.maxDrawdownPct)} />
-        <MetricCard label="年化波动" value={formatPercent(risk.annualVolatilityPct)} muted={`${risk.sampleCount || 0} 条净值样本`} />
+        <MetricCard label="区间收益" value={formatPercent(risk.totalReturnPct)} tone={valueColor(risk.totalReturnPct)} tooltip={riskRangeTip} />
+        <MetricCard label="年化收益" value={formatPercent(risk.annualReturnPct)} tone={valueColor(risk.annualReturnPct)} tooltip={ANNUAL_RETURN_TIP} />
+        <MetricCard label="最大回撤" value={formatPercent(risk.maxDrawdownPct)} tone={valueColor(risk.maxDrawdownPct)} tooltip={MAX_DRAWDOWN_TIP} />
+        <MetricCard label="年化波动" value={formatPercent(risk.annualVolatilityPct)} muted={`${risk.sampleCount || 0} 条净值样本`} tooltip={ANNUAL_VOLATILITY_TIP} />
       </div>
 
       {risk.reason ? (

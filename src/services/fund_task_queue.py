@@ -42,6 +42,7 @@ class FundTaskInfo:
     created_at: datetime = field(default_factory=datetime.now)
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    notification_error: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -57,6 +58,7 @@ class FundTaskInfo:
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "error": self.error,
+            "notification_error": self.notification_error,
         }
 
     def copy(self) -> "FundTaskInfo":
@@ -73,6 +75,7 @@ class FundTaskInfo:
             created_at=self.created_at,
             started_at=self.started_at,
             completed_at=self.completed_at,
+            notification_error=self.notification_error,
         )
 
 
@@ -250,7 +253,10 @@ class FundAnalysisTaskQueue:
                     task.progress = 100
                     task.completed_at = datetime.now()
                     task.result = result
-                    task.message = "分析完成"
+                    notification = result.get("notification") if isinstance(result.get("notification"), dict) else {}
+                    notification_error = notification.get("error") if notification.get("requested") and not notification.get("sent") else None
+                    task.notification_error = notification_error
+                    task.message = f"分析完成，通知失败: {notification_error[:80]}" if notification_error else "分析完成"
                     task.fund_name = result.get("fund_name") or task.fund_name
                     self._analyzing_funds.pop(task.fund_code, None)
                     snapshot = task.copy()
