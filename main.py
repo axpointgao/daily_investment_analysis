@@ -416,11 +416,15 @@ def run_full_analysis(
     # failures propagate to the caller instead of being silently swallowed.
     from src.core.market_review import run_market_review
     from src.core.pipeline import StockAnalysisPipeline
+    from src.enums import ReportType
 
     try:
         # Issue #529: Hot-reload STOCK_LIST from .env on each scheduled run
         if stock_codes is None:
             config.refresh_stock_list()
+        refresh_fund_list = getattr(config, "refresh_fund_list", None)
+        if callable(refresh_fund_list):
+            refresh_fund_list()
 
         # Issue #373: Trading day filter (per-stock, per-market)
         effective_codes = stock_codes if stock_codes is not None else config.stock_list
@@ -500,22 +504,57 @@ def run_full_analysis(
             if review_result:
                 market_report = review_result
 
-        # Issue #190: 合并推送（个股+大盘复盘）
-        if merge_notification and (results or market_report) and not args.no_notify:
+        fund_results = []
+        fund_codes = list(getattr(config, "fund_list", []) or [])
+        fund_report_type = ReportType.from_str(getattr(config, 'report_type', 'simple'))
+        if fund_codes and not args.dry_run:
+            from src.services.fund_analysis_service import FundAnalysisService
+
+            logger.info("===== 开始分析 %d 只场外基金 =====", len(fund_codes))
+            fund_service = FundAnalysisService()
+            for fund_code in fund_codes:
+                result = fund_service.analyze_fund(
+                    fund_code=fund_code,
+                    report_type=fund_report_type.value,
+                    notify=(not args.no_notify and not merge_notification),
+                )
+                if result:
+                    fund_results.append(result)
+                    notification = result.get("notification") if isinstance(result.get("notification"), dict) else {}
+                    if notification.get("requested") and not notification.get("sent"):
+                        logger.warning(
+                            "基金 %s 分析完成但通知失败: %s",
+                            result.get("fund_code", fund_code),
+                            notification.get("error") or "未知原因",
+                        )
+                else:
+                    logger.warning("基金 %s 分析失败: %s", fund_code, fund_service.last_error or "未知原因")
+
+        # Issue #190: 合并推送（股票大盘+场外基金）
+        if merge_notification and (results or market_report or fund_results) and not args.no_notify:
             parts = []
+            stock_parts = []
             if market_report:
-                parts.append(f"# 📈 大盘复盘\n\n{market_report}")
+                stock_parts.append(f"## 大盘复盘\n\n{market_report}")
             if results:
                 dashboard_content = pipeline.notifier.generate_aggregate_report(
                     results,
                     getattr(config, 'report_type', 'simple'),
                 )
-                parts.append(f"# 🚀 个股决策仪表盘\n\n{dashboard_content}")
+                stock_parts.append(f"## 个股决策仪表盘\n\n{dashboard_content}")
+            if stock_parts:
+                parts.append("# Part 1 股票\n\n" + "\n\n---\n\n".join(stock_parts))
+            if fund_results:
+                fund_content = pipeline.notifier.generate_fund_report(
+                    fund_results,
+                    report_type=fund_report_type,
+                )
+                parts.append("# Part 2 场外基金\n\n" + fund_content)
             if parts:
                 combined_content = "\n\n---\n\n".join(parts)
                 if pipeline.notifier.is_available():
                     if pipeline.notifier.send(combined_content, email_send_to_all=True):
-                        logger.info("已合并推送（个股+大盘复盘）")
+                        logger.info("已合并推送（股票+场外基金）")
                     else:
                         logger.warning("合并推送失败")
 
@@ -527,6 +566,18 @@ def run_full_analysis(
                 logger.info(
                     f"{emoji} {r.name}({r.code}): {r.operation_advice} | "
                     f"评分 {r.sentiment_score} | {r.trend_prediction}"
+                )
+        if fund_results:
+            logger.info("\n===== 场外基金分析结果摘要 =====")
+            for item in fund_results:
+                report = item.get("report") if isinstance(item.get("report"), dict) else {}
+                summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+                logger.info(
+                    "%s(%s): %s | 评分 %s",
+                    item.get("fund_name") or item.get("fund_code"),
+                    item.get("fund_code"),
+                    summary.get("allocationRating") or "N/A",
+                    summary.get("suitabilityScore") or "N/A",
                 )
 
         logger.info("\n任务执行完成")

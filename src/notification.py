@@ -67,6 +67,33 @@ class NotificationChannel(Enum):
     UNKNOWN = "unknown"    # 未知
 
 
+def _escape_md_text(value: Any) -> str:
+    text = "" if value is None else str(value)
+    return text.replace("*", r"\*").replace("|", r"\|")
+
+
+def _format_fund_value(value: Any) -> str:
+    if value in (None, ""):
+        return "N/A"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return _escape_md_text(value)
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.4f}".rstrip("0").rstrip(".")
+
+
+def _format_fund_percent(value: Any) -> str:
+    if value in (None, ""):
+        return "N/A"
+    try:
+        number = float(str(value).replace("%", "").strip())
+    except (TypeError, ValueError):
+        return _escape_md_text(value)
+    return f"{number:.2f}%"
+
+
 class ChannelDetector:
     """
     渠道检测器 - 简化版
@@ -247,6 +274,169 @@ class NotificationService(
         if normalized_type == ReportType.BRIEF:
             return self.generate_brief_report(results, report_date=report_date)
         return self.generate_dashboard_report(results, report_date=report_date)
+
+    def generate_fund_report(
+        self,
+        fund_results: List[Dict[str, Any]],
+        report_type: Any = ReportType.SIMPLE,
+        report_date: Optional[str] = None,
+    ) -> str:
+        """Generate fund diagnosis notification content."""
+        normalized_type = self._normalize_report_type(report_type)
+        if self._report_summary_only or normalized_type == ReportType.BRIEF:
+            return self.generate_fund_brief_report(fund_results, report_date=report_date)
+        if normalized_type == ReportType.FULL:
+            return self.generate_fund_full_report(fund_results, report_date=report_date)
+        return self.generate_fund_simple_report(fund_results, report_date=report_date)
+
+    def generate_fund_brief_report(
+        self,
+        fund_results: List[Dict[str, Any]],
+        report_date: Optional[str] = None,
+    ) -> str:
+        report_date = report_date or datetime.now().strftime("%Y-%m-%d")
+        lines = [f"# 场外基金诊断摘要 - {report_date}", ""]
+        for item in fund_results:
+            report = item.get("report") if isinstance(item, dict) else {}
+            meta, summary, _, _ = self._split_fund_report(report)
+            code = item.get("fund_code") or meta.get("fundCode") or ""
+            name = item.get("fund_name") or meta.get("fundName") or code
+            rating = summary.get("allocationRating") or "N/A"
+            score = summary.get("suitabilityScore")
+            advice = summary.get("holdingAdvice") or summary.get("analysisSummary") or "暂无建议"
+            risk = summary.get("riskSummary") or "风险信息不足"
+            lines.append(
+                f"- **{_escape_md_text(name)}({_escape_md_text(code)})**: "
+                f"{_escape_md_text(rating)} | 评分 {_format_fund_value(score)} | "
+                f"{_escape_md_text(advice)} | 风险：{_escape_md_text(risk)}"
+            )
+        lines.extend(["", f"*生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*"])
+        return "\n".join(lines)
+
+    def generate_fund_simple_report(
+        self,
+        fund_results: List[Dict[str, Any]],
+        report_date: Optional[str] = None,
+    ) -> str:
+        report_date = report_date or datetime.now().strftime("%Y-%m-%d")
+        lines = [f"# 场外基金诊断日报 - {report_date}", ""]
+        for item in fund_results:
+            lines.extend(self._build_fund_section(item, full=False))
+            lines.extend(["---", ""])
+        lines.append(f"*生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+        return "\n".join(lines)
+
+    def generate_fund_full_report(
+        self,
+        fund_results: List[Dict[str, Any]],
+        report_date: Optional[str] = None,
+    ) -> str:
+        report_date = report_date or datetime.now().strftime("%Y-%m-%d")
+        lines = [f"# 场外基金完整诊断日报 - {report_date}", ""]
+        for item in fund_results:
+            lines.extend(self._build_fund_section(item, full=True))
+            lines.extend(["---", ""])
+        lines.append(f"*生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _split_fund_report(report: Any) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+        payload = report if isinstance(report, dict) else {}
+        meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+        summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+        metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
+        details = payload.get("details") if isinstance(payload.get("details"), dict) else {}
+        return meta, summary, metrics, details
+
+    def _build_fund_section(self, item: Dict[str, Any], *, full: bool) -> List[str]:
+        report = item.get("report") if isinstance(item, dict) else {}
+        meta, summary, metrics, details = self._split_fund_report(report)
+        profile = metrics.get("profile") if isinstance(metrics.get("profile"), dict) else {}
+        risk = metrics.get("risk") if isinstance(metrics.get("risk"), dict) else {}
+        performance = metrics.get("performance") if isinstance(metrics.get("performance"), list) else []
+        managers = metrics.get("manager") if isinstance(metrics.get("manager"), list) else []
+        grade = metrics.get("grade") if isinstance(metrics.get("grade"), list) else []
+
+        code = item.get("fund_code") or meta.get("fundCode") or ""
+        name = item.get("fund_name") or meta.get("fundName") or code
+        lines = [
+            f"## {_escape_md_text(name)} ({_escape_md_text(code)})",
+            "",
+            f"- 配置建议：{_escape_md_text(summary.get('allocationRating') or 'N/A')}",
+            f"- 适配评分：{_format_fund_value(summary.get('suitabilityScore'))}",
+            f"- 分析摘要：{_escape_md_text(summary.get('analysisSummary') or 'N/A')}",
+            f"- 持有建议：{_escape_md_text(summary.get('holdingAdvice') or 'N/A')}",
+            f"- 风险说明：{_escape_md_text(summary.get('riskSummary') or 'N/A')}",
+            f"- 适合人群：{_escape_md_text(summary.get('suitableFor') or 'N/A')}",
+            "",
+            "| 指标 | 数值 |",
+            "|------|------|",
+            f"| 基金类型 | {_escape_md_text(meta.get('fundType') or profile.get('fundType') or 'N/A')} |",
+            f"| 最新净值 | {_format_fund_value(meta.get('latestNav'))} |",
+            f"| 净值日期 | {_escape_md_text(meta.get('navDate') or 'N/A')} |",
+            f"| 日涨跌幅 | {_format_fund_percent(meta.get('dailyReturnPct'))} |",
+            f"| 最大回撤 | {_format_fund_percent(risk.get('maxDrawdownPct'))} |",
+            f"| 年化波动 | {_format_fund_percent(risk.get('annualVolatilityPct'))} |",
+            f"| Sharpe | {_format_fund_value(risk.get('sharpe'))} |",
+            "",
+        ]
+
+        perf_rows = [row for row in performance if isinstance(row, dict) and row.get("period")]
+        if perf_rows:
+            limit = len(perf_rows) if full else min(4, len(perf_rows))
+            lines.extend(["### 阶段表现", "", "| 区间 | 收益 | 同类均值 | 沪深300 | 排名 |", "|------|------|------|------|------|"])
+            for row in perf_rows[:limit]:
+                rank = f"{row.get('rank')}/{row.get('peerCount')}" if row.get("rank") and row.get("peerCount") else "N/A"
+                lines.append(
+                    f"| {_escape_md_text(row.get('period'))} | {_format_fund_percent(row.get('returnPct'))} | "
+                    f"{_format_fund_percent(row.get('peerAvgPct'))} | {_format_fund_percent(row.get('hs300Pct'))} | "
+                    f"{_escape_md_text(rank)} |"
+                )
+            lines.append("")
+
+        self._append_fund_bullet_section(lines, "优势", details.get("advantages"))
+        self._append_fund_bullet_section(lines, "风险", details.get("risks"))
+        self._append_fund_bullet_section(lines, "观察项", details.get("watchItems"))
+
+        if full:
+            manager_names = []
+            for manager in managers:
+                if isinstance(manager, dict):
+                    name_value = manager.get("managerNames") or manager.get("name") or manager.get("managerName")
+                    if name_value:
+                        manager_names.append(str(name_value))
+            lines.extend([
+                "### 基金资料",
+                "",
+                "| 项目 | 内容 |",
+                "|------|------|",
+                f"| 基金公司 | {_escape_md_text(profile.get('fundCompany') or 'N/A')} |",
+                f"| 基金经理 | {_escape_md_text(' / '.join(manager_names) or profile.get('managerNames') or 'N/A')} |",
+                f"| 成立日期 | {_escape_md_text(profile.get('establishDate') or 'N/A')} |",
+                f"| 基金规模 | {_escape_md_text(profile.get('latestScale') or 'N/A')} |",
+                f"| 管理费 | {_escape_md_text(profile.get('managementFee') or 'N/A')} |",
+                f"| 托管费 | {_escape_md_text(profile.get('custodyFee') or 'N/A')} |",
+                f"| 业绩基准 | {_escape_md_text(profile.get('benchmark') or 'N/A')} |",
+                "",
+            ])
+            if grade:
+                lines.extend(["### 评级", ""])
+                for row in grade[:5]:
+                    if isinstance(row, dict):
+                        lines.append(f"- {_escape_md_text(row)}")
+                lines.append("")
+
+        return lines
+
+    @staticmethod
+    def _append_fund_bullet_section(lines: List[str], title: str, items: Any) -> None:
+        if not isinstance(items, list) or not items:
+            return
+        lines.extend([f"### {title}", ""])
+        for item in items:
+            if item is not None and str(item).strip():
+                lines.append(f"- {_escape_md_text(item)}")
+        lines.append("")
 
     def _collect_models_used(self, results: List[AnalysisResult]) -> List[str]:
         models: List[str] = []

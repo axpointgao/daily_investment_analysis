@@ -206,6 +206,71 @@ class MainScheduleModeTestCase(unittest.TestCase):
         self.assertIs(reloaded_config, runtime_config)
         get_config_mock.assert_called_once_with()
 
+    def test_run_full_analysis_merges_stock_and_fund_sections(self) -> None:
+        args = self._make_args(no_market_review=False, no_notify=False, dry_run=False)
+        config = self._make_config(
+            stock_list=["600519"],
+            fund_list=["110011"],
+            market_review_enabled=True,
+            merge_email_notification=True,
+            single_stock_notify=False,
+            report_type="simple",
+            trading_day_check_enabled=False,
+            refresh_stock_list=lambda: None,
+            refresh_fund_list=lambda: None,
+        )
+
+        class DummyNotifier:
+            sent_content = ""
+
+            def generate_aggregate_report(self, results, report_type):
+                return "stock report"
+
+            def generate_fund_report(self, results, report_type):
+                return "fund report"
+
+            def is_available(self):
+                return True
+
+            def send(self, content, email_send_to_all=False):
+                self.sent_content = content
+                return True
+
+        notifier = DummyNotifier()
+
+        class DummyPipeline:
+            def __init__(self, *args, **kwargs):
+                self.notifier = notifier
+                self.analyzer = object()
+                self.search_service = object()
+
+            def run(self, **kwargs):
+                return [SimpleNamespace(sentiment_score=80, get_emoji=lambda: "OK", name="贵州茅台", code="600519", operation_advice="持有", trend_prediction="震荡")]
+
+        with patch("src.core.pipeline.StockAnalysisPipeline", DummyPipeline), \
+             patch("src.core.market_review.run_market_review", return_value="market report"), \
+             patch("src.services.fund_analysis_service.FundAnalysisService") as fund_service_cls:
+            fund_service = fund_service_cls.return_value
+            fund_service.analyze_fund.return_value = {
+                "fund_code": "110011",
+                "fund_name": "易方达中小盘",
+                "report": {"summary": {"allocationRating": "谨慎观察", "suitabilityScore": 66}},
+                "notification": {"requested": False, "sent": False, "error": None},
+            }
+
+            main.run_full_analysis(config, args)
+
+        self.assertIn("# Part 1 股票", notifier.sent_content)
+        self.assertIn("market report", notifier.sent_content)
+        self.assertIn("stock report", notifier.sent_content)
+        self.assertIn("# Part 2 场外基金", notifier.sent_content)
+        self.assertIn("fund report", notifier.sent_content)
+        fund_service.analyze_fund.assert_called_once_with(
+            fund_code="110011",
+            report_type="simple",
+            notify=False,
+        )
+
     def test_reload_env_file_values_preserves_managed_env_vars_when_read_fails(self) -> None:
         with patch.dict(
             os.environ,

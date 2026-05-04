@@ -582,8 +582,9 @@ class Config:
     - 类方法 get_instance() 实现单例访问
     """
     
-    # === 自选股配置 ===
+    # === 自选资产配置 ===
     stock_list: List[str] = field(default_factory=list)
+    fund_list: List[str] = field(default_factory=list)
 
     # === 飞书云文档配置 ===
     feishu_app_id: Optional[str] = None
@@ -713,7 +714,7 @@ class Config:
     
     # 邮件配置（只需邮箱和授权码，SMTP 自动识别）
     email_sender: Optional[str] = None  # 发件人邮箱
-    email_sender_name: str = "daily_stock_analysis股票分析助手"  # 发件人显示名称
+    email_sender_name: str = "投资分析助手"  # 发件人显示名称
     email_password: Optional[str] = None  # 邮箱密码/授权码
     email_receivers: List[str] = field(default_factory=list)  # 收件人列表（留空则发给自己）
 
@@ -830,8 +831,8 @@ class Config:
     trading_day_check_enabled: bool = True
 
     # === 实时行情增强数据配置 ===
-    # 实时行情开关（关闭后使用历史收盘价进行分析）
-    enable_realtime_quote: bool = True
+    # 实时行情开关。股票分析/日报不依赖实时行情；该开关保留给持仓估值、价格提醒等实时场景。
+    enable_realtime_quote: bool = False
     # 盘中实时技术面：启用时用实时价计算 MA/多头排列（Issue #234）；关闭则用昨日收盘
     enable_realtime_technical_indicators: bool = True
     # 筹码分布开关（该接口不稳定，云端部署建议关闭）
@@ -931,6 +932,7 @@ class Config:
     _WEBUI_RUNTIME_ENV_FILE_PRIORITY_KEYS = frozenset(
         {
             "STOCK_LIST",
+            "FUND_LIST",
             "RUN_IMMEDIATELY",
             "SCHEDULE_ENABLED",
             "SCHEDULE_TIME",
@@ -1057,6 +1059,13 @@ class Config:
         # 如果没有配置，使用默认的示例股票
         if not stock_list:
             stock_list = ['600519', '000001', '300750']
+
+        fund_list_str = cls._resolve_env_value(
+            'FUND_LIST',
+            default='',
+            prefer_env_file=True,
+        )
+        fund_list = cls._parse_fund_list(fund_list_str)
         
         # === LiteLLM multi-key parsing ===
         # GEMINI_API_KEYS (comma-separated) > GEMINI_API_KEY (single)
@@ -1279,6 +1288,7 @@ class Config:
         
         return cls(
             stock_list=stock_list,
+            fund_list=fund_list,
             feishu_app_id=os.getenv('FEISHU_APP_ID'),
             feishu_app_secret=os.getenv('FEISHU_APP_SECRET'),
             feishu_folder_token=os.getenv('FEISHU_FOLDER_TOKEN'),
@@ -1406,7 +1416,7 @@ class Config:
             telegram_chat_id=os.getenv('TELEGRAM_CHAT_ID'),
             telegram_message_thread_id=os.getenv('TELEGRAM_MESSAGE_THREAD_ID'),
             email_sender=os.getenv('EMAIL_SENDER'),
-            email_sender_name=os.getenv('EMAIL_SENDER_NAME', 'daily_stock_analysis股票分析助手'),
+            email_sender_name=os.getenv('EMAIL_SENDER_NAME', '投资分析助手'),
             email_password=os.getenv('EMAIL_PASSWORD'),
             email_receivers=[r.strip() for r in os.getenv('EMAIL_RECEIVERS', '').split(',') if r.strip()],
             stock_email_groups=cls._parse_stock_email_groups(),
@@ -1537,7 +1547,7 @@ class Config:
             # Discord 机器人扩展配置
             discord_bot_status=os.getenv('DISCORD_BOT_STATUS', 'A股智能分析 | /help'),
             # 实时行情增强数据配置
-            enable_realtime_quote=os.getenv('ENABLE_REALTIME_QUOTE', 'true').lower() == 'true',
+            enable_realtime_quote=os.getenv('ENABLE_REALTIME_QUOTE', 'false').lower() == 'true',
             enable_realtime_technical_indicators=os.getenv(
                 'ENABLE_REALTIME_TECHNICAL_INDICATORS', 'true'
             ).lower() == 'true',
@@ -2154,6 +2164,34 @@ class Config:
             stock_list = ['000001']
 
         self.stock_list = stock_list
+
+    @staticmethod
+    def _parse_fund_list(value: str) -> List[str]:
+        funds: List[str] = []
+        seen = set()
+        for raw in (value or "").split(","):
+            code = (raw or "").strip()
+            if not re.fullmatch(r"\d{6}", code):
+                continue
+            if code in seen:
+                continue
+            seen.add(code)
+            funds.append(code)
+        return funds
+
+    def refresh_fund_list(self) -> None:
+        """热读取 FUND_LIST 环境变量并更新场外基金列表。"""
+        env_file = os.getenv("ENV_FILE")
+        env_path = Path(env_file) if env_file else (Path(__file__).parent.parent / '.env')
+        fund_list_str = ''
+        if env_path.exists():
+            env_values = dotenv_values(env_path)
+            fund_list_str = (env_values.get('FUND_LIST') or '').strip()
+
+        if not fund_list_str:
+            fund_list_str = os.getenv('FUND_LIST', '')
+
+        self.fund_list = self._parse_fund_list(fund_list_str)
     
     def validate_structured(self) -> List[ConfigIssue]:
         """Return structured validation issues with severity levels.

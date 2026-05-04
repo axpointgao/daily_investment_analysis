@@ -59,7 +59,7 @@ class EmailSender:
         """
         self._email_config = {
             'sender': config.email_sender,
-            'sender_name': getattr(config, 'email_sender_name', 'daily_stock_analysis股票分析助手'),
+            'sender_name': getattr(config, 'email_sender_name', '投资分析助手'),
             'password': config.email_password,
             'receivers': config.email_receivers or ([config.email_sender] if config.email_sender else []),
         }
@@ -111,7 +111,7 @@ class EmailSender:
 
     def _format_sender_address(self, sender: str) -> str:
         """Encode display name safely so non-ASCII sender names work across SMTP providers."""
-        sender_name = self._email_config.get('sender_name') or '股票分析助手'
+        sender_name = self._email_config.get('sender_name') or '投资分析助手'
         return formataddr((str(Header(str(sender_name), 'utf-8')), sender))
 
     @staticmethod
@@ -158,7 +158,7 @@ class EmailSender:
             # 生成主题
             if subject is None:
                 date_str = datetime.now().strftime('%Y-%m-%d')
-                subject = f"📈 股票智能分析报告 - {date_str}"
+                subject = f"投资智能分析报告 - {date_str}"
             
             # 将 Markdown 转换为简单 HTML
             html_content = markdown_to_html_document(content)
@@ -230,7 +230,7 @@ class EmailSender:
         server: Optional[smtplib.SMTP] = None
         try:
             date_str = datetime.now().strftime('%Y-%m-%d')
-            subject = f"📈 股票智能分析报告 - {date_str}"
+            subject = f"投资智能分析报告 - {date_str}"
             msg = MIMEMultipart('related')
             msg['Subject'] = Header(subject, 'utf-8')
             msg['From'] = self._format_sender_address(sender)
@@ -240,7 +240,7 @@ class EmailSender:
             alt.attach(MIMEText('报告已生成，详见下方图片。', 'plain', 'utf-8'))
             html_body = (
                 '<p>报告已生成，详见下方图片（点击可查看大图）：</p>'
-                '<p><img src="cid:report-image" alt="股票分析报告" style="max-width:100%%;" /></p>'
+                '<p><img src="cid:report-image" alt="投资分析报告" style="max-width:100%%;" /></p>'
             )
             alt.attach(MIMEText(html_body, 'html', 'utf-8'))
             msg.attach(alt)

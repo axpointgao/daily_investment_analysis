@@ -395,6 +395,62 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
         self.assertIn("group@example.com", msg["To"])
 
     @mock.patch("src.notification.get_config")
+    def test_generate_fund_report_respects_report_summary_only(self, mock_get_config: mock.MagicMock):
+        cfg = _make_config(report_summary_only=True)
+        mock_get_config.return_value = cfg
+        service = NotificationService()
+        payload = [{
+            "fund_code": "110011",
+            "fund_name": "易方达中小盘",
+            "report": {
+                "meta": {"fundCode": "110011", "fundName": "易方达中小盘", "latestNav": 1.2345},
+                "summary": {
+                    "allocationRating": "谨慎观察",
+                    "suitabilityScore": 66,
+                    "analysisSummary": "波动较高",
+                    "holdingAdvice": "控制仓位",
+                    "riskSummary": "回撤风险",
+                },
+                "metrics": {"performance": [{"period": "近1月", "returnPct": 1.2}]},
+                "details": {"advantages": ["长期业绩尚可"]},
+            },
+        }]
+
+        report = service.generate_fund_report(payload, report_type="full")
+
+        self.assertIn("场外基金诊断摘要", report)
+        self.assertIn("易方达中小盘(110011)", report)
+        self.assertIn("谨慎观察", report)
+        self.assertNotIn("长期业绩尚可", report)
+
+    @mock.patch("src.notification.get_config")
+    def test_generate_fund_full_report_contains_fund_specific_sections(self, mock_get_config: mock.MagicMock):
+        cfg = _make_config(report_summary_only=False)
+        mock_get_config.return_value = cfg
+        service = NotificationService()
+        payload = [{
+            "fund_code": "110011",
+            "fund_name": "易方达中小盘",
+            "report": {
+                "meta": {"fundCode": "110011", "fundName": "易方达中小盘", "latestNav": 1.2345},
+                "summary": {"allocationRating": "适合配置", "suitabilityScore": 82},
+                "metrics": {
+                    "profile": {"fundCompany": "易方达", "fundType": "混合型"},
+                    "risk": {"maxDrawdownPct": -12.3, "sharpe": 0.8},
+                    "performance": [{"period": "近1月", "returnPct": 1.2, "peerAvgPct": 0.5}],
+                },
+                "details": {"advantages": ["风格稳定"]},
+            },
+        }]
+
+        report = service.generate_fund_report(payload, report_type="full")
+
+        self.assertIn("场外基金完整诊断日报", report)
+        self.assertIn("阶段表现", report)
+        self.assertIn("基金资料", report)
+        self.assertIn("风格稳定", report)
+
+    @mock.patch("src.notification.get_config")
     @mock.patch("requests.post")
     def test_send_to_feishu_via_notification_service(self, mock_post: mock.MagicMock, mock_get_config: mock.MagicMock):
         cfg = _make_config(feishu_webhook_url="https://feishu.example")

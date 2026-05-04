@@ -485,6 +485,10 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         payload = self.service.get_config(include_schema=True)
         items = {item["key"]: item for item in payload["items"]}
 
+        self.assertEqual(items["FUND_LIST"]["schema"]["category"], "base")
+        self.assertEqual(items["FUND_LIST"]["schema"]["ui_control"], "textarea")
+        self.assertEqual(items["FUND_LIST"]["schema"]["data_type"], "array")
+
         agent_arch_schema = items["AGENT_ARCH"]["schema"]
         self.assertEqual(agent_arch_schema["options"][0]["value"], "single")
         self.assertEqual(agent_arch_schema["options"][1]["label"], "Multi Agent (Orchestrator)")
@@ -1080,6 +1084,16 @@ class SystemConfigServiceTestCase(unittest.TestCase):
 
         self.assertTrue(response["success"])
         self.assertEqual(Config.get_instance().stock_list, ["300750", "TSLA"])
+
+    def test_update_with_reload_applies_fund_list(self) -> None:
+        response = self.service.update(
+            config_version=self.manager.get_config_version(),
+            items=[{"key": "FUND_LIST", "value": "110011,not-a-fund,000001,110011"}],
+            reload_now=True,
+        )
+
+        self.assertTrue(response["success"])
+        self.assertEqual(Config.get_instance().fund_list, ["110011", "000001"])
 
     def test_update_raises_conflict_for_stale_version(self) -> None:
         with self.assertRaises(ConfigConflictError):

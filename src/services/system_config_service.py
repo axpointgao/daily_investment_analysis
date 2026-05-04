@@ -1076,6 +1076,7 @@ class SystemConfigService:
     def _is_setup_relevant_env_key(key: str) -> bool:
         if key in {
             "STOCK_LIST",
+            "FUND_LIST",
             "DATABASE_PATH",
             "LITELLM_CONFIG",
             "LITELLM_MODEL",

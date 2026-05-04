@@ -80,6 +80,20 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "validation": {"min_items": 1},
         "display_order": 10,
     },
+    "FUND_LIST": {
+        "title": "Off-exchange Fund List",
+        "description": "Comma-separated off-exchange fund codes for scheduled fund diagnosis.",
+        "category": "base",
+        "data_type": "array",
+        "ui_control": "textarea",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "",
+        "options": [],
+        "validation": {"pattern": r"^\d{6}$"},
+        "display_order": 11,
+    },
     # ------------------------------------------------------------------
     # AI Model – LiteLLM unified config
     # ------------------------------------------------------------------
@@ -432,14 +446,14 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "ENABLE_REALTIME_QUOTE": {
         "title": "Enable Realtime Quote",
-        "description": "Enable realtime market quotes. Disable to only use historical close prices.",
+        "description": "Enable realtime market quotes for realtime-only scenarios such as portfolio valuation and price alerts. Stock analysis reports use latest close prices.",
         "category": "data_source",
         "data_type": "boolean",
         "ui_control": "switch",
         "is_sensitive": False,
         "is_required": False,
         "is_editable": True,
-        "default_value": "true",
+        "default_value": "false",
         "options": [],
         "validation": {},
         "display_order": 22,
@@ -883,7 +897,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "REPORT_SUMMARY_ONLY": {
         "title": "Report Summary Only",
-        "description": "Push only analysis summary without per-stock details. Suitable for quick overview when tracking many stocks (Issue #262).",
+        "description": "Push only analysis summaries without per-stock or per-fund details. Suitable for quick overview when tracking many assets.",
         "category": "notification",
         "data_type": "boolean",
         "ui_control": "switch",
@@ -1243,7 +1257,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "REPORT_TYPE": {
         "title": "Report Type",
-        "description": "Report format: 'simple' (concise), 'full' (detailed), or 'brief' (3-5 sentences).",
+        "description": "Report format for stock and fund notifications: 'brief' (very short), 'simple' (standard summary), or 'full' (detailed).",
         "category": "notification",
         "data_type": "string",
         "ui_control": "select",
@@ -1344,7 +1358,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "MERGE_EMAIL_NOTIFICATION": {
         "title": "Merge Email Notification",
-        "description": "Merge stock analysis and market review into a single email notification.",
+        "description": "Merge scheduled stock analysis, market review, and fund diagnosis into one notification with separate stock and fund sections.",
         "category": "notification",
         "data_type": "boolean",
         "ui_control": "switch",
@@ -1963,7 +1977,7 @@ def _is_sensitive_key(key: str) -> bool:
 
 
 def _infer_category(key: str) -> str:
-    if key == "STOCK_LIST":
+    if key in {"STOCK_LIST", "FUND_LIST"}:
         return "base"
     if key.startswith("BACKTEST_"):
         return "backtest"
@@ -2032,7 +2046,7 @@ def _infer_data_type(key: str, value_hint: Optional[str]) -> str:
     except (TypeError, ValueError):
         pass
 
-    if key in {"STOCK_LIST", "EMAIL_RECEIVERS", "CUSTOM_WEBHOOK_URLS"}:
+    if key in {"STOCK_LIST", "FUND_LIST", "EMAIL_RECEIVERS", "CUSTOM_WEBHOOK_URLS"}:
         return "array"
     return "string"
 
