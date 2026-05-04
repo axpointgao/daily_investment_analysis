@@ -3,7 +3,7 @@
 Data tools — wraps DataFetcherManager methods as agent-callable tools.
 
 Tools:
-- get_realtime_quote: real-time stock quote
+- get_latest_close_quote: latest daily close quote for stock analysis
 - get_daily_history: historical OHLCV data
 - get_chip_distribution: chip distribution analysis
 - get_analysis_context: historical analysis context from DB
@@ -106,11 +106,21 @@ def _append_history_metadata(response: dict, metadata: Dict[str, Any]) -> dict:
     return response
 
 
+def _safe_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _compact_fundamental_context(fundamental_context: dict) -> dict:
     """Reduce token footprint for tool responses while keeping key semantics."""
     if not isinstance(fundamental_context, dict):
         return {}
     blocks = (
+        "market_metrics",
         "valuation",
         "growth",
         "earnings",
@@ -229,48 +239,42 @@ def _compact_portfolio_risk(risk: dict, top_n: int = 10) -> dict:
 
 
 # ============================================================
-# get_realtime_quote
+# get_latest_close_quote
 # ============================================================
 
-def _handle_get_realtime_quote(stock_code: str) -> dict:
-    """Get real-time stock quote."""
-    manager = _get_fetcher_manager()
-    quote = manager.get_realtime_quote(stock_code)
-    if quote is None:
+def _handle_get_latest_close_quote(stock_code: str) -> dict:
+    """Get latest daily close quote for stock analysis."""
+    from src.services.history_loader import load_history_df
+
+    df, source = load_history_df(stock_code, days=5)
+    if df is None or df.empty:
         return {
-            "error": f"No realtime quote available for {stock_code}",
+            "error": f"No latest close data available for {stock_code}",
             "retriable": False,
-            "note": "All data sources unavailable (network or circuit-breaker). Skip this tool and proceed with historical data only.",
+            "note": "Proceed without price fields and state the missing close data explicitly.",
         }
 
+    row = df.sort_values("date").iloc[-1] if "date" in df.columns else df.iloc[-1]
     return {
-        "code": quote.code,
-        "name": quote.name,
-        "price": quote.price,
-        "change_pct": quote.change_pct,
-        "change_amount": quote.change_amount,
-        "volume": quote.volume,
-        "amount": quote.amount,
-        "volume_ratio": quote.volume_ratio,
-        "turnover_rate": quote.turnover_rate,
-        "amplitude": quote.amplitude,
-        "open": quote.open_price,
-        "high": quote.high,
-        "low": quote.low,
-        "pre_close": quote.pre_close,
-        "pe_ratio": quote.pe_ratio,
-        "pb_ratio": quote.pb_ratio,
-        "total_mv": quote.total_mv,
-        "circ_mv": quote.circ_mv,
-        "change_60d": quote.change_60d,
-        "source": quote.source.value if hasattr(quote.source, 'value') else str(quote.source),
+        "code": stock_code,
+        "date": str(row.get("date", "")),
+        "price": _safe_float(row.get("close")),
+        "close": _safe_float(row.get("close")),
+        "change_pct": _safe_float(row.get("pct_chg")),
+        "volume": _safe_float(row.get("volume")),
+        "amount": _safe_float(row.get("amount")),
+        "open": _safe_float(row.get("open")),
+        "high": _safe_float(row.get("high")),
+        "low": _safe_float(row.get("low")),
+        "source": f"{source}:latest_close",
+        "note": "Latest trading-day close data; no intraday realtime quote is used.",
     }
 
 
-get_realtime_quote_tool = ToolDefinition(
-    name="get_realtime_quote",
-    description="Get real-time stock quote including price, change%, volume ratio, "
-                "turnover rate, PE, PB, market cap. Returns live market data.",
+get_latest_close_quote_tool = ToolDefinition(
+    name="get_latest_close_quote",
+    description="Get latest trading-day close quote for stock analysis. "
+                "This is not intraday realtime data.",
     parameters=[
         ToolParameter(
             name="stock_code",
@@ -278,7 +282,7 @@ get_realtime_quote_tool = ToolDefinition(
             description="Stock code, e.g., '600519' (A-share), 'AAPL' (US), 'hk00700' (HK)",
         ),
     ],
-    handler=_handle_get_realtime_quote,
+    handler=_handle_get_latest_close_quote,
     category="data",
 )
 
@@ -618,7 +622,7 @@ get_portfolio_snapshot_tool = ToolDefinition(
 # ============================================================
 
 ALL_DATA_TOOLS = [
-    get_realtime_quote_tool,
+    get_latest_close_quote_tool,
     get_daily_history_tool,
     get_chip_distribution_tool,
     get_analysis_context_tool,

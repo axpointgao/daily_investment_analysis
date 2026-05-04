@@ -122,11 +122,7 @@ class StockAnalysisPipeline:
         
         logger.info(f"调度器初始化完成，最大并发数: {self.max_workers}")
         logger.info("已启用技术分析引擎（均线/趋势/量价指标）")
-        # 打印实时行情/筹码配置状态
-        if self.config.enable_realtime_quote:
-            logger.info(f"实时行情已启用 (优先级: {self.config.realtime_source_priority})")
-        else:
-            logger.info("实时行情已禁用，将使用历史收盘价")
+        logger.info("股票分析使用最新收盘价口径，不依赖实时行情")
         if self.config.enable_chip_distribution:
             logger.info("筹码分布分析已启用")
         else:
@@ -234,10 +230,10 @@ class StockAnalysisPipeline:
     
     def analyze_stock(self, code: str, report_type: ReportType, query_id: str) -> Optional[AnalysisResult]:
         """
-        分析单只股票（增强版：含量比、换手率、筹码分析、多维度情报）
+        分析单只股票（增强版：含收盘价量价、筹码分析、多维度情报）
         
         流程：
-        1. 获取实时行情（量比、换手率）- 通过 DataFetcherManager 自动故障切换
+        1. 使用最新交易日收盘行情作为分析价格
         2. 获取筹码分布 - 通过 DataFetcherManager 带熔断保护
         3. 进行趋势分析（基于交易理念）
         4. 多维度情报搜索（最新消息+风险排查+业绩预期）
@@ -254,31 +250,13 @@ class StockAnalysisPipeline:
         """
         stock_name = code
         try:
-            self._emit_progress(18, f"{code}：正在获取行情与筹码数据")
-            # 获取股票名称（先走轻量名称路径，后续若 realtime_quote 有 name 再覆盖）
+            self._emit_progress(18, f"{code}：正在获取收盘行情与筹码数据")
+            # 获取股票名称（轻量名称路径，避免触发实时全市场行情）
             stock_name = self.fetcher_manager.get_stock_name(code, allow_realtime=False)
 
-            # Step 1: 获取实时行情（量比、换手率等）- 使用统一入口，自动故障切换
+            # Step 1: 股票分析/日报统一使用最新交易日收盘价，不调用实时行情。
             realtime_quote = None
-            try:
-                if self.config.enable_realtime_quote:
-                    realtime_quote = self.fetcher_manager.get_realtime_quote(code, log_final_failure=False)
-                    if realtime_quote:
-                        # 使用实时行情返回的真实股票名称
-                        if realtime_quote.name:
-                            stock_name = realtime_quote.name
-                        # 兼容不同数据源的字段（有些数据源可能没有 volume_ratio）
-                        volume_ratio = getattr(realtime_quote, 'volume_ratio', None)
-                        turnover_rate = getattr(realtime_quote, 'turnover_rate', None)
-                        logger.info(f"{stock_name}({code}) 实时行情: 价格={realtime_quote.price}, "
-                                  f"量比={volume_ratio}, 换手率={turnover_rate}% "
-                                  f"(来源: {realtime_quote.source.value if hasattr(realtime_quote, 'source') else 'unknown'})")
-                    else:
-                        logger.warning(f"{stock_name}({code}) 所有实时行情数据源均不可用，已降级为历史收盘价继续分析")
-                else:
-                    logger.info(f"{stock_name}({code}) 实时行情已禁用，使用历史收盘价继续分析")
-            except Exception as e:
-                logger.warning(f"{stock_name}({code}) 实时行情链路异常，已降级为历史收盘价继续分析: {e}")
+            logger.info(f"{stock_name}({code}) 使用最新交易日收盘价继续分析")
 
             # 如果还是没有名称，使用代码作为名称
             if not stock_name:
@@ -352,9 +330,6 @@ class StockAnalysisPipeline:
                 historical_bars = self.db.get_data_range(code, start_date, end_date)
                 if historical_bars:
                     df = pd.DataFrame([bar.to_dict() for bar in historical_bars])
-                    # Issue #234: Augment with realtime for intraday MA calculation
-                    if self.config.enable_realtime_quote and realtime_quote:
-                        df = self._augment_historical_with_realtime(df, realtime_quote, code)
                     trend_result = self.trend_analyzer.analyze(df, code)
                     logger.info(f"{stock_name}({code}) 趋势分析: {trend_result.trend_status.value}, "
                               f"买入信号={trend_result.buy_signal.value}, 评分={trend_result.signal_score}")
@@ -433,7 +408,7 @@ class StockAnalysisPipeline:
             context = self.db.get_analysis_context(code)
 
             if context is None:
-                logger.warning(f"{stock_name}({code}) 无法获取历史行情数据，将仅基于新闻和实时行情分析")
+                logger.warning(f"{stock_name}({code}) 无法获取历史行情数据，将仅基于新闻和低频基本面分析")
                 _mkt_date = get_market_now(
                     get_market_for_stock(normalize_stock_code(code))
                 ).date()
@@ -446,7 +421,7 @@ class StockAnalysisPipeline:
                     'yesterday': {}
                 }
             
-            # Step 6: 增强上下文数据（添加实时行情、筹码、趋势分析结果、股票名称）
+            # Step 6: 增强上下文数据（添加低频指标、筹码、趋势分析结果、股票名称）
             enhanced_context = self._enhance_context(
                 context, 
                 realtime_quote, 
@@ -481,9 +456,9 @@ class StockAnalysisPipeline:
             if result:
                 self._emit_progress(94, f"{stock_name}：正在校验并整理分析结果")
                 result.query_id = query_id
-                realtime_data = enhanced_context.get('realtime', {})
-                result.current_price = realtime_data.get('price')
-                result.change_pct = realtime_data.get('change_pct')
+                latest_close, latest_change = self._get_latest_close_from_context(enhanced_context)
+                result.current_price = latest_close
+                result.change_pct = latest_change
 
             # Step 7.6: chip_structure fallback (Issue #589)
             if result and chip_data:
@@ -491,7 +466,7 @@ class StockAnalysisPipeline:
 
             # Step 7.7: price_position fallback
             if result:
-                fill_price_position_if_needed(result, trend_result, realtime_quote)
+                fill_price_position_if_needed(result, trend_result, None)
 
             # Step 8: 保存分析历史记录
             if result and result.success:
@@ -533,11 +508,11 @@ class StockAnalysisPipeline:
         """
         增强分析上下文
         
-        将实时行情、筹码分布、趋势分析结果、股票名称添加到上下文中
+        将低频指标、筹码分布、趋势分析结果、股票名称添加到上下文中
         
         Args:
             context: 原始上下文
-            realtime_quote: 实时行情数据（UnifiedRealtimeQuote 或 None）
+            realtime_quote: 兼容旧签名，股票分析链路不再传入实时行情
             chip_data: 筹码分布数据
             trend_result: 趋势分析结果
             stock_name: 股票名称
@@ -557,30 +532,9 @@ class StockAnalysisPipeline:
         # 将运行时搜索窗口透传给 analyzer，避免与全局配置重新读取产生窗口不一致
         enhanced['news_window_days'] = getattr(self.search_service, "news_window_days", 3)
         
-        # 添加实时行情（兼容不同数据源的字段差异）
-        if realtime_quote:
-            # 使用 getattr 安全获取字段，缺失字段返回 None 或默认值
-            volume_ratio = getattr(realtime_quote, 'volume_ratio', None)
-            enhanced['realtime'] = {
-                'name': getattr(realtime_quote, 'name', ''),
-                'price': getattr(realtime_quote, 'price', None),
-                'change_pct': getattr(realtime_quote, 'change_pct', None),
-                'volume_ratio': volume_ratio,
-                'volume_ratio_desc': self._describe_volume_ratio(volume_ratio) if volume_ratio else '无数据',
-                'turnover_rate': getattr(realtime_quote, 'turnover_rate', None),
-                'pe_ratio': getattr(realtime_quote, 'pe_ratio', None),
-                'pb_ratio': getattr(realtime_quote, 'pb_ratio', None),
-                'total_mv': getattr(realtime_quote, 'total_mv', None),
-                'circ_mv': getattr(realtime_quote, 'circ_mv', None),
-                'change_60d': getattr(realtime_quote, 'change_60d', None),
-                'source': getattr(realtime_quote, 'source', None),
-            }
-            # 移除 None 值以减少上下文大小
-            enhanced['realtime'] = {k: v for k, v in enhanced['realtime'].items() if v is not None}
-        
         # 添加筹码分布
         if chip_data:
-            current_price = getattr(realtime_quote, 'price', 0) if realtime_quote else 0
+            current_price = self._get_latest_close_from_context(enhanced)[0] or 0
             enhanced['chip'] = {
                 'profit_ratio': chip_data.profit_ratio,
                 'avg_cost': chip_data.avg_cost,
@@ -604,71 +558,6 @@ class StockAnalysisPipeline:
                 'signal_reasons': trend_result.signal_reasons,
                 'risk_factors': trend_result.risk_factors,
             }
-
-        # Issue #234: Override today with realtime OHLC + trend MA for intraday analysis
-        # Guard: trend_result.ma5 > 0 ensures MA calculation succeeded (data sufficient)
-        if realtime_quote and trend_result and trend_result.ma5 > 0:
-            price = getattr(realtime_quote, 'price', None)
-            if price is not None and price > 0:
-                yesterday_close = None
-                if enhanced.get('yesterday') and isinstance(enhanced['yesterday'], dict):
-                    yesterday_close = enhanced['yesterday'].get('close')
-                orig_today = enhanced.get('today') or {}
-                open_p = getattr(realtime_quote, 'open_price', None) or getattr(
-                    realtime_quote, 'pre_close', None
-                ) or yesterday_close or orig_today.get('open') or price
-                high_p = getattr(realtime_quote, 'high', None) or price
-                low_p = getattr(realtime_quote, 'low', None) or price
-                vol = getattr(realtime_quote, 'volume', None)
-                amt = getattr(realtime_quote, 'amount', None)
-                pct = getattr(realtime_quote, 'change_pct', None)
-                realtime_today = {
-                    'close': price,
-                    'open': open_p,
-                    'high': high_p,
-                    'low': low_p,
-                    'ma5': trend_result.ma5,
-                    'ma10': trend_result.ma10,
-                    'ma20': trend_result.ma20,
-                }
-                if vol is not None:
-                    realtime_today['volume'] = vol
-                if amt is not None:
-                    realtime_today['amount'] = amt
-                if pct is not None:
-                    realtime_today['pct_chg'] = pct
-                for k, v in orig_today.items():
-                    if k not in realtime_today and v is not None:
-                        realtime_today[k] = v
-                enhanced['today'] = realtime_today
-                enhanced['ma_status'] = self._compute_ma_status(
-                    price, trend_result.ma5, trend_result.ma10, trend_result.ma20
-                )
-                enhanced['date'] = get_market_now(
-                    get_market_for_stock(normalize_stock_code(enhanced.get('code', '')))
-                ).date().isoformat()
-                if yesterday_close is not None:
-                    try:
-                        yc = float(yesterday_close)
-                        if yc > 0:
-                            enhanced['price_change_ratio'] = round(
-                                (price - yc) / yc * 100, 2
-                            )
-                    except (TypeError, ValueError):
-                        pass
-                if vol is not None and enhanced.get('yesterday'):
-                    yest_vol = enhanced['yesterday'].get('volume') if isinstance(
-                        enhanced['yesterday'], dict
-                    ) else None
-                    if yest_vol is not None:
-                        try:
-                            yv = float(yest_vol)
-                            if yv > 0:
-                                enhanced['volume_change_ratio'] = round(
-                                    float(vol) / yv, 2
-                                )
-                        except (TypeError, ValueError):
-                            pass
 
         # ETF/index flag for analyzer prompt (Fixes #274)
         enhanced['is_index_etf'] = SearchService.is_index_or_etf(
@@ -787,6 +676,19 @@ class StockAnalysisPipeline:
                 "report_language": report_language,
                 "fundamental_context": fundamental_context,
             }
+
+            latest_close, latest_change = self._get_latest_close_from_context(
+                self.db.get_analysis_context(code) or {}
+            )
+            if latest_close is not None or latest_change is not None:
+                initial_context["latest_close_quote"] = {
+                    "code": code,
+                    "price": latest_close,
+                    "close": latest_close,
+                    "change_pct": latest_change,
+                    "source": "db:latest_close",
+                    "note": "Latest trading-day close data; no intraday realtime quote is used.",
+                }
             
             if realtime_quote:
                 initial_context["realtime_quote"] = self._safe_to_dict(realtime_quote)
@@ -849,7 +751,7 @@ class StockAnalysisPipeline:
 
             # price_position fallback (same as non-agent path Step 7.7)
             if result:
-                fill_price_position_if_needed(result, trend_result, realtime_quote)
+                fill_price_position_if_needed(result, trend_result, None)
 
             resolved_stock_name = result.name if result and result.name else stock_name
 
@@ -1066,6 +968,23 @@ class StockAnalysisPipeline:
             return "明显放量"
         else:
             return "巨量"
+
+    @staticmethod
+    def _get_latest_close_from_context(context: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
+        """Return latest close price and pct change from the stored daily context."""
+        today = context.get("today") if isinstance(context, dict) else None
+        if not isinstance(today, dict):
+            return None, None
+
+        def _safe_float(value: Any) -> Optional[float]:
+            if value is None:
+                return None
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        return _safe_float(today.get("close")), _safe_float(today.get("pct_chg"))
 
     @staticmethod
     def _compute_ma_status(close: float, ma5: float, ma10: float, ma20: float) -> str:
@@ -1383,13 +1302,6 @@ class StockAnalysisPipeline:
         # 冻结本轮运行的统一参考时间，避免跨市场收盘边界时同批股票使用不同目标交易日。
         resume_reference_time = datetime.now(timezone.utc)
         
-        # === 批量预取实时行情（优化：避免每只股票都触发全量拉取）===
-        # 只有股票数量 >= 5 时才进行预取，少量股票直接逐个查询更高效
-        if len(stock_codes) >= 5:
-            prefetch_count = self.fetcher_manager.prefetch_realtime_quotes(stock_codes)
-            if prefetch_count > 0:
-                logger.info(f"已启用批量预取架构：一次拉取全市场数据，{len(stock_codes)} 只股票共享缓存")
-
         # Issue #455: 预取股票名称，避免并发分析时显示「股票xxxxx」
         # dry_run 仅做数据拉取，不需要名称预取，避免额外网络开销
         if not dry_run:

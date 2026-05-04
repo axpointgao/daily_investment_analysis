@@ -69,13 +69,6 @@ class TestFundamentalContext(unittest.TestCase):
             fundamental_fetch_timeout_seconds=0.8,
             fundamental_retry_max=1,
         )
-        quote = SimpleNamespace(
-            pe_ratio=None,
-            pb_ratio=None,
-            total_mv=5.0e10,
-            circ_mv=4.0e10,
-            source=SimpleNamespace(value="tencent"),
-        )
         # Mock get_fundamental_bundle so growth/earnings/institution are not_supported (no network).
         bundle = {
             "status": "not_supported",
@@ -86,7 +79,11 @@ class TestFundamentalContext(unittest.TestCase):
             "errors": [],
         }
         with patch("src.config.get_config", return_value=cfg), \
-                patch.object(manager, "get_realtime_quote", return_value=quote), \
+                patch.object(manager, "get_low_frequency_market_metrics", return_value={
+                    "total_mv": 5.0e10,
+                    "circ_mv": 4.0e10,
+                    "source": "tushare:daily_basic",
+                }), \
                 patch(
                     "data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle",
                     return_value=bundle,
@@ -128,15 +125,14 @@ class TestFundamentalContext(unittest.TestCase):
             fundamental_fetch_timeout_seconds=0.8,
             fundamental_retry_max=1,
         )
-        quote = SimpleNamespace(
-            pe_ratio=12.3,
-            pb_ratio=2.1,
-            total_mv=1.0e11,
-            circ_mv=7.0e10,
-            source=SimpleNamespace(value="tencent"),
-        )
         with patch("src.config.get_config", return_value=cfg), \
-                patch.object(manager, "get_realtime_quote", return_value=quote), \
+                patch.object(manager, "get_low_frequency_market_metrics", return_value={
+                    "pe_ratio": 12.3,
+                    "pb_ratio": 2.1,
+                    "total_mv": 1.0e11,
+                    "circ_mv": 7.0e10,
+                    "source": "tushare:daily_basic",
+                }), \
                 patch("data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle", return_value={
                     "growth": {"revenue_yoy": 10.1, "net_profit_yoy": 8.5},
                     "earnings": {"forecast_summary": "预增"},
@@ -163,16 +159,15 @@ class TestFundamentalContext(unittest.TestCase):
             fundamental_fetch_timeout_seconds=0.8,
             fundamental_retry_max=1,
         )
-        quote = SimpleNamespace(
-            price=50.0,
-            pe_ratio=12.3,
-            pb_ratio=2.1,
-            total_mv=1.0e11,
-            circ_mv=7.0e10,
-            source=SimpleNamespace(value="tencent"),
-        )
         with patch("src.config.get_config", return_value=cfg), \
-                patch.object(manager, "get_realtime_quote", return_value=quote), \
+                patch.object(manager, "get_low_frequency_market_metrics", return_value={
+                    "close": 50.0,
+                    "pe_ratio": 12.3,
+                    "pb_ratio": 2.1,
+                    "total_mv": 1.0e11,
+                    "circ_mv": 7.0e10,
+                    "source": "tushare:daily_basic",
+                }), \
                 patch("data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle", return_value={
                     "status": "partial",
                     "growth": {},
@@ -205,16 +200,15 @@ class TestFundamentalContext(unittest.TestCase):
             fundamental_fetch_timeout_seconds=0.8,
             fundamental_retry_max=1,
         )
-        quote = SimpleNamespace(
-            price=None,
-            pe_ratio=12.3,
-            pb_ratio=2.1,
-            total_mv=1.0e11,
-            circ_mv=7.0e10,
-            source=SimpleNamespace(value="tencent"),
-        )
         with patch("src.config.get_config", return_value=cfg), \
-                patch.object(manager, "get_realtime_quote", return_value=quote), \
+                patch.object(manager, "get_low_frequency_market_metrics", return_value={
+                    "close": None,
+                    "pe_ratio": 12.3,
+                    "pb_ratio": 2.1,
+                    "total_mv": 1.0e11,
+                    "circ_mv": 7.0e10,
+                    "source": "tushare:daily_basic",
+                }), \
                 patch("data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle", return_value={
                     "status": "partial",
                     "growth": {},
@@ -246,13 +240,6 @@ class TestFundamentalContext(unittest.TestCase):
             fundamental_fetch_timeout_seconds=0.8,
             fundamental_retry_max=1,
         )
-        quote = SimpleNamespace(
-            pe_ratio=12.3,
-            pb_ratio=2.1,
-            total_mv=1.0e11,
-            circ_mv=7.0e10,
-            source=SimpleNamespace(value="tencent"),
-        )
         bundle = {
             "status": "not_supported",
             "growth": {},
@@ -276,7 +263,13 @@ class TestFundamentalContext(unittest.TestCase):
             return {"status": "not_supported", "source_chain": [], "errors": [], "data": {}}
 
         with patch("src.config.get_config", return_value=cfg), \
-                patch.object(manager, "get_realtime_quote", return_value=quote), \
+                patch.object(manager, "get_low_frequency_market_metrics", return_value={
+                    "pe_ratio": 12.3,
+                    "pb_ratio": 2.1,
+                    "total_mv": 1.0e11,
+                    "circ_mv": 7.0e10,
+                    "source": "tushare:daily_basic",
+                }), \
                 patch(
                     "data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle",
                     return_value=bundle,
@@ -344,13 +337,6 @@ class TestFundamentalContext(unittest.TestCase):
             fundamental_fetch_timeout_seconds=0.8,
             fundamental_retry_max=1,
         )
-        quote = SimpleNamespace(
-            pe_ratio=None,
-            pb_ratio=None,
-            total_mv=None,
-            circ_mv=None,
-            source=SimpleNamespace(value="tencent"),
-        )
         bundle = {
             "status": "not_supported",
             "growth": {},
@@ -360,7 +346,13 @@ class TestFundamentalContext(unittest.TestCase):
             "errors": [],
         }
         with patch("src.config.get_config", return_value=cfg), \
-                patch.object(manager, "get_realtime_quote", return_value=quote), \
+                patch.object(manager, "get_low_frequency_market_metrics", return_value={
+                    "pe_ratio": None,
+                    "pb_ratio": None,
+                    "total_mv": None,
+                    "circ_mv": None,
+                    "source": "tushare:daily_basic",
+                }), \
                 patch(
                     "data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle",
                     return_value=bundle,

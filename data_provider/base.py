@@ -497,7 +497,7 @@ class DataFetcherManager:
         self._stock_name_cache: Dict[str, str] = {}
         self._stock_name_cache_lock = RLock()
         
-        if fetchers:
+        if fetchers is not None:
             # 按优先级排序
             self._fetchers = sorted(fetchers, key=lambda f: f.priority)
         else:
@@ -1870,6 +1870,7 @@ class DataFetcherManager:
             "capital_flow",
             "dragon_tiger",
             "boards",
+            "market_metrics",
         ):
             payload = context.get(block, {})
             if isinstance(payload, dict) and DataFetcherManager._has_meaningful_payload(payload.get("data")):
@@ -1920,6 +1921,12 @@ class DataFetcherManager:
                 [{"provider": "fundamental_pipeline", "result": "not_supported", "duration_ms": 0}],
                 [reason],
             ),
+            "market_metrics": self._build_fundamental_block(
+                "not_supported",
+                {},
+                [{"provider": "fundamental_pipeline", "result": "not_supported", "duration_ms": 0}],
+                [reason],
+            ),
         }
         return {
             "market": market,
@@ -1943,6 +1950,7 @@ class DataFetcherManager:
             "capital_flow",
             "dragon_tiger",
             "boards",
+            "market_metrics",
         )
         blocks = {
             block: self._build_fundamental_block(
@@ -2017,6 +2025,7 @@ class DataFetcherManager:
             "capital_flow": {},
             "dragon_tiger": {},
             "boards": {},
+            "market_metrics": {},
             "coverage": {},
             "source_chain": [],
             "errors": [],
@@ -2028,39 +2037,89 @@ class DataFetcherManager:
             nonlocal remaining_seconds
             remaining_seconds = max(0.0, remaining_seconds - consumed_ms / 1000.0)
 
-        valuation_timeout = min(fetch_timeout, remaining_seconds)
-        if valuation_timeout > 0:
-            quote_payload, valuation_err, valuation_ms = self._run_with_retry(
-                lambda: self.get_realtime_quote(stock_code),
-                valuation_timeout,
-                "fundamental_valuation",
+        metrics_payload: Optional[Dict[str, Any]] = None
+        metrics_err = None
+        metrics_ms = 0
+        metrics_source = "low_frequency_metrics"
+        metrics_timeout = min(fetch_timeout, remaining_seconds)
+        if metrics_timeout > 0:
+            metrics_payload, metrics_err, metrics_ms = self._run_with_retry(
+                lambda: self.get_low_frequency_market_metrics(stock_code),
+                metrics_timeout,
+                "low_frequency_market_metrics",
             )
-            _consume_budget(valuation_ms)
+            _consume_budget(metrics_ms)
         else:
-            quote_payload, valuation_err, valuation_ms = None, "fundamental stage timeout", 0
+            metrics_err = "fundamental stage timeout"
+
+        if not isinstance(metrics_payload, dict):
+            metrics_payload = {}
 
         valuation_payload = {
-            "pe_ratio": getattr(quote_payload, "pe_ratio", None) if quote_payload else None,
-            "pb_ratio": getattr(quote_payload, "pb_ratio", None) if quote_payload else None,
-            "total_mv": getattr(quote_payload, "total_mv", None) if quote_payload else None,
-            "circ_mv": getattr(quote_payload, "circ_mv", None) if quote_payload else None,
+            "pe_ratio": metrics_payload.get("pe_ratio"),
+            "pe_ttm": metrics_payload.get("pe_ttm"),
+            "pb_ratio": metrics_payload.get("pb_ratio"),
+            "ps_ratio": metrics_payload.get("ps_ratio"),
+            "ps_ttm": metrics_payload.get("ps_ttm"),
+            "dividend_yield": metrics_payload.get("dividend_yield"),
+            "dividend_yield_ttm": metrics_payload.get("dividend_yield_ttm"),
+            "total_mv": metrics_payload.get("total_mv"),
+            "circ_mv": metrics_payload.get("circ_mv"),
+            "as_of": metrics_payload.get("trade_date"),
+            "source": metrics_payload.get("source"),
+        }
+        valuation_value_payload = {
+            key: value
+            for key, value in valuation_payload.items()
+            if key not in {"source"} and value is not None
         }
         valuation_status = self._infer_block_status(
-            valuation_payload,
-            "partial" if quote_payload is not None else "not_supported",
+            valuation_value_payload,
+            "partial" if metrics_payload else "not_supported",
         )
-        if valuation_status == "partial" and valuation_err and not self._has_meaningful_payload(valuation_payload):
+        if valuation_status == "partial" and metrics_err and not self._has_meaningful_payload(valuation_payload):
             valuation_status = "failed"
         result_ctx["valuation"] = self._build_fundamental_block(
             valuation_status,
             valuation_payload,
             self._normalize_source_chain(
-                [{"provider": "realtime_quote", "result": valuation_status, "duration_ms": valuation_ms}],
-                "realtime_quote",
+                [{"provider": metrics_source, "result": valuation_status, "duration_ms": metrics_ms}],
+                metrics_source,
                 valuation_status,
-                valuation_ms,
+                metrics_ms,
             ),
-            [valuation_err] if valuation_err else [],
+            [metrics_err] if metrics_err else [],
+        )
+
+        market_metrics_payload = {
+            key: metrics_payload.get(key)
+            for key in (
+                "trade_date",
+                "close",
+                "turnover_rate",
+                "turnover_rate_free_float",
+                "volume_ratio",
+                "total_share",
+                "float_share",
+                "free_share",
+                "source",
+            )
+            if metrics_payload.get(key) is not None
+        }
+        market_metrics_status = self._infer_block_status(
+            market_metrics_payload,
+            "partial" if metrics_payload else "not_supported",
+        )
+        result_ctx["market_metrics"] = self._build_fundamental_block(
+            market_metrics_status,
+            market_metrics_payload,
+            self._normalize_source_chain(
+                [{"provider": metrics_source, "result": market_metrics_status, "duration_ms": metrics_ms}],
+                metrics_source,
+                market_metrics_status,
+                metrics_ms,
+            ),
+            [metrics_err] if metrics_err else [],
         )
 
         # growth / earnings / institution (one AkShare call)
@@ -2126,10 +2185,7 @@ class DataFetcherManager:
                     ttm_cash = float(ttm_cash_raw)
                 except (TypeError, ValueError):
                     earnings_extra_errors.append("invalid_ttm_cash_dividend_per_share")
-            if isinstance(quote_payload, dict):
-                latest_price_raw = quote_payload.get("price")
-            else:
-                latest_price_raw = getattr(quote_payload, "price", None) if quote_payload else None
+            latest_price_raw = metrics_payload.get("close")
             latest_price = None
             if latest_price_raw is not None:
                 try:
@@ -2229,6 +2285,7 @@ class DataFetcherManager:
             "capital_flow": result_ctx["capital_flow"].get("status", "not_supported"),
             "dragon_tiger": result_ctx["dragon_tiger"].get("status", "not_supported"),
             "boards": result_ctx["boards"].get("status", "not_supported"),
+            "market_metrics": result_ctx["market_metrics"].get("status", "not_supported"),
         }
         result_ctx["coverage"] = block_statuses
         for block in (
@@ -2239,6 +2296,7 @@ class DataFetcherManager:
             "capital_flow",
             "dragon_tiger",
             "boards",
+            "market_metrics",
         ):
             result_ctx["errors"].extend(result_ctx[block].get("errors", []))
             result_ctx["source_chain"].extend(result_ctx[block].get("source_chain", []))
@@ -2287,8 +2345,70 @@ class DataFetcherManager:
                 [{"provider": "fundamental_pipeline", "result": "failed", "duration_ms": 0}],
                 ["fundamental stage timeout"],
             )
+
+        def task() -> Dict[str, Any]:
+            source_chain: List[Dict[str, Any]] = []
+            errors: List[str] = []
+            for fetcher in self._get_fetchers_snapshot():
+                if not hasattr(fetcher, "get_capital_flow"):
+                    continue
+                start = time.time()
+                try:
+                    payload = self._call_fetcher_method(fetcher, "get_capital_flow", stock_code)
+                    duration_ms = int((time.time() - start) * 1000)
+                    if isinstance(payload, dict) and self._has_meaningful_payload(payload):
+                        source_chain.append({
+                            "provider": fetcher.name,
+                            "result": str(payload.get("status") or "ok"),
+                            "duration_ms": duration_ms,
+                        })
+                        payload = dict(payload)
+                        payload["source_chain"] = list(payload.get("source_chain", [])) + source_chain
+                        return payload
+                    source_chain.append({
+                        "provider": fetcher.name,
+                        "result": "empty",
+                        "duration_ms": duration_ms,
+                    })
+                except Exception as exc:
+                    _, error_reason = summarize_exception(exc)
+                    duration_ms = int((time.time() - start) * 1000)
+                    errors.append(f"{fetcher.name}: {error_reason}")
+                    source_chain.append({
+                        "provider": fetcher.name,
+                        "result": "failed",
+                        "duration_ms": duration_ms,
+                        "error": error_reason,
+                    })
+                    logger.warning("[资金流向] %s %s 获取失败: %s", stock_code, fetcher.name, error_reason)
+
+            start = time.time()
+            payload = self._fundamental_adapter.get_capital_flow(stock_code)
+            duration_ms = int((time.time() - start) * 1000)
+            if isinstance(payload, dict):
+                payload = dict(payload)
+                adapter_status = str(payload.get("status") or "partial")
+                if adapter_status == "not_supported":
+                    adapter_chain = []
+                else:
+                    adapter_chain = [{
+                        "provider": "AkshareFundamentalAdapter",
+                        "result": adapter_status,
+                        "duration_ms": duration_ms,
+                    }]
+                payload["source_chain"] = list(payload.get("source_chain", [])) + source_chain + adapter_chain
+                payload["errors"] = list(payload.get("errors", [])) + errors
+                return payload
+            return {
+                "status": "failed",
+                "stock_flow": {},
+                "sector_rankings": {"top": [], "bottom": []},
+                "source_chain": source_chain,
+                "errors": errors or ["capital_flow failed"],
+            }
+
         payload, err, cost_ms = self._run_with_retry(
-            lambda: self._fundamental_adapter.get_capital_flow(stock_code),
+            task,
             timeout,
             "capital_flow",
         )
@@ -2351,8 +2471,71 @@ class DataFetcherManager:
                 [{"provider": "fundamental_pipeline", "result": "failed", "duration_ms": 0}],
                 ["fundamental stage timeout"],
             )
+
+        def task() -> Dict[str, Any]:
+            source_chain: List[Dict[str, Any]] = []
+            errors: List[str] = []
+            for fetcher in self._get_fetchers_snapshot():
+                if not hasattr(fetcher, "get_dragon_tiger_flag"):
+                    continue
+                start = time.time()
+                try:
+                    payload = self._call_fetcher_method(fetcher, "get_dragon_tiger_flag", stock_code)
+                    duration_ms = int((time.time() - start) * 1000)
+                    if isinstance(payload, dict) and self._has_meaningful_payload(payload):
+                        source_chain.append({
+                            "provider": fetcher.name,
+                            "result": str(payload.get("status") or "ok"),
+                            "duration_ms": duration_ms,
+                        })
+                        payload = dict(payload)
+                        payload["source_chain"] = list(payload.get("source_chain", [])) + source_chain
+                        return payload
+                    source_chain.append({
+                        "provider": fetcher.name,
+                        "result": "empty",
+                        "duration_ms": duration_ms,
+                    })
+                except Exception as exc:
+                    _, error_reason = summarize_exception(exc)
+                    duration_ms = int((time.time() - start) * 1000)
+                    errors.append(f"{fetcher.name}: {error_reason}")
+                    source_chain.append({
+                        "provider": fetcher.name,
+                        "result": "failed",
+                        "duration_ms": duration_ms,
+                        "error": error_reason,
+                    })
+                    logger.warning("[龙虎榜] %s %s 获取失败: %s", stock_code, fetcher.name, error_reason)
+
+            start = time.time()
+            payload = self._fundamental_adapter.get_dragon_tiger_flag(stock_code)
+            duration_ms = int((time.time() - start) * 1000)
+            if isinstance(payload, dict):
+                payload = dict(payload)
+                adapter_status = str(payload.get("status") or "partial")
+                if adapter_status == "not_supported":
+                    adapter_chain = []
+                else:
+                    adapter_chain = [{
+                        "provider": "AkshareFundamentalAdapter",
+                        "result": adapter_status,
+                        "duration_ms": duration_ms,
+                    }]
+                payload["source_chain"] = list(payload.get("source_chain", [])) + source_chain + adapter_chain
+                payload["errors"] = list(payload.get("errors", [])) + errors
+                return payload
+            return {
+                "status": "failed",
+                "is_on_list": False,
+                "recent_count": 0,
+                "latest_date": None,
+                "source_chain": source_chain,
+                "errors": errors or ["dragon_tiger failed"],
+            }
+
         payload, err, cost_ms = self._run_with_retry(
-            lambda: self._fundamental_adapter.get_dragon_tiger_flag(stock_code),
+            task,
             timeout,
             "dragon_tiger",
         )
@@ -2369,6 +2552,9 @@ class DataFetcherManager:
                 "is_on_list": bool(payload.get("is_on_list", False)),
                 "recent_count": int(payload.get("recent_count", 0)),
                 "latest_date": payload.get("latest_date"),
+                "latest_reason": payload.get("latest_reason"),
+                "latest_net_amount": payload.get("latest_net_amount"),
+                "latest_turnover_rate": payload.get("latest_turnover_rate"),
             },
             self._normalize_source_chain(
                 payload.get("source_chain", []),
@@ -2498,3 +2684,28 @@ class DataFetcherManager:
             return top, bottom
         logger.warning(f"[板块排行] 所有数据源均失败，最终错误: {last_error}")
         return [], []
+
+    def get_low_frequency_market_metrics(self, stock_code: str) -> Optional[Dict[str, Any]]:
+        """获取低频行情衍生指标，优先使用 Tushare daily_basic。"""
+        stock_code = normalize_stock_code(stock_code)
+        if _market_tag(stock_code) != "cn" or _is_etf_code(stock_code):
+            return None
+
+        last_error = ""
+        for fetcher in self._get_fetchers_snapshot():
+            if not hasattr(fetcher, "get_daily_basic_metrics"):
+                continue
+            try:
+                payload = self._call_fetcher_method(fetcher, "get_daily_basic_metrics", stock_code)
+                if isinstance(payload, dict) and self._has_meaningful_payload(payload):
+                    logger.info("[低频行情] %s 成功获取 (来源: %s)", stock_code, fetcher.name)
+                    return payload
+                last_error = f"{fetcher.name} 返回空结果"
+            except Exception as e:
+                _, error_reason = summarize_exception(e)
+                last_error = f"{fetcher.name}: {error_reason}"
+                logger.warning("[低频行情] %s %s 获取失败: %s", stock_code, fetcher.name, error_reason)
+
+        if last_error:
+            logger.warning("[低频行情] %s 所有可用数据源均失败: %s", stock_code, last_error)
+        return None

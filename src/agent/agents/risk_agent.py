@@ -31,7 +31,7 @@ class RiskAgent(BaseAgent):
     max_steps = 4
     tool_names = [
         "search_stock_news",
-        "get_realtime_quote",
+        "get_latest_close_quote",
         "get_stock_info",
     ]
 
@@ -125,4 +125,3 @@ def _risk_to_signal(risk_level: str) -> str:
         "high": "strong_sell",
     }
     return mapping.get(risk_level, "hold")
-

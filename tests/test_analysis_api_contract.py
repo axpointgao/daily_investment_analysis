@@ -534,6 +534,44 @@ class AnalysisApiContractTestCase(unittest.TestCase):
         self.assertEqual(status.result.report["meta"]["change_pct"], 0.0)
         self.assertEqual(status.result.report["meta"]["model_used"], "test-model")
 
+    def test_get_analysis_status_reads_price_fields_from_raw_result(self) -> None:
+        if get_analysis_status is None:
+            self.skipTest("analysis endpoint helpers unavailable in this environment")
+
+        record = SimpleNamespace(
+            id=1,
+            code="300274",
+            name="阳光电源",
+            report_type="detailed",
+            created_at=datetime(2026, 5, 4, 6, 58, 0),
+            raw_result=json.dumps({
+                "model_used": "test-model",
+                "report_language": "zh",
+                "current_price": 137.41,
+                "change_pct": -0.48,
+            }),
+            context_snapshot=json.dumps({"enhanced_context": {"today": {"close": 137.41, "pct_chg": -0.48}}}),
+            sentiment_score=50,
+            operation_advice="观望",
+            trend_prediction="震荡",
+            analysis_summary="summary",
+            ideal_buy=None,
+            secondary_buy=None,
+            stop_loss=None,
+            take_profit=None,
+        )
+        mock_db = MagicMock()
+        mock_db.get_analysis_history.return_value = [record]
+
+        with patch("api.v1.endpoints.analysis.get_task_queue") as queue_mock, \
+             patch("src.storage.DatabaseManager.get_instance", return_value=mock_db):
+            queue_mock.return_value.get_task.return_value = None
+            status = get_analysis_status("task_latest_close")
+
+        self.assertEqual(status.status, "completed")
+        self.assertEqual(status.result.report["meta"]["current_price"], 137.41)
+        self.assertEqual(status.result.report["meta"]["change_pct"], -0.48)
+
     def test_openapi_declares_single_and_batch_async_202_payloads(self) -> None:
         if create_app is None:
             self.skipTest("fastapi is not installed in this test environment")

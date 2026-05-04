@@ -717,6 +717,200 @@ class TushareFetcher(BaseFetcher):
             logger.warning(f"Tushare 获取股票列表失败: {e}")
 
         return None
+
+    def get_daily_basic_metrics(self, stock_code: str) -> Optional[dict]:
+        """
+        获取最新交易日的低频估值与成交指标。
+
+        使用 Tushare Pro daily_basic，适合收盘后分析；不用于盘中实时行情。
+        """
+        if self._api is None:
+            return None
+        if _is_us_code(stock_code) or _is_hk_market(stock_code) or _is_etf_code(stock_code):
+            return None
+
+        try:
+            self._check_rate_limit()
+            ts_code = self._convert_stock_code(stock_code)
+            start_date = self.get_trade_time(early_time='00:00', late_time='19:00')
+            kwargs = {"ts_code": ts_code}
+            if start_date:
+                kwargs["trade_date"] = start_date
+            df = self._api.daily_basic(
+                **kwargs,
+                fields=(
+                    "ts_code,trade_date,close,turnover_rate,turnover_rate_f,"
+                    "volume_ratio,pe,pe_ttm,pb,ps,ps_ttm,dv_ratio,dv_ttm,"
+                    "total_share,float_share,free_share,total_mv,circ_mv"
+                ),
+            )
+            if df is None or df.empty:
+                return None
+
+            row = df.iloc[0]
+
+            def _safe_float(value):
+                try:
+                    if value is None or pd.isna(value):
+                        return None
+                    return float(value)
+                except (TypeError, ValueError):
+                    return None
+
+            trade_date = str(row.get("trade_date") or "")
+            if len(trade_date) == 8:
+                trade_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:]}"
+
+            payload = {
+                "trade_date": trade_date or None,
+                "close": _safe_float(row.get("close")),
+                "turnover_rate": _safe_float(row.get("turnover_rate")),
+                "turnover_rate_free_float": _safe_float(row.get("turnover_rate_f")),
+                "volume_ratio": _safe_float(row.get("volume_ratio")),
+                "pe_ratio": _safe_float(row.get("pe")),
+                "pe_ttm": _safe_float(row.get("pe_ttm")),
+                "pb_ratio": _safe_float(row.get("pb")),
+                "ps_ratio": _safe_float(row.get("ps")),
+                "ps_ttm": _safe_float(row.get("ps_ttm")),
+                "dividend_yield": _safe_float(row.get("dv_ratio")),
+                "dividend_yield_ttm": _safe_float(row.get("dv_ttm")),
+                "total_share": _safe_float(row.get("total_share")),
+                "float_share": _safe_float(row.get("float_share")),
+                "free_share": _safe_float(row.get("free_share")),
+                "total_mv": _safe_float(row.get("total_mv")),
+                "circ_mv": _safe_float(row.get("circ_mv")),
+                "source": "tushare:daily_basic",
+            }
+            return {k: v for k, v in payload.items() if v is not None}
+        except Exception as e:
+            logger.warning(f"[Tushare] 获取 daily_basic 失败 {stock_code}: {e}")
+            return None
+
+    @staticmethod
+    def _safe_float(value: Any) -> Optional[float]:
+        try:
+            if value is None or pd.isna(value):
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _format_trade_date(value: Any) -> Optional[str]:
+        trade_date = str(value or "").strip()
+        if len(trade_date) == 8 and trade_date.isdigit():
+            return f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:]}"
+        return trade_date or None
+
+    def get_capital_flow(self, stock_code: str, top_n: int = 5) -> Optional[Dict[str, Any]]:
+        """
+        获取个股资金流向（日频）。
+
+        使用 Tushare Pro moneyflow，适合收盘后分析；不依赖实时行情。
+        """
+        if self._api is None:
+            return None
+        if _is_us_code(stock_code) or _is_hk_market(stock_code) or _is_etf_code(stock_code):
+            return None
+
+        try:
+            ts_code = self._convert_stock_code(stock_code)
+            trade_date = self.get_trade_time(early_time='00:00', late_time='19:00')
+            kwargs: Dict[str, Any] = {"ts_code": ts_code}
+            if trade_date:
+                kwargs.update({"start_date": trade_date, "end_date": trade_date})
+
+            df = self._call_api_with_rate_limit(
+                "moneyflow",
+                **kwargs,
+                fields=(
+                    "ts_code,trade_date,buy_lg_amount,sell_lg_amount,"
+                    "buy_elg_amount,sell_elg_amount,net_mf_vol,net_mf_amount"
+                ),
+            )
+            if df is None or df.empty:
+                return None
+
+            row = df.iloc[0]
+            buy_lg = self._safe_float(row.get("buy_lg_amount")) or 0.0
+            sell_lg = self._safe_float(row.get("sell_lg_amount")) or 0.0
+            buy_elg = self._safe_float(row.get("buy_elg_amount")) or 0.0
+            sell_elg = self._safe_float(row.get("sell_elg_amount")) or 0.0
+            payload = {
+                "status": "partial",
+                "stock_flow": {
+                    "trade_date": self._format_trade_date(row.get("trade_date")),
+                    "main_net_inflow": self._safe_float(row.get("net_mf_amount")),
+                    "net_mf_vol": self._safe_float(row.get("net_mf_vol")),
+                    "large_net_inflow": round((buy_lg + buy_elg) - (sell_lg + sell_elg), 4),
+                    "extra_large_net_inflow": round(buy_elg - sell_elg, 4),
+                    "source": "tushare:moneyflow",
+                },
+                "sector_rankings": {"top": [], "bottom": []},
+                "source_chain": ["capital_stock:tushare_moneyflow"],
+                "errors": [],
+            }
+            if any(v is not None for v in payload["stock_flow"].values()):
+                payload["status"] = "ok"
+            return payload
+        except Exception as e:
+            logger.warning(f"[Tushare] 获取 moneyflow 失败 {stock_code}: {e}")
+            return None
+
+    def get_dragon_tiger_flag(self, stock_code: str, lookback_days: int = 20) -> Optional[Dict[str, Any]]:
+        """
+        获取近期香港龙虎榜信号（日频）。
+
+        使用 Tushare Pro top_list，返回是否上榜、近期香港次数和最新原因。
+        """
+        if self._api is None:
+            return None
+        if _is_us_code(stock_code) or _is_hk_market(stock_code) or _is_etf_code(stock_code):
+            return None
+
+        try:
+            ts_code = self._convert_stock_code(stock_code)
+            end_date = self.get_trade_time(early_time='00:00', late_time='19:00')
+            if not end_date:
+                return None
+            start_date = (datetime.strptime(end_date, "%Y%m%d") - timedelta(days=max(1, lookback_days * 2))).strftime("%Y%m%d")
+
+            df = self._call_api_with_rate_limit(
+                "top_list",
+                ts_code=ts_code,
+                start_date=start_date,
+                end_date=end_date,
+                fields="trade_date,ts_code,name,close,pct_change,turnover_rate,amount,l_sell,l_buy,net_amount,reason",
+            )
+            if df is None or df.empty:
+                return {
+                    "status": "ok",
+                    "is_on_list": False,
+                    "recent_count": 0,
+                    "latest_date": None,
+                    "latest_reason": None,
+                    "source_chain": ["dragon_tiger:tushare_top_list"],
+                    "errors": [],
+                }
+
+            work_df = df.copy()
+            if "trade_date" in work_df.columns:
+                work_df = work_df.sort_values("trade_date", ascending=False)
+            row = work_df.iloc[0]
+            return {
+                "status": "ok",
+                "is_on_list": True,
+                "recent_count": int(len(work_df)),
+                "latest_date": self._format_trade_date(row.get("trade_date")),
+                "latest_reason": str(row.get("reason") or "").strip() or None,
+                "latest_net_amount": self._safe_float(row.get("net_amount")),
+                "latest_turnover_rate": self._safe_float(row.get("turnover_rate")),
+                "source_chain": ["dragon_tiger:tushare_top_list"],
+                "errors": [],
+            }
+        except Exception as e:
+            logger.warning(f"[Tushare] 获取 top_list 龙虎榜失败 {stock_code}: {e}")
+            return None
     
     def get_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
         """

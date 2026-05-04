@@ -708,7 +708,7 @@ class AgentOrchestrator:
             ctx.meta["report_language"] = normalize_report_language(context.get("report_language", "zh"))
 
             # Pre-populate data fields that the caller already has
-            for data_key in ("realtime_quote", "daily_history", "chip_distribution",
+            for data_key in ("latest_close_quote", "realtime_quote", "daily_history", "chip_distribution",
                              "trend_result", "news_context"):
                 if context.get(data_key):
                     ctx.set_data(data_key, context[data_key])
@@ -815,6 +815,7 @@ class AgentOrchestrator:
         """Normalize or synthesize the dashboard shape expected downstream."""
         payload = dict(payload or {})
         meaningful_data_keys = (
+            "latest_close_quote",
             "realtime_quote",
             "daily_history",
             "chip_distribution",
@@ -1052,7 +1053,8 @@ class AgentOrchestrator:
         key_levels: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Build a lightweight data_perspective block from cached market data."""
-        realtime = ctx.get_data("realtime_quote")
+        close_quote = ctx.get_data("latest_close_quote")
+        realtime = close_quote if isinstance(close_quote, dict) else ctx.get_data("realtime_quote")
         chip = ctx.get_data("chip_distribution")
         trend = ctx.get_data("trend_result")
         technical = self._latest_opinion(ctx, {"technical"})

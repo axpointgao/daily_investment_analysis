@@ -75,7 +75,7 @@ class AgentContext:
 
     # --- collected data (populated by data-fetching stages) ---
     data: Dict[str, Any] = field(default_factory=dict)
-    # Typical keys: "realtime_quote", "daily_history", "trend_result",
+    # Typical keys: "latest_close_quote", "daily_history", "trend_result",
     #               "chip_distribution", "news_context"
 
     # --- opinions from individual agents ---

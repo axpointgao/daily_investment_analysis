@@ -49,7 +49,7 @@ class ResearchAgent:
         "search_stock_news",
         "search_comprehensive_intel",
         "get_stock_info",
-        "get_realtime_quote",
+        "get_latest_close_quote",
         "get_daily_history",
         "get_sector_rankings",
         "get_market_indices",

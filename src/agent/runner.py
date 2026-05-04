@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 # Tool name → friendly label for progress messages
 _THINKING_TOOL_LABELS: Dict[str, str] = {
+    "get_latest_close_quote": "收盘行情获取",
     "get_realtime_quote": "行情获取",
     "get_daily_history": "K线数据获取",
     "analyze_trend": "技术指标分析",

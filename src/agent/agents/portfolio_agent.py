@@ -45,7 +45,7 @@ class PortfolioAgent(BaseAgent):
     description = "Portfolio-level risk and allocation analysis"
 
     tool_names = [
-        "get_realtime_quote",
+        "get_latest_close_quote",
         "get_stock_info",
     ]
 

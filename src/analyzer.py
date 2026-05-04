@@ -532,7 +532,7 @@ def get_stock_name_multi_source(
     多来源获取股票中文名称
 
     获取策略（按优先级）：
-    1. 从传入的 context 中获取（realtime 数据）
+    1. 从传入的 context 中获取（已解析名称/行情数据）
     2. 从静态映射表 STOCK_NAME_MAP 获取
     3. 从 DataFetcherManager 获取（各数据源）
     4. 返回默认名称（股票+代码）
@@ -545,7 +545,7 @@ def get_stock_name_multi_source(
     Returns:
         股票中文名称
     """
-    # 1. 从上下文获取（实时行情数据）
+    # 1. 从上下文获取（已解析名称/行情数据）
     if context:
         # 优先从 stock_name 字段获取
         if context.get('stock_name'):
@@ -1765,7 +1765,7 @@ class GeminiAnalyzer:
         """
         格式化分析提示词（决策仪表盘 v2.0）
         
-        包含：技术指标、实时行情（量比/换手率）、筹码分布、趋势分析、新闻
+        包含：技术指标、低频估值与成交指标、筹码分布、趋势分析、新闻
         
         Args:
             context: 技术面数据上下文（包含增强数据）
@@ -1810,6 +1810,8 @@ class GeminiAnalyzer:
 | 成交量 | {self._format_volume(today.get('volume'))} |
 | 成交额 | {self._format_amount(today.get('amount'))} |
 
+> 价格与技术指标均采用最新交易日收盘数据；本分析不使用盘中实时行情。
+
 ### 均线系统（关键判断指标）
 | 均线 | 数值 | 说明 |
 |------|------|------|
@@ -1819,25 +1821,62 @@ class GeminiAnalyzer:
 | 均线形态 | {context.get('ma_status', unknown_text)} | 多头/空头/缠绕 |
 """
         
-        # 添加实时行情数据（量比、换手率等）
-        if 'realtime' in context:
-            rt = context['realtime']
+        # 添加低频行情衍生指标（daily_basic 等）
+        fundamental_context = context.get("fundamental_context") if isinstance(context, dict) else None
+        market_metrics_block = (
+            fundamental_context.get("market_metrics", {})
+            if isinstance(fundamental_context, dict)
+            else {}
+        )
+        market_metrics = (
+            market_metrics_block.get("data", {})
+            if isinstance(market_metrics_block, dict)
+            else {}
+        )
+        if isinstance(market_metrics, dict) and market_metrics:
+            volume_ratio = market_metrics.get("volume_ratio")
+            volume_desc = self._describe_volume_ratio(volume_ratio) if volume_ratio not in (None, "") else "无数据"
             prompt += f"""
-### 实时行情增强数据
+### 收盘后低频行情增强数据
 | 指标 | 数值 | 解读 |
 |------|------|------|
-| 当前价格 | {rt.get('price', 'N/A')} 元 | |
-| **量比** | **{rt.get('volume_ratio', 'N/A')}** | {rt.get('volume_ratio_desc', '')} |
-| **换手率** | **{rt.get('turnover_rate', 'N/A')}%** | |
-| 市盈率(动态) | {rt.get('pe_ratio', 'N/A')} | |
-| 市净率 | {rt.get('pb_ratio', 'N/A')} | |
-| 总市值 | {self._format_amount(rt.get('total_mv'))} | |
-| 流通市值 | {self._format_amount(rt.get('circ_mv'))} | |
-| 60日涨跌幅 | {rt.get('change_60d', 'N/A')}% | 中期表现 |
+| 指标日期 | {market_metrics.get('trade_date', 'N/A')} | |
+| 收盘价 | {market_metrics.get('close', 'N/A')} 元 | |
+| **量比** | **{market_metrics.get('volume_ratio', 'N/A')}** | {volume_desc} |
+| **换手率** | **{market_metrics.get('turnover_rate', 'N/A')}%** | 收盘后口径 |
+| 自由流通换手率 | {market_metrics.get('turnover_rate_free_float', 'N/A')}% | |
+| 数据来源 | {market_metrics.get('source', 'N/A')} | |
 """
 
         # 添加财报与分红（价值投资口径）
-        fundamental_context = context.get("fundamental_context") if isinstance(context, dict) else None
+        valuation_block = (
+            fundamental_context.get("valuation", {})
+            if isinstance(fundamental_context, dict)
+            else {}
+        )
+        valuation_data = (
+            valuation_block.get("data", {})
+            if isinstance(valuation_block, dict)
+            else {}
+        )
+        if isinstance(valuation_data, dict) and valuation_data:
+            prompt += f"""
+### 估值指标（收盘后低频口径）
+| 指标 | 数值 | 说明 |
+|------|------|------|
+| 指标日期 | {valuation_data.get('as_of', 'N/A')} | |
+| PE | {valuation_data.get('pe_ratio', 'N/A')} | |
+| PE(TTM) | {valuation_data.get('pe_ttm', 'N/A')} | |
+| PB | {valuation_data.get('pb_ratio', 'N/A')} | |
+| PS | {valuation_data.get('ps_ratio', 'N/A')} | |
+| PS(TTM) | {valuation_data.get('ps_ttm', 'N/A')} | |
+| 股息率 | {valuation_data.get('dividend_yield', 'N/A')}% | |
+| TTM股息率 | {valuation_data.get('dividend_yield_ttm', 'N/A')}% | |
+| 总市值 | {self._format_amount(valuation_data.get('total_mv'))} | Tushare daily_basic 单位 |
+| 流通市值 | {self._format_amount(valuation_data.get('circ_mv'))} | Tushare daily_basic 单位 |
+| 数据来源 | {valuation_data.get('source', 'N/A')} | |
+"""
+
         earnings_block = (
             fundamental_context.get("earnings", {})
             if isinstance(fundamental_context, dict)
@@ -1875,10 +1914,56 @@ class GeminiAnalyzer:
 | 经营现金流 | {financial_report.get('operating_cash_flow', 'N/A')} | |
 | ROE | {financial_report.get('roe', 'N/A')} | |
 | 近12个月每股现金分红 | {ttm_cash} | 仅现金分红、税前口径 |
-| TTM 股息率 | {ttm_yield} | 公式：近12个月每股现金分红 / 当前价格 × 100% |
+| TTM 股息率 | {ttm_yield} | 公式：近12个月每股现金分红 / 最新收盘价 × 100% |
 | TTM 分红事件数 | {ttm_count} | |
 
 > 若上述字段为 N/A 或缺失，请明确写“数据缺失，无法判断”，禁止编造。
+"""
+
+        capital_flow_block = (
+            fundamental_context.get("capital_flow", {})
+            if isinstance(fundamental_context, dict)
+            else {}
+        )
+        capital_flow_data = (
+            capital_flow_block.get("data", {})
+            if isinstance(capital_flow_block, dict)
+            else {}
+        )
+        if isinstance(capital_flow_data, dict) and capital_flow_data:
+            stock_flow = capital_flow_data.get("stock_flow") if isinstance(capital_flow_data.get("stock_flow"), dict) else {}
+            sector_rankings = capital_flow_data.get("sector_rankings") if isinstance(capital_flow_data.get("sector_rankings"), dict) else {}
+            top_sectors = sector_rankings.get("top") or []
+            bottom_sectors = sector_rankings.get("bottom") or []
+            prompt += f"""
+### 资金流与板块热度
+| 指标 | 数值 |
+|------|------|
+| 主力净流入 | {stock_flow.get('main_net_inflow', 'N/A')} |
+| 5日资金流 | {stock_flow.get('inflow_5d', 'N/A')} |
+| 10日资金流 | {stock_flow.get('inflow_10d', 'N/A')} |
+| 资金流入靠前板块 | {', '.join(str(item.get('name', '')) for item in top_sectors[:5] if isinstance(item, dict)) or 'N/A'} |
+| 资金流出靠前板块 | {', '.join(str(item.get('name', '')) for item in bottom_sectors[:5] if isinstance(item, dict)) or 'N/A'} |
+"""
+
+        dragon_tiger_block = (
+            fundamental_context.get("dragon_tiger", {})
+            if isinstance(fundamental_context, dict)
+            else {}
+        )
+        dragon_tiger_data = (
+            dragon_tiger_block.get("data", {})
+            if isinstance(dragon_tiger_block, dict)
+            else {}
+        )
+        if isinstance(dragon_tiger_data, dict) and dragon_tiger_data:
+            prompt += f"""
+### 龙虎榜信号
+| 指标 | 数值 |
+|------|------|
+| 近期是否上榜 | {dragon_tiger_data.get('is_on_list', 'N/A')} |
+| 近窗口上榜次数 | {dragon_tiger_data.get('recent_count', 'N/A')} |
+| 最近上榜日期 | {dragon_tiger_data.get('latest_date', 'N/A')} |
 """
 
         # 添加筹码分布数据
@@ -2024,7 +2109,7 @@ class GeminiAnalyzer:
         if context.get('data_missing'):
             prompt += """
 ⚠️ **数据缺失警告**
-由于接口限制，当前无法获取完整的实时行情和技术指标数据。
+由于接口限制，当前无法获取完整的历史收盘行情和技术指标数据。
 请 **忽略上述表格中的 N/A 数据**，重点依据 **【📰 舆情情报】** 中的新闻进行基本面和情绪面分析。
 在回答技术面问题（如均线、乖离率）时，请直接说明“数据缺失，无法判断”，**严禁编造数据**。
 """
@@ -2128,6 +2213,26 @@ class GeminiAnalyzer:
             return f"{amount / 1e4:.2f} 万元"
         else:
             return f"{amount:.0f} 元"
+
+    def _describe_volume_ratio(self, volume_ratio: Optional[float]) -> str:
+        """格式化量比解释。"""
+        if volume_ratio is None:
+            return "无数据"
+        try:
+            value = float(volume_ratio)
+        except (TypeError, ValueError):
+            return "无数据"
+        if value < 0.5:
+            return "极度萎缩"
+        if value < 0.8:
+            return "明显萎缩"
+        if value < 1.2:
+            return "正常"
+        if value < 2.0:
+            return "温和放量"
+        if value < 3.0:
+            return "明显放量"
+        return "巨量"
 
     def _format_percent(self, value: Optional[float]) -> str:
         """格式化百分比显示"""

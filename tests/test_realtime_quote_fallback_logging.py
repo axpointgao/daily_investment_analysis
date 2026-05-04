@@ -8,7 +8,6 @@ import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
 from tests.litellm_stub import ensure_litellm_stub
 
 ensure_litellm_stub()
@@ -109,7 +108,7 @@ def test_manager_does_not_warn_when_fallback_source_succeeds(mock_get_config, ca
     assert "所有数据源均不可用" not in caplog.text
 
 
-def test_pipeline_warns_once_when_all_realtime_sources_fail(caplog):
+def test_pipeline_uses_latest_close_without_realtime_quote(caplog):
     pipeline = _make_pipeline(enable_realtime_quote=True, realtime_quote=None)
 
     with caplog.at_level(logging.INFO):
@@ -117,13 +116,8 @@ def test_pipeline_warns_once_when_all_realtime_sources_fail(caplog):
 
     assert result is None
     pipeline.fetcher_manager.get_stock_name.assert_called_once_with("600519", allow_realtime=False)
-    pipeline.fetcher_manager.get_realtime_quote.assert_called_once_with("600519", log_final_failure=False)
-    downgrade_logs = [
-        record.message
-        for record in caplog.records
-        if "历史收盘价继续分析" in record.message
-    ]
-    assert downgrade_logs == ["贵州茅台(600519) 所有实时行情数据源均不可用，已降级为历史收盘价继续分析"]
+    pipeline.fetcher_manager.get_realtime_quote.assert_not_called()
+    assert "使用最新交易日收盘价继续分析" in caplog.text
 
 
 @patch("src.config.get_config")
@@ -154,7 +148,7 @@ def test_event_monitor_keeps_manager_failure_summary_for_direct_quote_call(mock_
     assert "[实时行情] 600519 所有数据源均失败: [efinance] 失败: efinance timeout" in caplog.text
 
 
-def test_pipeline_logs_disabled_realtime_once_without_fetching_quote(caplog):
+def test_pipeline_does_not_fetch_realtime_when_realtime_disabled(caplog):
     pipeline = _make_pipeline(enable_realtime_quote=False, realtime_quote=_make_quote())
 
     with caplog.at_level(logging.INFO):
@@ -163,9 +157,4 @@ def test_pipeline_logs_disabled_realtime_once_without_fetching_quote(caplog):
     assert result is None
     pipeline.fetcher_manager.get_stock_name.assert_called_once_with("600519", allow_realtime=False)
     pipeline.fetcher_manager.get_realtime_quote.assert_not_called()
-    downgrade_logs = [
-        record.message
-        for record in caplog.records
-        if "历史收盘价继续分析" in record.message
-    ]
-    assert downgrade_logs == ["贵州茅台(600519) 实时行情已禁用，使用历史收盘价继续分析"]
+    assert "使用最新交易日收盘价继续分析" in caplog.text

@@ -63,6 +63,7 @@ from src.utils.data_processing import (
     extract_fundamental_detail_fields,
     extract_board_detail_fields,
 )
+from src.utils.analysis_price import extract_price_fields
 
 logger = logging.getLogger(__name__)
 
@@ -610,22 +611,11 @@ def get_analysis_status(task_id: str) -> TaskStatus:
             )
             stock_name = get_localized_stock_name(record.name, record.code, report_language)
 
-            # Extract current_price / change_pct from context_snapshot
-            current_price = None
-            change_pct = None
             context_snapshot = parse_json_field(getattr(record, 'context_snapshot', None))
-            if context_snapshot and isinstance(context_snapshot, dict):
-                enhanced_context = context_snapshot.get('enhanced_context') or {}
-                realtime = enhanced_context.get('realtime') or {}
-                current_price = realtime.get('price')
-                change_pct = realtime.get('change_pct')
-                realtime_quote_raw = context_snapshot.get('realtime_quote_raw') or {}
-                if current_price is None:
-                    current_price = realtime_quote_raw.get('price')
-                if change_pct is None:
-                    change_pct = realtime_quote_raw.get('change_pct')
-                if change_pct is None:
-                    change_pct = realtime_quote_raw.get('pct_chg')
+            current_price, change_pct = extract_price_fields(
+                raw_result if isinstance(raw_result, dict) else {},
+                context_snapshot if isinstance(context_snapshot, dict) else None,
+            )
 
             # Build report from DB record so completed tasks return real data
             report_dict = AnalysisReport(

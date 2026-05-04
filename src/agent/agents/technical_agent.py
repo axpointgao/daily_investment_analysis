@@ -3,7 +3,7 @@
 TechnicalAgent — technical & price analysis specialist.
 
 Responsible for:
-- Fetching realtime quotes and historical K-line data
+- Fetching latest close quotes and historical K-line data
 - Running technical indicators (trend, MA, volume, pattern)
 - Producing a structured opinion on trend/momentum/support-resistance
 """
@@ -24,13 +24,14 @@ class TechnicalAgent(BaseAgent):
     agent_name = "technical"
     max_steps = 6
     tool_names = [
-        "get_realtime_quote",
+        "get_latest_close_quote",
         "get_daily_history",
         "analyze_trend",
         "calculate_ma",
         "get_volume_analysis",
         "analyze_pattern",
         "get_chip_distribution",
+        "get_stock_info",
         "get_analysis_context",
     ]
 
@@ -50,9 +51,9 @@ Your task: perform a thorough technical analysis of the given stock and \
 output a structured JSON opinion.
 
 ## Workflow (execute stages in order)
-1. Fetch realtime quote + daily history (if not already provided)
+1. Fetch latest trading-day close quote + daily history (if not already provided)
 2. Run trend analysis (MA alignment, MACD, RSI)
-3. Analyse volume and chip distribution
+3. Analyse volume, turnover, valuation and capital-flow context through get_stock_info
 4. Identify chart patterns
 
 {baseline}
@@ -100,4 +101,3 @@ Return **only** a JSON object (no markdown fences):
             },
             raw_data=parsed,
         )
-
