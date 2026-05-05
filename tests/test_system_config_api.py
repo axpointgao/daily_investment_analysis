@@ -67,6 +67,10 @@ class SystemConfigApiTestCase(unittest.TestCase):
         self.assertEqual(ttfund_schema["category"], "agent")
         self.assertTrue(ttfund_schema["is_sensitive"])
 
+        portfolio_prompt_schema = item_map["PORTFOLIO_ANALYSIS_PROMPT_STOCK"]["schema"]
+        self.assertEqual(portfolio_prompt_schema["category"], "portfolio_analysis")
+        self.assertEqual(portfolio_prompt_schema["ui_control"], "textarea")
+
     def test_test_ttfund_skills_data_source_uses_agent_api_key(self) -> None:
         self.env_path.write_text(
             "\n".join(
