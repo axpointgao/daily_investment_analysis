@@ -29,6 +29,29 @@ type SubmitAnalysisOptions = {
   forceRefresh?: boolean;
 };
 
+function buildFundTaskFromAccepted(
+  response: { taskId: string; status: 'pending' | 'processing'; message?: string },
+  {
+    fundCode,
+    fundName,
+  }: {
+    fundCode: string;
+    fundName?: string;
+  },
+): TaskInfo {
+  return {
+    taskId: response.taskId,
+    type: 'fund',
+    fundCode,
+    fundName,
+    status: response.status,
+    progress: response.status === 'processing' ? 10 : 0,
+    message: response.message || '基金分析任务已提交',
+    reportType: 'detailed',
+    createdAt: new Date().toISOString(),
+  };
+}
+
 let reportRequestSeq = 0;
 let analyzeRequestSeq = 0;
 let historyRequestSeq = 0;
@@ -364,7 +387,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
 
       const requestId = nextAnalyzeRequestId();
       try {
-        await fundAnalysisApi.analyzeAsync({
+        const accepted = await fundAnalysisApi.analyzeAsync({
           fundCode,
           fundName,
           reportType: 'detailed',
@@ -376,6 +399,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
           return;
         }
 
+        get().syncTaskCreated(buildFundTaskFromAccepted(accepted, { fundCode, fundName }));
         set({ query: '', selectionSource: 'manual' });
       } catch (error) {
         if (requestId !== analyzeRequestSeq) {

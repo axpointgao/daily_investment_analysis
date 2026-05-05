@@ -7,6 +7,7 @@ import hashlib
 import logging
 import os
 import re
+import json
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -52,11 +53,12 @@ class ConfigLineEntry:
 
     @classmethod
     def assignment(cls, key: str, value: str) -> "ConfigLineEntry":
+        line_value = cls._render_assignment_value(value)
         return cls(
             kind="assignment",
-            raw_line=f"{key}={value}",
+            raw_line=f"{key}={line_value}",
             key=key,
-            value=value,
+            value=line_value,
             updated=True,
         )
 
@@ -64,6 +66,12 @@ class ConfigLineEntry:
         if self.kind == "assignment" and self.updated and self.key is not None:
             return f"{self.key}={self.value}"
         return self.raw_line
+
+    @staticmethod
+    def _render_assignment_value(value: str) -> str:
+        if "\n" not in value and "\r" not in value:
+            return value
+        return json.dumps(value, ensure_ascii=False)
 
 
 class ConfigManager:
@@ -146,11 +154,10 @@ class ConfigManager:
         key_to_index = self._find_last_key_indexes(entries)
 
         for key, value in updates.items():
-            line_value = value.replace("\n", "")
             if key in key_to_index:
-                entries[key_to_index[key]] = ConfigLineEntry.assignment(key, line_value)
+                entries[key_to_index[key]] = ConfigLineEntry.assignment(key, value)
             else:
-                entries.append(ConfigLineEntry.assignment(key, line_value))
+                entries.append(ConfigLineEntry.assignment(key, value))
 
         if not self._env_path.parent.exists():
             self._env_path.parent.mkdir(parents=True, exist_ok=True)

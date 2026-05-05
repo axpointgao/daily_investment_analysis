@@ -271,6 +271,28 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         self.assertFalse(validation["valid"])
         self.assertTrue(any(issue["code"] == "invalid_format" for issue in validation["issues"]))
 
+    def test_validate_allows_multiline_portfolio_prompt_override(self) -> None:
+        validation = self.service.validate(
+            items=[{"key": "PORTFOLIO_ANALYSIS_PROMPT_FUND", "value": "第一行\n第二行"}]
+        )
+
+        self.assertTrue(validation["valid"], validation["issues"])
+        self.assertEqual(validation["issues"], [])
+
+    def test_validate_rejects_multiline_for_regular_string_config(self) -> None:
+        validation = self.service.validate(items=[{"key": "SCHEDULE_TIME", "value": "18:00\n19:00"}])
+
+        self.assertFalse(validation["valid"])
+        self.assertTrue(any(issue["code"] == "invalid_value" for issue in validation["issues"]))
+
+    def test_validate_rejects_overlong_portfolio_prompt_override(self) -> None:
+        validation = self.service.validate(
+            items=[{"key": "PORTFOLIO_ANALYSIS_PROMPT_FUND", "value": "x" * 4001}]
+        )
+
+        self.assertFalse(validation["valid"])
+        self.assertTrue(any(issue["code"] == "too_long" for issue in validation["issues"]))
+
     def test_validate_reports_invalid_searxng_url(self) -> None:
         validation = self.service.validate(items=[{"key": "SEARXNG_BASE_URLS", "value": "searx.local,https://ok.example"}])
         self.assertFalse(validation["valid"])

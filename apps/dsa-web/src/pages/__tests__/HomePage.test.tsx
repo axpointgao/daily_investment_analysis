@@ -48,6 +48,7 @@ vi.mock('../../api/fundAnalysis', async () => {
     ...actual,
     fundAnalysisApi: {
       analyzeAsync: vi.fn(),
+      getTaskStatus: vi.fn(),
       getTaskStreamUrl: vi.fn(() => '/api/v1/fund-analysis/tasks/stream'),
     },
   };
@@ -384,7 +385,7 @@ describe('HomePage', () => {
     );
 
     fireEvent.change(await screen.findByLabelText('分析类型'), { target: { value: 'fund' } });
-    const input = screen.getByPlaceholderText('输入基金代码，如 000001');
+    const input = screen.getByPlaceholderText('输入基金代码或名称，如 000001、华夏成长');
     fireEvent.change(input, { target: { value: '000001' } });
     fireEvent.click(screen.getByRole('button', { name: '分析' }));
 

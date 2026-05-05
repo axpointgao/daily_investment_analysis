@@ -377,10 +377,10 @@ describe('PortfolioPage FX refresh', () => {
 
     expect(await screen.findByText('0.12345678')).toBeInTheDocument();
     expect(screen.getByText(/数量=0.12345678/)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('数量')).toHaveAttribute('step', '0.00000001');
+    expect(screen.getByPlaceholderText('成交数量（币）')).toHaveAttribute('step', '0.00000001');
   });
 
-  it('generates portfolio analysis only from the explicit refresh button and shows full drawer', async () => {
+  it('generates portfolio analysis only from the explicit analysis button and shows report drawer', async () => {
     getSnapshot.mockResolvedValueOnce(makeSnapshot({ fxStale: false, positions: [
       { symbol: '510050', market: 'cn', currency: 'CNY', quantity: 100, avgCost: 2.5, totalCost: 250, lastPrice: 2.8, marketValueBase: 280, unrealizedPnlBase: 30, unrealizedPnlPct: 12, valuationCurrency: 'CNY', priceSource: 'history_close', priceDate: '2026-03-18', priceStale: false, priceAvailable: true },
       { symbol: '000290', market: 'fund', currency: 'CNY', quantity: 100, avgCost: 1.1, totalCost: 110, lastPrice: 1.2, marketValueBase: 120, unrealizedPnlBase: 10, unrealizedPnlPct: 9.09, valuationCurrency: 'CNY', priceSource: 'fund_nav', priceDate: '2026-03-18', priceStale: false, priceAvailable: true },
@@ -397,13 +397,31 @@ describe('PortfolioPage FX refresh', () => {
     expect(screen.getByText('场外基金')).toBeInTheDocument();
     expect(analyzePortfolio).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: '重新分析' }));
+    fireEvent.click(screen.getByRole('button', { name: '生成分析' }));
 
     expect(await screen.findByText('权益资产占比较高')).toBeInTheDocument();
     expect(analyzePortfolio).toHaveBeenCalledTimes(1);
+    expect(analyzePortfolio).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'quick' }));
 
-    fireEvent.click(screen.getByRole('button', { name: '完整分析' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看报告' }));
     expect(await screen.findByText('资产配置结构')).toBeInTheDocument();
+  });
+
+  it('uses selected wealth report mode when generating portfolio analysis', async () => {
+    getSnapshot.mockResolvedValueOnce(makeSnapshot({ fxStale: false, positions: [
+      { symbol: '510050', market: 'cn', currency: 'CNY', quantity: 100, avgCost: 2.5, totalCost: 250, lastPrice: 2.8, marketValueBase: 280, unrealizedPnlBase: 30, unrealizedPnlPct: 12, valuationCurrency: 'CNY', priceSource: 'history_close', priceDate: '2026-03-18', priceStale: false, priceAvailable: true },
+    ] }));
+
+    render(<PortfolioPage />);
+
+    await waitForInitialLoad();
+
+    fireEvent.click(screen.getByRole('button', { name: '财富报告' }));
+    fireEvent.click(screen.getByRole('button', { name: '生成财富报告' }));
+
+    await waitFor(() => {
+      expect(analyzePortfolio).toHaveBeenCalledWith(expect.objectContaining({ mode: 'wealth_report' }));
+    });
   });
 
   it('prefers disabled feedback over empty-pair feedback when refresh is disabled', async () => {

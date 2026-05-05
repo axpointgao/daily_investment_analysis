@@ -86,6 +86,19 @@ class ConfigManagerTestCase(unittest.TestCase):
 
         self.assertEqual(self.env_path.read_text(encoding="utf-8"), "STOCK_LIST=000001\n")
 
+    def test_apply_updates_round_trips_multiline_value(self) -> None:
+        self.env_path.write_text("STOCK_LIST=600519\n", encoding="utf-8")
+
+        self.manager.apply_updates(
+            updates=[("PORTFOLIO_ANALYSIS_PROMPT_FUND", "第一行\n第二行")],
+            sensitive_keys=set(),
+            mask_token="******",
+        )
+
+        env_content = self.env_path.read_text(encoding="utf-8")
+        self.assertIn('PORTFOLIO_ANALYSIS_PROMPT_FUND="第一行\\n第二行"\n', env_content)
+        self.assertEqual(self.manager.read_config_map()["PORTFOLIO_ANALYSIS_PROMPT_FUND"], "第一行\n第二行")
+
 
 if __name__ == "__main__":
     unittest.main()

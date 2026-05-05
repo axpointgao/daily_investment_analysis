@@ -858,7 +858,8 @@ class SystemConfigService:
         if not value.strip() and not is_required:
             return issues
 
-        if ("\n" in value or "\r" in value) and data_type != "json":
+        allow_multiline = bool(validation.get("allow_multiline") or validation.get("allowMultiline"))
+        if ("\n" in value or "\r" in value) and data_type != "json" and not allow_multiline:
             issues.append(
                 {
                     "key": key,
@@ -867,6 +868,20 @@ class SystemConfigService:
                     "severity": "error",
                     "expected": "single-line value",
                     "actual": "contains newline",
+                }
+            )
+            return issues
+
+        max_length = validation.get("max_length") or validation.get("maxLength")
+        if max_length is not None and len(value) > int(max_length):
+            issues.append(
+                {
+                    "key": key,
+                    "code": "too_long",
+                    "message": f"Value must be at most {int(max_length)} characters",
+                    "severity": "error",
+                    "expected": f"<={int(max_length)} characters",
+                    "actual": f"{len(value)} characters",
                 }
             )
             return issues

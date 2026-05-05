@@ -154,6 +154,7 @@ def get_fund_task_status(task_id: str) -> FundTaskStatus:
         progress=task.progress,
         result=result,
         error=task.error,
+        message=task.message,
         notification_error=task.notification_error,
         fund_name=task.fund_name,
     )

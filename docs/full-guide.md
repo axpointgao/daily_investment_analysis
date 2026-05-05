@@ -35,6 +35,7 @@ daily_stock_analysis/
 - [数据源配置](#数据源配置)
 - [高级功能](#高级功能)
 - [回测功能](#回测功能)
+- [持仓分析配置](#持仓分析配置)
 - [本地 WebUI 管理界面](#本地-webui-管理界面)
 
 ---
@@ -1039,6 +1040,23 @@ python main.py --debug
 | `stop_loss_trigger_rate` | 止损触发率（仅统计配置了止损的记录） |
 | `take_profit_trigger_rate` | 止盈触发率（仅统计配置了止盈的记录） |
 
+## 持仓分析配置
+
+设置页在“回测配置”后提供“持仓分析配置”，用于查看系统内置 Prompt，并按分析场景覆盖报告写作要求。覆盖内容只影响资产分析、深度诊断和财富报告的表达口径，不改变账户识别、盈米/天天基金等外部能力调用、失败降级和安全约束。
+
+这些变量可留空。留空时使用系统内置模板；填写后最多 4000 字，支持多行文本。
+
+| 变量 | 默认值 | 说明 |
+|------|-------|------|
+| `PORTFOLIO_ANALYSIS_PROMPT_ALL_QUICK` | 内置模板 | 全部账户“分析”的写作要求 |
+| `PORTFOLIO_ANALYSIS_PROMPT_ALL_DEEP` | 内置模板 | 全部账户“深度诊断”的写作要求 |
+| `PORTFOLIO_ANALYSIS_PROMPT_ALL_WEALTH_REPORT` | 内置模板 | 全部账户“财富报告”的写作要求 |
+| `PORTFOLIO_ANALYSIS_PROMPT_STOCK` | 内置模板 | 股票账户单账户分析写作要求 |
+| `PORTFOLIO_ANALYSIS_PROMPT_FUND` | 内置模板 | 基金账户单账户分析写作要求 |
+| `PORTFOLIO_ANALYSIS_PROMPT_ADVISORY` | 内置模板 | 投顾账户单账户分析写作要求 |
+| `PORTFOLIO_ANALYSIS_PROMPT_BANK` | 内置模板 | 银行账户单账户分析写作要求 |
+| `PORTFOLIO_ANALYSIS_PROMPT_INSURANCE_BASIC` | 内置模板 | 保险账户基础资产分析写作要求；当前不做保险保障专项建议 |
+
 ---
 
 ## 本地 WebUI 管理界面
@@ -1072,6 +1090,9 @@ FastAPI 提供 RESTful API 服务，支持配置管理和触发分析。
 | `/api/v1/analysis/tasks` | GET | 查询任务列表 |
 | `/api/v1/analysis/tasks/stream` | GET (SSE) | 订阅任务实时状态流 |
 | `/api/v1/analysis/status/{task_id}` | GET | 查询任务状态 |
+| `/api/v1/fund-analysis/analyze` | POST | 触发场外基金分析 |
+| `/api/v1/fund-analysis/tasks/stream` | GET (SSE) | 订阅场外基金任务实时状态流 |
+| `/api/v1/fund-analysis/status/{task_id}` | GET | 查询场外基金任务状态 |
 | `/api/v1/history` | GET | 查询分析历史 |
 | `/api/v1/usage/summary?period=today|month|all` | GET | 按调用类型与模型维度汇总 LLM 调用次数和 Token 用量 |
 | `/api/v1/backtest/run` | POST | 触发回测 |
@@ -1087,6 +1108,7 @@ FastAPI 提供 RESTful API 服务，支持配置管理和触发分析。
 
 > 进度流说明：`GET /api/v1/analysis/tasks/stream` 除 `task_created / task_started / task_completed / task_failed` 外，新增 `task_progress` 事件。普通分析链路会在“行情准备 / 新闻检索 / 上下文整理 / LLM 生成 / 报告保存”等阶段持续更新 `progress` 与 `message`。LiteLLM 流式返回仅在服务端累积完整文本，最终 JSON 解析成功后才会持久化历史报告；若流式在首个 chunk 前不可用，会自动回退到原非流式调用；若已产生部分 chunk 后失败，系统先尝试同模型非流式重试，失败后再按既有主模型->备用模型顺序继续尝试。  
 > 如果任务进度回调异常，主链路不会中断，系统会提升告警为 warning 级别并在服务端日志中输出完整异常，便于排查 SSE 推送断点。
+> 场外基金分析同样使用异步任务与 SSE；Web 首页提交基金分析后会先用 `202` 响应创建本地任务，再用基金任务 SSE 更新进度。如果 SSE 断开或事件延迟，前端会每 5 秒查询 `/api/v1/fund-analysis/status/{task_id}` 兜底刷新进度和状态。服务端会并发获取阶段收益、排名、基金经理和评级等基础补充数据，单个补充接口失败不会中断主分析链路。
 >  
 > 说明：该特性属于运行时 SSE 与回退链路细节，优先记录于完整指南（`full-guide*.md`），不在 `README.md` 中展开详细行为分支。
 

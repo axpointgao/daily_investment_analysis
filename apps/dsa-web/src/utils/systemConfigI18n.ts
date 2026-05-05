@@ -8,6 +8,7 @@ const categoryTitleMap: Record<SystemConfigCategory, string> = {
   system: '系统设置',
   agent: 'Agent 设置',
   backtest: '回测配置',
+  portfolio_analysis: '持仓分析配置',
   uncategorized: '其他',
 };
 
@@ -19,6 +20,7 @@ const categoryDescriptionMap: Partial<Record<SystemConfigCategory, string>> = {
   system: '管理调度、日志、端口等系统级参数。',
   agent: '管理基金投顾能力、股票问股策略和后台自动化能力。',
   backtest: '管理回测开关、评估窗口和引擎参数。',
+  portfolio_analysis: '查看和调整持仓分析报告的写作要求。',
   uncategorized: '其他未归类的配置项。',
 };
 
@@ -97,6 +99,14 @@ const fieldTitleMap: Record<string, string> = {
   BACKTEST_MIN_AGE_DAYS: '回测最小历史天数',
   BACKTEST_ENGINE_VERSION: '回测引擎版本',
   BACKTEST_NEUTRAL_BAND_PCT: '回测中性区间阈值（%）',
+  PORTFOLIO_ANALYSIS_PROMPT_ALL_QUICK: '全部账户 · 分析',
+  PORTFOLIO_ANALYSIS_PROMPT_ALL_DEEP: '全部账户 · 深度诊断',
+  PORTFOLIO_ANALYSIS_PROMPT_ALL_WEALTH_REPORT: '全部账户 · 财富报告',
+  PORTFOLIO_ANALYSIS_PROMPT_STOCK: '股票账户',
+  PORTFOLIO_ANALYSIS_PROMPT_FUND: '基金账户',
+  PORTFOLIO_ANALYSIS_PROMPT_ADVISORY: '投顾账户',
+  PORTFOLIO_ANALYSIS_PROMPT_BANK: '银行账户',
+  PORTFOLIO_ANALYSIS_PROMPT_INSURANCE_BASIC: '保险账户基础分析',
 };
 
 const fieldDescriptionMap: Record<string, string> = {
@@ -174,6 +184,14 @@ const fieldDescriptionMap: Record<string, string> = {
   BACKTEST_MIN_AGE_DAYS: '仅回测早于该天数的分析记录。',
   BACKTEST_ENGINE_VERSION: '回测引擎版本标识，用于区分结果版本。',
   BACKTEST_NEUTRAL_BAND_PCT: '中性区间阈值百分比，例如 2 表示 -2%~+2%。',
+  PORTFOLIO_ANALYSIS_PROMPT_ALL_QUICK: '留空时使用系统默认写法。这里只影响报告表达，不改变账户识别或工具调用。',
+  PORTFOLIO_ANALYSIS_PROMPT_ALL_DEEP: '留空时使用系统默认写法。深度诊断仍由系统自动决定是否调用盈米专业能力。',
+  PORTFOLIO_ANALYSIS_PROMPT_ALL_WEALTH_REPORT: '留空时使用系统默认写法。用于更正式、适合留档的家庭财富报告。',
+  PORTFOLIO_ANALYSIS_PROMPT_STOCK: '留空时使用系统默认写法。用于 A 股、港股、美股账户的单账户分析。',
+  PORTFOLIO_ANALYSIS_PROMPT_FUND: '留空时使用系统默认写法。用于场外基金账户分析。',
+  PORTFOLIO_ANALYSIS_PROMPT_ADVISORY: '留空时使用系统默认写法。用于投顾组合账户分析。',
+  PORTFOLIO_ANALYSIS_PROMPT_BANK: '留空时使用系统默认写法。用于银行活期、定期和理财账户分析。',
+  PORTFOLIO_ANALYSIS_PROMPT_INSURANCE_BASIC: '留空时使用系统默认写法。当前只分析保单资产属性，不做保险专项保障建议。',
 };
 
 export function getCategoryTitleZh(category: SystemConfigCategory, fallback?: string): string {

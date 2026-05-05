@@ -70,6 +70,13 @@ type AgentConfigGroup = {
   defaultOpen?: boolean;
 };
 
+type PortfolioPromptGroup = {
+  id: string;
+  title: string;
+  description: string;
+  keys: string[];
+};
+
 const PORTFOLIO_DATA_SOURCE_TESTS: Array<{ source: TestDataSourceSource; label: string; description: string }> = [
   {
     source: 'tushare_third_party',
@@ -131,6 +138,49 @@ const AGENT_CONFIG_GROUPS: AgentConfigGroup[] = [
 
 const AGENT_GROUP_KEY_SET = new Set(AGENT_CONFIG_GROUPS.flatMap((group) => group.keys));
 const AGENT_ALWAYS_HIDDEN_KEYS = new Set(['YINGMI_STARGATE_BASE_URL']);
+
+const PORTFOLIO_PROMPT_GROUPS: PortfolioPromptGroup[] = [
+  {
+    id: 'all',
+    title: '全部账户',
+    description: '家庭资产视角，覆盖分析、深度诊断和财富报告。',
+    keys: [
+      'PORTFOLIO_ANALYSIS_PROMPT_ALL_QUICK',
+      'PORTFOLIO_ANALYSIS_PROMPT_ALL_DEEP',
+      'PORTFOLIO_ANALYSIS_PROMPT_ALL_WEALTH_REPORT',
+    ],
+  },
+  {
+    id: 'stock',
+    title: '股票',
+    description: 'A 股、港股、美股账户的单账户分析。',
+    keys: ['PORTFOLIO_ANALYSIS_PROMPT_STOCK'],
+  },
+  {
+    id: 'fund',
+    title: '基金',
+    description: '场外基金账户，专业判断由系统自动接入盈米能力。',
+    keys: ['PORTFOLIO_ANALYSIS_PROMPT_FUND'],
+  },
+  {
+    id: 'advisory',
+    title: '投顾',
+    description: '投顾组合账户，策略数据由系统自动判断是否可用。',
+    keys: ['PORTFOLIO_ANALYSIS_PROMPT_ADVISORY'],
+  },
+  {
+    id: 'bank',
+    title: '银行',
+    description: '活期、定期和银行理财账户。',
+    keys: ['PORTFOLIO_ANALYSIS_PROMPT_BANK'],
+  },
+  {
+    id: 'insurance',
+    title: '保险',
+    description: '只做保单资产属性分析，不做保障专项建议。',
+    keys: ['PORTFOLIO_ANALYSIS_PROMPT_INSURANCE_BASIC'],
+  },
+];
 
 function trimDesktopRuntimeString(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
@@ -345,6 +395,178 @@ function AgentSettingsSections({
           onChange={onChange}
         />
       ) : null}
+    </div>
+  );
+}
+
+function getDefaultPrompt(item: SystemConfigItem) {
+  const raw = item.schema?.defaultValue;
+  return typeof raw === 'string' ? raw : '';
+}
+
+function PromptEditorCard({
+  item,
+  isSaving,
+  issueByKey,
+  onChange,
+}: {
+  item: SystemConfigItem;
+  isSaving: boolean;
+  issueByKey: Record<string, ConfigValidationIssue[]>;
+  onChange: (key: string, value: string) => void;
+}) {
+  const [showDefault, setShowDefault] = useState(false);
+  const defaultPrompt = getDefaultPrompt(item);
+  const value = String(item.value ?? '');
+  const issues = issueByKey[item.key] || [];
+  const hasError = issues.some((issue) => issue.severity === 'error');
+  const isCustomized = value.trim().length > 0;
+  const title = item.schema?.title || item.key;
+
+  return (
+    <div className={`rounded-2xl border p-4 transition-colors ${
+      hasError ? 'border-danger/40 bg-danger/5' : 'settings-border bg-background/35'
+    }`}>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+            <span className={`rounded-full border px-2 py-0.5 text-[11px] ${
+              isCustomized ? 'border-info/25 bg-info/10 text-info' : 'border-border/60 bg-background/40 text-muted-text'
+            }`}>
+              {isCustomized ? '已自定义' : '使用默认'}
+            </span>
+          </div>
+          <p className="mt-1 text-xs leading-5 text-muted-text">
+            {item.schema?.description || '留空时使用系统默认模板。'}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="settings-secondary"
+            size="sm"
+            onClick={() => setShowDefault((current) => !current)}
+          >
+            {showDefault ? '收起默认' : '查看默认'}
+          </Button>
+          <Button
+            type="button"
+            variant="settings-secondary"
+            size="sm"
+            disabled={isSaving || !isCustomized}
+            onClick={() => onChange(item.key, '')}
+          >
+            恢复默认
+          </Button>
+        </div>
+      </div>
+
+      {showDefault ? (
+        <div className="mt-4 rounded-xl border settings-border bg-card/65 p-3">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-text">系统默认模板</p>
+          <p className="whitespace-pre-wrap text-xs leading-6 text-secondary-text">{defaultPrompt || '暂无默认模板。'}</p>
+        </div>
+      ) : null}
+
+      <label className="mt-4 block text-xs font-medium text-secondary-text" htmlFor={`prompt-${item.key}`}>
+        自定义模板
+      </label>
+      <textarea
+        id={`prompt-${item.key}`}
+        className="input-surface input-focus-glow mt-2 min-h-[150px] w-full resize-y rounded-xl border bg-transparent px-4 py-3 text-sm leading-6 transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+        value={value}
+        disabled={isSaving}
+        placeholder="留空则使用系统默认模板。只写你希望额外强调的分析口径，不需要重复输出格式要求。"
+        onChange={(event) => onChange(item.key, event.target.value)}
+      />
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-text">
+        <span>只影响报告写法，不改变账户识别、工具调用或失败降级。</span>
+        <span>{value.length}/4000</span>
+      </div>
+      {issues.length ? (
+        <div className="mt-2 space-y-1">
+          {issues.map((issue, index) => (
+            <p key={`${issue.key}-${issue.code}-${index}`} className={issue.severity === 'error' ? 'text-xs text-danger' : 'text-xs text-warning'}>
+              {issue.message}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PortfolioAnalysisPromptSections({
+  items,
+  isSaving,
+  issueByKey,
+  onChange,
+}: {
+  items: SystemConfigItem[];
+  isSaving: boolean;
+  issueByKey: Record<string, ConfigValidationIssue[]>;
+  onChange: (key: string, value: string) => void;
+}) {
+  const [activeGroupId, setActiveGroupId] = useState('all');
+  const itemByKey = new Map(items.map((item) => [item.key, item]));
+  const activeGroup = PORTFOLIO_PROMPT_GROUPS.find((group) => group.id === activeGroupId) || PORTFOLIO_PROMPT_GROUPS[0];
+  const activeItems = activeGroup.keys
+    .map((key) => itemByKey.get(key))
+    .filter((item): item is SystemConfigItem => Boolean(item));
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border settings-border bg-background/35 p-4">
+        <h3 className="text-sm font-semibold text-foreground">先确认边界</h3>
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="rounded-xl border settings-border bg-card/70 p-3">
+            <p className="text-xs font-semibold text-foreground">只改写法</p>
+            <p className="mt-1 text-xs leading-5 text-muted-text">Prompt 不控制账户类型、工具调用和降级逻辑。</p>
+          </div>
+          <div className="rounded-xl border settings-border bg-card/70 p-3">
+            <p className="text-xs font-semibold text-foreground">留空更稳</p>
+            <p className="mt-1 text-xs leading-5 text-muted-text">没有明确偏好时留空，系统会使用内置模板。</p>
+          </div>
+          <div className="rounded-xl border settings-border bg-card/70 p-3">
+            <p className="text-xs font-semibold text-foreground">安全约束保留</p>
+            <p className="mt-1 text-xs leading-5 text-muted-text">系统仍会要求不编造、不承诺收益、不直接给交易指令。</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[220px_1fr]">
+        <div className="rounded-2xl border settings-border bg-background/35 p-2">
+          {PORTFOLIO_PROMPT_GROUPS.map((group) => {
+            const isActive = group.id === activeGroup.id;
+            return (
+              <button
+                key={group.id}
+                type="button"
+                className={`w-full rounded-xl px-3 py-3 text-left transition-colors ${
+                  isActive ? 'bg-primary/10 text-foreground' : 'text-secondary-text hover:bg-background/50 hover:text-foreground'
+                }`}
+                onClick={() => setActiveGroupId(group.id)}
+              >
+                <p className="text-sm font-semibold">{group.title}</p>
+                <p className="mt-1 text-xs leading-5 text-muted-text">{group.description}</p>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="space-y-4">
+          {activeItems.map((item) => (
+            <PromptEditorCard
+              key={item.key}
+              item={item}
+              isSaving={isSaving}
+              issueByKey={issueByKey}
+              onChange={onChange}
+            />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1011,10 +1233,23 @@ const SettingsPage: React.FC = () => {
                 />
               </SettingsSectionCard>
             ) : null}
+            {activeCategory === 'portfolio_analysis' ? (
+              <SettingsSectionCard
+                title="持仓分析配置"
+                description="查看和调整资产分析、深度诊断和财富报告的写作要求。账户类型和工具调用由系统自动选择。"
+              >
+                <PortfolioAnalysisPromptSections
+                  items={rawActiveItems}
+                  isSaving={isSaving}
+                  issueByKey={issueByKey}
+                  onChange={setDraftValue}
+                />
+              </SettingsSectionCard>
+            ) : null}
             {activeCategory === 'system' && passwordChangeable ? (
               <ChangePasswordCard />
             ) : null}
-            {activeCategory !== 'agent' && activeItems.length ? (
+            {activeCategory !== 'agent' && activeCategory !== 'portfolio_analysis' && activeItems.length ? (
               <SettingsSectionCard
                 title="当前分类配置项"
                 description={getCategoryDescriptionZh(activeCategory as SystemConfigCategory, '') || '使用统一字段卡片维护当前分类的系统配置。'}
@@ -1030,7 +1265,7 @@ const SettingsPage: React.FC = () => {
                   />
                 ))}
               </SettingsSectionCard>
-            ) : activeCategory !== 'agent' ? (
+            ) : activeCategory !== 'agent' && activeCategory !== 'portfolio_analysis' ? (
               <EmptyState
                 title="当前分类下暂无配置项"
                 description="当前分类没有可编辑字段；可切换左侧分类继续查看其它系统配置。"

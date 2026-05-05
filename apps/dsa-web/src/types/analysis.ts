@@ -212,7 +212,10 @@ export interface TaskStatus {
   progress?: number;
   result?: AnalysisResult;
   error?: string;
+  message?: string;
   stockName?: string;
+  fundName?: string;
+  notificationError?: string;
   originalQuery?: string;
   selectionSource?: string;
 }

@@ -78,6 +78,7 @@ const HomePage: React.FC = () => {
   const selectedReportType = getReportAssetType(selectedReport?.meta.assetType);
 
   useDashboardLifecycle({
+    activeTasks,
     loadInitialHistory,
     refreshHistory,
     syncTaskCreated,

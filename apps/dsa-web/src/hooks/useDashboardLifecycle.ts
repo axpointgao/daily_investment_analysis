@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { TaskInfo } from '../types/analysis';
 import { fundAnalysisApi } from '../api/fundAnalysis';
 import { useTaskStream } from './useTaskStream';
 
 type UseDashboardLifecycleOptions = {
+  activeTasks?: TaskInfo[];
   loadInitialHistory: () => Promise<void>;
   refreshHistory: (silent?: boolean) => Promise<void>;
   syncTaskCreated: (task: TaskInfo) => void;
@@ -14,6 +15,7 @@ type UseDashboardLifecycleOptions = {
 };
 
 export function useDashboardLifecycle({
+  activeTasks = [],
   loadInitialHistory,
   refreshHistory,
   syncTaskCreated,
@@ -23,6 +25,7 @@ export function useDashboardLifecycle({
   enabled = true,
 }: UseDashboardLifecycleOptions): void {
   const removalTimeoutsRef = useRef<number[]>([]);
+  const activeTasksRef = useRef(new Map<string, TaskInfo>());
 
   useEffect(() => {
     if (!enabled) {
@@ -66,14 +69,83 @@ export function useDashboardLifecycle({
     };
   }, []);
 
-  const scheduleTaskRemoval = (taskId: string, delayMs: number) => {
+  const scheduleTaskRemoval = useCallback((taskId: string, delayMs: number) => {
     const timeoutId = window.setTimeout(() => {
       removeTask(taskId);
       removalTimeoutsRef.current = removalTimeoutsRef.current.filter((item) => item !== timeoutId);
     }, delayMs);
 
     removalTimeoutsRef.current.push(timeoutId);
-  };
+  }, [removeTask]);
+
+  useEffect(() => {
+    const activeTaskIds = new Set<string>();
+    activeTasks.forEach((task) => {
+      if (task.status === 'pending' || task.status === 'processing') {
+        activeTaskIds.add(task.taskId);
+        activeTasksRef.current.set(task.taskId, task);
+      }
+    });
+    activeTasksRef.current.forEach((_task, taskId) => {
+      if (!activeTaskIds.has(taskId)) {
+        activeTasksRef.current.delete(taskId);
+      }
+    });
+  }, [activeTasks]);
+
+  const syncAndTrackTask = useCallback((task: TaskInfo) => {
+    syncTaskUpdated(task);
+    if (task.status === 'pending' || task.status === 'processing') {
+      activeTasksRef.current.set(task.taskId, task);
+    } else {
+      activeTasksRef.current.delete(task.taskId);
+    }
+  }, [syncTaskUpdated]);
+
+  const trackCreatedTask = useCallback((task: TaskInfo) => {
+    syncTaskCreated(task);
+    if (task.status === 'pending' || task.status === 'processing') {
+      activeTasksRef.current.set(task.taskId, task);
+    }
+  }, [syncTaskCreated]);
+
+  useEffect(() => {
+    if (!enabled) {
+      activeTasksRef.current.clear();
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      const fundTasks = Array.from(activeTasksRef.current.values()).filter((task) => task.type === 'fund');
+      fundTasks.forEach((task) => {
+        void fundAnalysisApi.getTaskStatus(task.taskId)
+          .then((status) => {
+            const updatedTask: TaskInfo = {
+              ...task,
+              status: status.status,
+              progress: status.progress ?? task.progress,
+              message: status.error || status.message || task.message,
+              error: status.error,
+              fundName: status.fundName || task.fundName,
+              notificationError: status.notificationError || task.notificationError,
+            };
+            syncAndTrackTask(updatedTask);
+            if (updatedTask.status === 'completed') {
+              void refreshHistory(true);
+              scheduleTaskRemoval(updatedTask.taskId, 2_000);
+            } else if (updatedTask.status === 'failed') {
+              syncTaskFailed(updatedTask);
+              scheduleTaskRemoval(updatedTask.taskId, 5_000);
+            }
+          })
+          .catch(() => {
+            // SSE still owns the primary path; polling failures should not create noisy user errors.
+          });
+      });
+    }, 5_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [enabled, refreshHistory, scheduleTaskRemoval, syncAndTrackTask, syncTaskFailed]);
 
   useTaskStream({
     onTaskCreated: syncTaskCreated,
@@ -96,15 +168,17 @@ export function useDashboardLifecycle({
 
   useTaskStream({
     streamUrl: fundAnalysisApi.getTaskStreamUrl(),
-    onTaskCreated: syncTaskCreated,
-    onTaskStarted: syncTaskUpdated,
-    onTaskProgress: syncTaskUpdated,
+    onTaskCreated: trackCreatedTask,
+    onTaskStarted: syncAndTrackTask,
+    onTaskProgress: syncAndTrackTask,
     onTaskCompleted: (task) => {
+      activeTasksRef.current.delete(task.taskId);
       syncTaskUpdated(task);
       void refreshHistory(true);
       scheduleTaskRemoval(task.taskId, 2_000);
     },
     onTaskFailed: (task) => {
+      activeTasksRef.current.delete(task.taskId);
       syncTaskFailed(task);
       scheduleTaskRemoval(task.taskId, 5_000);
     },

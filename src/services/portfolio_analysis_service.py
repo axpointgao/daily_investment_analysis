@@ -19,6 +19,59 @@ from src.services.portfolio_risk_service import PortfolioRiskService
 from src.services.portfolio_service import PortfolioService
 
 
+PORTFOLIO_ANALYSIS_PROMPT_KEYS = {
+    "all_quick": "PORTFOLIO_ANALYSIS_PROMPT_ALL_QUICK",
+    "all_deep": "PORTFOLIO_ANALYSIS_PROMPT_ALL_DEEP",
+    "all_wealth_report": "PORTFOLIO_ANALYSIS_PROMPT_ALL_WEALTH_REPORT",
+    "stock": "PORTFOLIO_ANALYSIS_PROMPT_STOCK",
+    "fund": "PORTFOLIO_ANALYSIS_PROMPT_FUND",
+    "advisory": "PORTFOLIO_ANALYSIS_PROMPT_ADVISORY",
+    "bank": "PORTFOLIO_ANALYSIS_PROMPT_BANK",
+    "insurance_basic": "PORTFOLIO_ANALYSIS_PROMPT_INSURANCE_BASIC",
+}
+
+PORTFOLIO_ANALYSIS_DEFAULT_PROMPTS: Dict[str, str] = {
+    "all_quick": (
+        "以家庭总资产视角分析当前全部账户。重点判断资产配置是否均衡、现金与银行资产是否足够、"
+        "股票/基金/投顾/保险/数字货币之间是否存在明显集中或流动性问题。保险只按已录入现金价值、"
+        "已交保费和返还流水做资产层面的基础判断，不做保障责任适配。数字货币只作为高波动另类资产风险敞口。"
+    ),
+    "all_deep": (
+        "以家庭总资产体检视角做深度诊断。先分析资产配置、账户分布、币种暴露、现金流动性和集中度，"
+        "再结合专业投顾诊断中的基金/投顾组合风险、资产配置、相关性或回测信息。对未被专业数据覆盖的资产，"
+        "只基于本地持仓快照判断，并明确说明数据覆盖不足。"
+    ),
+    "all_wealth_report": (
+        "生成适合留档的家庭财富报告。报告应覆盖总资产结构、账户和币种分布、主要风险来源、流动性、"
+        "基金/投顾专业诊断摘要、保险基础资产情况和后续观察事项。语气正式、克制，不承诺收益，不给直接交易指令。"
+    ),
+    "stock": (
+        "只分析股票账户。重点关注单一持仓集中度、市场和币种暴露、股票行业集中度、盈亏结构和回撤风险。"
+        "不要强行分析基金、银行、保险或数字货币逻辑，不给明确买卖指令。"
+    ),
+    "fund": (
+        "只分析场外基金账户。重点关注基金组合的资产配置、风险等级、收益波动、基金集中度和是否适合作为核心/卫星配置。"
+        "如果存在盈米专业数据，优先使用专业诊断；否则使用净值、表现和本地风险指标。"
+    ),
+    "advisory": (
+        "只分析投顾组合账户。重点关注投顾产品风格、风险等级、持仓金额集中度、净值更新情况和组合适配性。"
+        "如存在盈米投顾策略数据，优先作为专业判断依据。"
+    ),
+    "bank": (
+        "只分析银行账户。重点关注活期、定期和银行理财的占比，期限分布，年化利率，风险等级，现金冗余和到期流动性。"
+        "不要用股票或基金的收益波动框架硬套银行资产。"
+    ),
+    "insurance_basic": (
+        "只分析保险账户的资产属性。重点关注已交保费、当前现金价值、返还/年金/分红流水、未来缴费压力和流动性。"
+        "不要评价疾病、身故、医疗等保障责任是否充足；如数据不足，明确说明保险专项分析能力暂未接入。"
+    ),
+}
+
+
+def get_portfolio_analysis_default_prompt(prompt_key: str) -> str:
+    return PORTFOLIO_ANALYSIS_DEFAULT_PROMPTS.get(prompt_key, PORTFOLIO_ANALYSIS_DEFAULT_PROMPTS["all_quick"])
+
+
 class PortfolioAnalysisError(ValueError):
     """Raised when portfolio analysis cannot be generated."""
 
@@ -51,7 +104,7 @@ class PortfolioAnalysisService:
         if not self.analyzer.is_available():
             raise PortfolioAnalysisError("LLM API Key 未配置，无法生成资产分析。")
 
-        analysis_mode = "deep" if mode == "deep" else "quick"
+        analysis_mode = mode if mode in {"quick", "deep", "wealth_report"} else "quick"
         as_of_date = as_of or date.today()
         snapshot = self.portfolio_service.get_portfolio_snapshot(
             account_id=account_id,
@@ -70,7 +123,7 @@ class PortfolioAnalysisService:
             snapshot_signature=snapshot_signature,
         )
         provider_status: List[Dict[str, Any]] = []
-        if analysis_mode == "deep":
+        if analysis_mode in {"deep", "wealth_report"}:
             strategy = normalize_yingmi_fund_data_strategy(getattr(self.config, "yingmi_fund_data_strategy", None))
             if strategy == "basic_only":
                 professional = {
@@ -89,7 +142,7 @@ class PortfolioAnalysisService:
             compact_payload["专业投顾诊断"] = professional.get("data") or {}
             provider_status = professional.get("providerStatus") or []
         compact_payload["analysisMode"] = analysis_mode
-        prompt = self._build_prompt(compact_payload)
+        prompt = self._build_prompt(compact_payload, mode=analysis_mode, account_id=account_id)
         raw_text = self.analyzer.generate_text(prompt, max_tokens=2400, temperature=0.25)
         if not raw_text:
             raise PortfolioAnalysisError("LLM 未返回资产分析结果。")
@@ -349,9 +402,43 @@ class PortfolioAnalysisService:
             )
         return result
 
-    def _build_prompt(self, payload: Dict[str, Any]) -> str:
+    def _resolve_prompt_key(self, payload: Dict[str, Any], *, mode: str, account_id: Optional[int]) -> str:
+        if account_id is None:
+            if mode == "deep":
+                return "all_deep"
+            if mode == "wealth_report":
+                return "all_wealth_report"
+            return "all_quick"
+
+        account_rows = payload.get("按账户汇总") or []
+        account_market = ""
+        if account_rows:
+            account_market = str(account_rows[0].get("market") or "").strip().lower()
+        if account_market in {"cn", "hk", "us"}:
+            return "stock"
+        if account_market in {"fund", "advisory", "bank"}:
+            return account_market
+        if account_market == "insurance":
+            return "insurance_basic"
+        return "all_quick"
+
+    def _get_prompt_instruction(self, prompt_key: str) -> str:
+        env_key = PORTFOLIO_ANALYSIS_PROMPT_KEYS.get(prompt_key, "")
+        configured = str(getattr(self.config, env_key.lower(), "") or "").strip() if env_key else ""
+        return configured or get_portfolio_analysis_default_prompt(prompt_key)
+
+    def _build_prompt(
+        self,
+        payload: Dict[str, Any],
+        *,
+        mode: str = "quick",
+        account_id: Optional[int] = None,
+    ) -> str:
+        prompt_key = self._resolve_prompt_key(payload, mode=mode, account_id=account_id)
+        scenario_instruction = self._get_prompt_instruction(prompt_key)
         return (
             "你是一名面向个人投资者的多资产组合分析师。请基于用户当前持仓快照，生成简洁、专业、非交易指令式的资产分析。\n\n"
+            f"本次分析场景：{scenario_instruction}\n\n"
             "重要要求：\n"
             "- 只分析组合结构与风险画像，不给具体买入/卖出指令。\n"
             "- 不预测短期涨跌，不承诺收益。\n"

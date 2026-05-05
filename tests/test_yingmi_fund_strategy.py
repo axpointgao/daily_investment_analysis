@@ -58,6 +58,42 @@ class YingmiFundStrategyTestCase(unittest.TestCase):
         self.assertEqual(result["data"], {})
         self.assertIn("仅基础数据", result["providerStatus"][0]["message"])
 
+    def test_home_fund_basic_enrichment_collects_parallel_results(self) -> None:
+        service = FundAnalysisService()
+        service._fetch_period_increase = lambda _client, _code: [{"period": "近1月"}]  # type: ignore[method-assign]
+        service._fetch_rank_diagram = lambda _client, _code: [{"rank": 12}]  # type: ignore[method-assign]
+        service._fetch_managers = lambda _client, _code: [{"managerNames": "张三"}]  # type: ignore[method-assign]
+        service._fetch_grade = lambda _client, _code: [{"zhaoshangRating": "五星"}]  # type: ignore[method-assign]
+
+        performance, ranking, managers, grade = service._fetch_basic_enrichment(
+            SimpleNamespace(),
+            "000001",
+            use_basic_enrichment=True,
+        )
+
+        self.assertEqual(performance, [{"period": "近1月"}])
+        self.assertEqual(ranking, [{"rank": 12}])
+        self.assertEqual(managers, [{"managerNames": "张三"}])
+        self.assertEqual(grade, [{"zhaoshangRating": "五星"}])
+
+    def test_home_fund_basic_only_keeps_performance_without_extra_enrichment(self) -> None:
+        service = FundAnalysisService()
+        service._fetch_period_increase = lambda _client, _code: [{"period": "近1年"}]  # type: ignore[method-assign]
+        service._fetch_rank_diagram = lambda _client, _code: [{"rank": 12}]  # type: ignore[method-assign]
+        service._fetch_managers = lambda _client, _code: [{"managerNames": "张三"}]  # type: ignore[method-assign]
+        service._fetch_grade = lambda _client, _code: [{"zhaoshangRating": "五星"}]  # type: ignore[method-assign]
+
+        performance, ranking, managers, grade = service._fetch_basic_enrichment(
+            SimpleNamespace(),
+            "000001",
+            use_basic_enrichment=False,
+        )
+
+        self.assertEqual(performance, [{"period": "近1年"}])
+        self.assertEqual(ranking, [])
+        self.assertEqual(managers, [])
+        self.assertEqual(grade, [])
+
     def test_home_fund_fast_depth_skips_extra_fund_risk(self) -> None:
         self._write_env("YINGMI_API_KEY=dummy", "YINGMI_FUND_ANALYSIS_DEPTH=fast")
         client = SimpleNamespace(

@@ -28,6 +28,7 @@ vi.mock('../../api/fundAnalysis', async () => {
     ...actual,
     fundAnalysisApi: {
       analyzeAsync: vi.fn(),
+      getTaskStatus: vi.fn(),
       getTaskStreamUrl: vi.fn(() => '/api/v1/fund-analysis/tasks/stream'),
     },
   };
@@ -516,5 +517,14 @@ describe('stockPoolStore', () => {
       notify: true,
     }));
     expect(analysisApi.analyzeAsync).not.toHaveBeenCalled();
+    expect(useStockPoolStore.getState().activeTasks).toEqual([
+      expect.objectContaining({
+        taskId: 'fund-task-1',
+        type: 'fund',
+        fundCode: '000001',
+        status: 'pending',
+        message: '基金分析任务已提交',
+      }),
+    ]);
   });
 });

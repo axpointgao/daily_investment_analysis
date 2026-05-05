@@ -1,6 +1,6 @@
 import apiClient from './index';
 import { toCamelCase } from './utils';
-import type { FundAnalysisRequest, FundAnalyzeAsyncResponse } from '../types/analysis';
+import type { FundAnalysisRequest, FundAnalyzeAsyncResponse, TaskStatus } from '../types/analysis';
 
 export const fundAnalysisApi = {
   analyzeAsync: async (data: FundAnalysisRequest): Promise<FundAnalyzeAsyncResponse> => {
@@ -36,6 +36,11 @@ export const fundAnalysisApi = {
   getTaskStreamUrl: (): string => {
     const baseUrl = apiClient.defaults.baseURL || '';
     return `${baseUrl}/api/v1/fund-analysis/tasks/stream`;
+  },
+
+  getTaskStatus: async (taskId: string): Promise<TaskStatus> => {
+    const response = await apiClient.get<Record<string, unknown>>(`/api/v1/fund-analysis/status/${encodeURIComponent(taskId)}`);
+    return toCamelCase<TaskStatus>(response.data);
   },
 };
 

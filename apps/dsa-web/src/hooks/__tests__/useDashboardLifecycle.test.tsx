@@ -1,10 +1,18 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fundAnalysisApi } from '../../api/fundAnalysis';
 import { useDashboardLifecycle } from '../useDashboardLifecycle';
 import { useTaskStream } from '../useTaskStream';
 
 vi.mock('../useTaskStream', () => ({
   useTaskStream: vi.fn(),
+}));
+
+vi.mock('../../api/fundAnalysis', () => ({
+  fundAnalysisApi: {
+    getTaskStatus: vi.fn(),
+    getTaskStreamUrl: vi.fn(() => '/api/v1/fund-analysis/tasks/stream'),
+  },
 }));
 
 const createTask = () => ({
@@ -150,6 +158,57 @@ describe('useDashboardLifecycle', () => {
     });
 
     expect(syncTaskUpdated).toHaveBeenCalledWith(progressTask);
+  });
+
+  it('polls active fund task status when the SSE stream is delayed', async () => {
+    const syncTaskUpdated = vi.fn();
+    const refreshHistory = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(fundAnalysisApi.getTaskStatus).mockResolvedValue({
+      taskId: 'fund-task-1',
+      status: 'processing',
+      progress: 55,
+      message: '正在获取历史净值',
+      fundName: '华夏成长混合',
+    });
+
+    renderHook(() =>
+      useDashboardLifecycle({
+        activeTasks: [
+          {
+            taskId: 'fund-task-1',
+            type: 'fund',
+            fundCode: '000001',
+            status: 'pending',
+            progress: 0,
+            message: '基金分析任务已提交',
+            reportType: 'detailed',
+            createdAt: '2026-03-18T08:00:00Z',
+          },
+        ],
+        loadInitialHistory: vi.fn().mockResolvedValue(undefined),
+        refreshHistory,
+        syncTaskCreated: vi.fn(),
+        syncTaskUpdated,
+        syncTaskFailed: vi.fn(),
+        removeTask: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+      await Promise.resolve();
+    });
+
+    expect(fundAnalysisApi.getTaskStatus).toHaveBeenCalledWith('fund-task-1');
+    expect(syncTaskUpdated).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'fund-task-1',
+      type: 'fund',
+      fundCode: '000001',
+      status: 'processing',
+      progress: 55,
+      message: '正在获取历史净值',
+      fundName: '华夏成长混合',
+    }));
   });
 
   it('reports failed tasks and removes them after the failure grace window', () => {

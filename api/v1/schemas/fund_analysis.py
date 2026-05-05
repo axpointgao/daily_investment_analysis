@@ -47,6 +47,7 @@ class FundTaskStatus(BaseModel):
     progress: Optional[int] = Field(None, description="进度百分比", ge=0, le=100)
     result: Optional[FundAnalysisResultResponse] = Field(None, description="分析结果")
     error: Optional[str] = Field(None, description="错误信息")
+    message: Optional[str] = Field(None, description="状态消息")
     notification_error: Optional[str] = Field(None, description="通知发送失败原因")
     fund_name: Optional[str] = Field(None, description="基金名称")
 

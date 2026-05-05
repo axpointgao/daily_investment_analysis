@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -164,10 +165,11 @@ class FundAnalysisService:
             use_basic_enrichment = data_strategy != "yingmi_only"
 
             emit(52, f"{code}：正在获取收益、排名与经理数据")
-            performance = self._fetch_period_increase(client, code)
-            ranking = self._fetch_rank_diagram(client, code) if use_basic_enrichment else []
-            managers = self._fetch_managers(client, code) if use_basic_enrichment else []
-            grade = self._fetch_grade(client, code) if use_basic_enrichment else []
+            performance, ranking, managers, grade = self._fetch_basic_enrichment(
+                client,
+                code,
+                use_basic_enrichment=use_basic_enrichment,
+            )
 
             emit(65, f"{code}：正在计算风险收益指标")
             risk = self._calculate_risk(nav_series)
@@ -411,6 +413,46 @@ class FundAnalysisService:
             for row in rows
             if isinstance(row, dict)
         ]
+
+    def _fetch_basic_enrichment(
+        self,
+        client: TiantianFundClient,
+        code: str,
+        *,
+        use_basic_enrichment: bool,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+        calls = {
+            "performance": lambda: self._fetch_period_increase(client, code),
+        }
+        if use_basic_enrichment:
+            calls.update({
+                "ranking": lambda: self._fetch_rank_diagram(client, code),
+                "managers": lambda: self._fetch_managers(client, code),
+                "grade": lambda: self._fetch_grade(client, code),
+            })
+
+        results: Dict[str, List[Dict[str, Any]]] = {
+            "performance": [],
+            "ranking": [],
+            "managers": [],
+            "grade": [],
+        }
+        if not calls:
+            return results["performance"], results["ranking"], results["managers"], results["grade"]
+
+        with ThreadPoolExecutor(max_workers=min(4, len(calls)), thread_name_prefix="fund_basic_data_") as executor:
+            future_map = {executor.submit(caller): key for key, caller in calls.items()}
+            for future in as_completed(future_map):
+                key = future_map[future]
+                try:
+                    value = future.result()
+                except Exception as exc:
+                    logger.info("基金 %s 基础补充数据获取失败: %s: %s", code, key, exc)
+                    continue
+                if isinstance(value, list):
+                    results[key] = value
+
+        return results["performance"], results["ranking"], results["managers"], results["grade"]
 
     def _calculate_risk(self, nav_series: List[Dict[str, Any]]) -> Dict[str, Any]:
         navs = [float(item["unitNav"]) for item in nav_series if _as_float(item.get("unitNav")) is not None]

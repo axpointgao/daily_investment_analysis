@@ -716,6 +716,16 @@ class Config:
     agent_event_monitor_interval_minutes: int = 5  # Polling interval for event monitor background checks
     agent_event_alert_rules_json: str = ""  # JSON array of serialized EventMonitor rules
 
+    # === Portfolio analysis prompt overrides ===
+    portfolio_analysis_prompt_all_quick: str = ""
+    portfolio_analysis_prompt_all_deep: str = ""
+    portfolio_analysis_prompt_all_wealth_report: str = ""
+    portfolio_analysis_prompt_stock: str = ""
+    portfolio_analysis_prompt_fund: str = ""
+    portfolio_analysis_prompt_advisory: str = ""
+    portfolio_analysis_prompt_bank: str = ""
+    portfolio_analysis_prompt_insurance_basic: str = ""
+
     # === 通知配置（可同时配置多个，全部推送）===
     
     # 企业微信 Webhook
@@ -961,6 +971,14 @@ class Config:
             "YINGMI_ENABLED",
             "YINGMI_FUND_ANALYSIS_DEPTH",
             "YINGMI_FUND_DATA_STRATEGY",
+            "PORTFOLIO_ANALYSIS_PROMPT_ALL_QUICK",
+            "PORTFOLIO_ANALYSIS_PROMPT_ALL_DEEP",
+            "PORTFOLIO_ANALYSIS_PROMPT_ALL_WEALTH_REPORT",
+            "PORTFOLIO_ANALYSIS_PROMPT_STOCK",
+            "PORTFOLIO_ANALYSIS_PROMPT_FUND",
+            "PORTFOLIO_ANALYSIS_PROMPT_ADVISORY",
+            "PORTFOLIO_ANALYSIS_PROMPT_BANK",
+            "PORTFOLIO_ANALYSIS_PROMPT_INSURANCE_BASIC",
         }
     )
     _BOOTSTRAP_RUNTIME_ENV_OVERRIDES_CAPTURED = False
@@ -1345,6 +1363,14 @@ class Config:
                 field_name='YINGMI_SKILL_DAILY_LIMIT',
                 minimum=1,
             ),
+            portfolio_analysis_prompt_all_quick=cls._resolve_env_value('PORTFOLIO_ANALYSIS_PROMPT_ALL_QUICK') or "",
+            portfolio_analysis_prompt_all_deep=cls._resolve_env_value('PORTFOLIO_ANALYSIS_PROMPT_ALL_DEEP') or "",
+            portfolio_analysis_prompt_all_wealth_report=cls._resolve_env_value('PORTFOLIO_ANALYSIS_PROMPT_ALL_WEALTH_REPORT') or "",
+            portfolio_analysis_prompt_stock=cls._resolve_env_value('PORTFOLIO_ANALYSIS_PROMPT_STOCK') or "",
+            portfolio_analysis_prompt_fund=cls._resolve_env_value('PORTFOLIO_ANALYSIS_PROMPT_FUND') or "",
+            portfolio_analysis_prompt_advisory=cls._resolve_env_value('PORTFOLIO_ANALYSIS_PROMPT_ADVISORY') or "",
+            portfolio_analysis_prompt_bank=cls._resolve_env_value('PORTFOLIO_ANALYSIS_PROMPT_BANK') or "",
+            portfolio_analysis_prompt_insurance_basic=cls._resolve_env_value('PORTFOLIO_ANALYSIS_PROMPT_INSURANCE_BASIC') or "",
             tickflow_api_key=os.getenv('TICKFLOW_API_KEY'),
             longbridge_app_key=os.getenv('LONGBRIDGE_APP_KEY') or None,
             longbridge_app_secret=os.getenv('LONGBRIDGE_APP_SECRET') or None,

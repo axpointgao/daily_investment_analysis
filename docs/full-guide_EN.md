@@ -897,6 +897,9 @@ FastAPI provides RESTful API service for configuration management and triggering
 | `/api/v1/analysis/tasks` | GET | Query task list |
 | `/api/v1/analysis/tasks/stream` | GET (SSE) | Subscribe to realtime task updates |
 | `/api/v1/analysis/status/{task_id}` | GET | Query task status |
+| `/api/v1/fund-analysis/analyze` | POST | Trigger mutual fund analysis |
+| `/api/v1/fund-analysis/tasks/stream` | GET (SSE) | Subscribe to mutual fund task updates |
+| `/api/v1/fund-analysis/status/{task_id}` | GET | Query mutual fund task status |
 | `/api/v1/history` | GET | Query analysis history |
 | `/api/v1/usage/summary?period=today|month|all` | GET | Query LLM call counts and token usage grouped by call type and model |
 | `/api/v1/backtest/run` | POST | Trigger backtest |
@@ -910,6 +913,7 @@ FastAPI provides RESTful API service for configuration management and triggering
 
 > Progress-stream note: `GET /api/v1/analysis/tasks/stream` now emits `task_progress` in addition to `task_created / task_started / task_completed / task_failed`. The regular analysis path updates `progress` and `message` across quote preparation, news retrieval, context assembly, LLM generation, and report persistence. Streaming chunks are accumulated only on the server side; history is persisted only after the final JSON parses successfully. If streaming is unavailable before the first chunk, the system falls back to the previous non-stream request. If a stream fails after partial output has already arrived, the system first retries non-stream for the same model, then continues through existing fallback models in the original order (primary + fallback list).
 > If a progress callback fails, the analysis flow continues, and the exception is now logged at warning level to help troubleshoot SSE delivery gaps.
+> Mutual fund analysis uses the same async-task model. The Web home page creates a local task from the `202` response immediately, then updates progress through the fund SSE stream. If the SSE stream disconnects or lags, the UI polls `/api/v1/fund-analysis/status/{task_id}` every 5 seconds as a fallback. On the backend, basic fund enrichment such as period performance, ranking, managers, and ratings is fetched concurrently; a single enrichment failure does not stop the main analysis flow.
 
 > Note: This behavior is documented in the full guide (`full-guide*.md`) because it is detailed runtime SSE/fallback behavior and is therefore kept out of the README.
 

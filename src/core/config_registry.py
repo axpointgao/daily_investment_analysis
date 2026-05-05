@@ -11,6 +11,7 @@ from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
 from src.config import AGENT_MAX_STEPS_DEFAULT
+from src.services.portfolio_analysis_service import get_portfolio_analysis_default_prompt
 
 SCHEMA_VERSION = "2026-03-29"
 
@@ -56,6 +57,12 @@ _CATEGORY_DEFINITIONS: List[Dict[str, Any]] = [
         "title": "Backtest",
         "description": "Backtest engine behavior and evaluation parameters.",
         "display_order": 60,
+    },
+    {
+        "category": "portfolio_analysis",
+        "title": "Portfolio Analysis",
+        "description": "Prompt overrides for portfolio analysis reports.",
+        "display_order": 65,
     },
     {
         "category": "uncategorized",
@@ -1622,6 +1629,118 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "validation": {"min": 0.0, "max": 100.0},
         "display_order": 50,
     },
+    "PORTFOLIO_ANALYSIS_PROMPT_ALL_QUICK": {
+        "title": "All Accounts Quick Prompt",
+        "description": "Prompt override for all-account standard analysis. Leave empty to use the built-in default.",
+        "category": "portfolio_analysis",
+        "data_type": "string",
+        "ui_control": "textarea",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": get_portfolio_analysis_default_prompt("all_quick"),
+        "options": [],
+        "validation": {"allow_multiline": True, "max_length": 4000, "prompt_key": "all_quick"},
+        "display_order": 10,
+    },
+    "PORTFOLIO_ANALYSIS_PROMPT_ALL_DEEP": {
+        "title": "All Accounts Deep Prompt",
+        "description": "Prompt override for all-account deep diagnosis. Leave empty to use the built-in default.",
+        "category": "portfolio_analysis",
+        "data_type": "string",
+        "ui_control": "textarea",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": get_portfolio_analysis_default_prompt("all_deep"),
+        "options": [],
+        "validation": {"allow_multiline": True, "max_length": 4000, "prompt_key": "all_deep"},
+        "display_order": 20,
+    },
+    "PORTFOLIO_ANALYSIS_PROMPT_ALL_WEALTH_REPORT": {
+        "title": "All Accounts Wealth Report Prompt",
+        "description": "Prompt override for all-account wealth report. Leave empty to use the built-in default.",
+        "category": "portfolio_analysis",
+        "data_type": "string",
+        "ui_control": "textarea",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": get_portfolio_analysis_default_prompt("all_wealth_report"),
+        "options": [],
+        "validation": {"allow_multiline": True, "max_length": 4000, "prompt_key": "all_wealth_report"},
+        "display_order": 30,
+    },
+    "PORTFOLIO_ANALYSIS_PROMPT_STOCK": {
+        "title": "Stock Account Prompt",
+        "description": "Prompt override for stock account analysis. Leave empty to use the built-in default.",
+        "category": "portfolio_analysis",
+        "data_type": "string",
+        "ui_control": "textarea",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": get_portfolio_analysis_default_prompt("stock"),
+        "options": [],
+        "validation": {"allow_multiline": True, "max_length": 4000, "prompt_key": "stock"},
+        "display_order": 40,
+    },
+    "PORTFOLIO_ANALYSIS_PROMPT_FUND": {
+        "title": "Fund Account Prompt",
+        "description": "Prompt override for fund account analysis. Leave empty to use the built-in default.",
+        "category": "portfolio_analysis",
+        "data_type": "string",
+        "ui_control": "textarea",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": get_portfolio_analysis_default_prompt("fund"),
+        "options": [],
+        "validation": {"allow_multiline": True, "max_length": 4000, "prompt_key": "fund"},
+        "display_order": 50,
+    },
+    "PORTFOLIO_ANALYSIS_PROMPT_ADVISORY": {
+        "title": "Advisory Account Prompt",
+        "description": "Prompt override for advisory account analysis. Leave empty to use the built-in default.",
+        "category": "portfolio_analysis",
+        "data_type": "string",
+        "ui_control": "textarea",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": get_portfolio_analysis_default_prompt("advisory"),
+        "options": [],
+        "validation": {"allow_multiline": True, "max_length": 4000, "prompt_key": "advisory"},
+        "display_order": 60,
+    },
+    "PORTFOLIO_ANALYSIS_PROMPT_BANK": {
+        "title": "Bank Account Prompt",
+        "description": "Prompt override for bank account analysis. Leave empty to use the built-in default.",
+        "category": "portfolio_analysis",
+        "data_type": "string",
+        "ui_control": "textarea",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": get_portfolio_analysis_default_prompt("bank"),
+        "options": [],
+        "validation": {"allow_multiline": True, "max_length": 4000, "prompt_key": "bank"},
+        "display_order": 70,
+    },
+    "PORTFOLIO_ANALYSIS_PROMPT_INSURANCE_BASIC": {
+        "title": "Insurance Basic Prompt",
+        "description": "Prompt override for insurance account basic asset analysis. Leave empty to use the built-in default.",
+        "category": "portfolio_analysis",
+        "data_type": "string",
+        "ui_control": "textarea",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": get_portfolio_analysis_default_prompt("insurance_basic"),
+        "options": [],
+        "validation": {"allow_multiline": True, "max_length": 4000, "prompt_key": "insurance_basic"},
+        "display_order": 80,
+    },
     "AGENT_MODE": {
         "title": "Agent Mode",
         "description": "Enable ReAct Agent for stock analysis.",
@@ -2087,6 +2206,8 @@ def _infer_category(key: str) -> str:
         return "base"
     if key.startswith("BACKTEST_"):
         return "backtest"
+    if key.startswith("PORTFOLIO_ANALYSIS_"):
+        return "portfolio_analysis"
     if key.startswith(("GEMINI_", "OPENAI_", "ANTHROPIC_", "LITELLM_", "AIHUBMIX_", "DEEPSEEK_", "LLM_")):
         return "ai_model"
     if key.endswith("_PRIORITY") or key.startswith(
