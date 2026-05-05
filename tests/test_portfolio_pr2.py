@@ -495,6 +495,35 @@ class PortfolioPr2TestCase(unittest.TestCase):
         self.assertTrue(len(sectors) >= 1)
         self.assertEqual(sectors[0]["sector"], "白酒")
 
+    @patch.object(PortfolioRiskService, "_fetch_belong_boards")
+    def test_sector_concentration_skips_cn_etf(self, mock_fetch) -> None:
+        account = self.service.create_account(name="ETF", broker="Demo", market="cn", base_currency="CNY")
+        aid = account["id"]
+        self.service.record_cash_ledger(
+            account_id=aid,
+            event_date=date(2026, 1, 1),
+            direction="in",
+            amount=10000.0,
+            currency="CNY",
+        )
+        self.service.record_trade(
+            account_id=aid,
+            symbol="510050",
+            trade_date=date(2026, 1, 1),
+            side="buy",
+            quantity=1000,
+            price=3.0,
+            market="cn",
+            currency="CNY",
+        )
+        self._save_close("510050", date(2026, 1, 1), 3.0)
+
+        report = self.risk_service.get_risk_report(account_id=aid, as_of=date(2026, 1, 1), cost_method="fifo")
+
+        self.assertEqual(report["sector_concentration"]["top_sectors"], [])
+        self.assertEqual(report["sector_concentration"]["coverage"]["classified_count"], 0)
+        mock_fetch.assert_not_called()
+
     def test_snapshot_does_not_trigger_online_fx_refresh(self) -> None:
         account = self.service.create_account(name="US", broker="Demo", market="us", base_currency="CNY")
         aid = account["id"]

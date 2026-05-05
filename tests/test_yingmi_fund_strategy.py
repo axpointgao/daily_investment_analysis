@@ -207,7 +207,9 @@ class YingmiFundStrategyTestCase(unittest.TestCase):
         positions = [{"symbol": "000001", "displayName": "测试基金", "market": "fund", "marketValueBase": 100.0}]
         client = SimpleNamespace(
             get_asset_allocation=lambda fund_list: {"asset": fund_list},
+            get_fund_diagnosis=lambda code: {"diagnosis": code},
             analyze_portfolio_risk=lambda holdings: {"risk": holdings},
+            analyze_fund_risk=lambda codes: {"fund_risk": codes},
             get_funds_backtest=lambda fund_list: {"backtest": fund_list},
             get_funds_correlation=lambda codes: {"correlation": codes},
         )
@@ -220,14 +222,18 @@ class YingmiFundStrategyTestCase(unittest.TestCase):
             )._build_professional_analysis(positions)
 
         self.assertIn("asset_allocation", result["data"])
+        self.assertIn("fund_diagnosis", result["data"])
         self.assertNotIn("portfolio_risk", result["data"])
+        self.assertNotIn("fund_risk", result["data"])
         self.assertNotIn("funds_backtest", result["data"])
 
     def test_portfolio_deep_depth_adds_risk_and_backtest(self) -> None:
         positions = [{"symbol": "000001", "displayName": "测试基金", "market": "fund", "marketValueBase": 100.0}]
         client = SimpleNamespace(
             get_asset_allocation=lambda fund_list: {"asset": fund_list},
+            get_fund_diagnosis=lambda code: {"diagnosis": code},
             analyze_portfolio_risk=lambda holdings: {"risk": holdings},
+            analyze_fund_risk=lambda codes: {"fund_risk": codes},
             get_funds_backtest=lambda fund_list: {"backtest": fund_list},
             get_funds_correlation=lambda codes: {"correlation": codes},
         )
@@ -240,7 +246,9 @@ class YingmiFundStrategyTestCase(unittest.TestCase):
             )._build_professional_analysis(positions)
 
         self.assertIn("asset_allocation", result["data"])
+        self.assertIn("fund_diagnosis", result["data"])
         self.assertIn("portfolio_risk", result["data"])
+        self.assertIn("fund_risk", result["data"])
         self.assertIn("funds_backtest", result["data"])
 
     def test_portfolio_uses_total_cost_when_fund_market_value_missing(self) -> None:
@@ -256,7 +264,9 @@ class YingmiFundStrategyTestCase(unittest.TestCase):
         captured = {}
         client = SimpleNamespace(
             get_asset_allocation=lambda fund_list: captured.setdefault("fund_list", fund_list) or {"asset": fund_list},
+            get_fund_diagnosis=lambda code: captured.setdefault("diagnosis_code", code) or {"diagnosis": code},
             analyze_portfolio_risk=lambda holdings: captured.setdefault("holdings", holdings) or {"risk": holdings},
+            analyze_fund_risk=lambda codes: captured.setdefault("risk_codes", codes) or {"fund_risk": codes},
         )
 
         self._write_env("YINGMI_API_KEY=dummy", "YINGMI_FUND_ANALYSIS_DEPTH=professional")
@@ -267,7 +277,9 @@ class YingmiFundStrategyTestCase(unittest.TestCase):
             )._build_professional_analysis(positions)
 
         self.assertIn("asset_allocation", result["data"])
+        self.assertIn("fund_diagnosis", result["data"])
         self.assertEqual(captured["fund_list"][0]["fundCode"], "000290")
+        self.assertEqual(captured["diagnosis_code"], "000290")
         self.assertAlmostEqual(captured["fund_list"][0]["amount"], 12199.6454)
         self.assertAlmostEqual(captured["holdings"][0]["weight"], 1.0)
 

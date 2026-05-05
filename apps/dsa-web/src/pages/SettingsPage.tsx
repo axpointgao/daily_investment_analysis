@@ -112,7 +112,7 @@ const AGENT_CONFIG_GROUPS: AgentConfigGroup[] = [
   {
     id: 'fund-advisory',
     title: '基金投顾能力',
-    description: '影响首页基金分析、诊基对话和持仓里的“深度诊断”。盈米负责专业判断，天天基金负责基础资料补充。',
+    description: '影响首页基金分析、诊基对话和持仓资产分析报告。盈米负责基金/投顾专业判断，天天基金负责基础资料补充。',
     impact: '建议优先配置盈米 StarGate；未配置时这些页面仍可运行，但基金投顾分析会退回本地指标和天天基金基础数据。',
     keys: ['YINGMI_ENABLED', 'YINGMI_API_KEY', 'YINGMI_FUND_ANALYSIS_DEPTH', 'YINGMI_FUND_DATA_STRATEGY', 'YINGMI_MCP_DAILY_LIMIT', 'YINGMI_SKILL_DAILY_LIMIT', 'TTFUND_APIKEY'],
     defaultOpen: true,
@@ -143,12 +143,8 @@ const PORTFOLIO_PROMPT_GROUPS: PortfolioPromptGroup[] = [
   {
     id: 'all',
     title: '全部账户',
-    description: '家庭资产视角，覆盖分析、深度诊断和财富报告。',
-    keys: [
-      'PORTFOLIO_ANALYSIS_PROMPT_ALL_QUICK',
-      'PORTFOLIO_ANALYSIS_PROMPT_ALL_DEEP',
-      'PORTFOLIO_ANALYSIS_PROMPT_ALL_WEALTH_REPORT',
-    ],
+    description: '家庭资产视角，生成统一的资产分析报告。',
+    keys: ['PORTFOLIO_ANALYSIS_PROMPT_ALL_QUICK'],
   },
   {
     id: 'stock',
@@ -354,7 +350,7 @@ function AgentSettingsSections({
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
           <div className="rounded-xl border settings-border bg-card/70 p-3">
             <p className="text-xs font-semibold text-foreground">基金分析更专业</p>
-            <p className="mt-1 text-xs leading-5 text-muted-text">配置盈米后，首页基金分析、诊基和持仓深度诊断会优先使用盈米。</p>
+            <p className="mt-1 text-xs leading-5 text-muted-text">配置盈米后，首页基金分析、诊基和持仓资产分析报告会在基金/投顾部分优先使用盈米。</p>
           </div>
           <div className="rounded-xl border settings-border bg-card/70 p-3">
             <p className="text-xs font-semibold text-foreground">天天基金做补充</p>
@@ -1236,7 +1232,7 @@ const SettingsPage: React.FC = () => {
             {activeCategory === 'portfolio_analysis' ? (
               <SettingsSectionCard
                 title="持仓分析配置"
-                description="查看和调整资产分析、深度诊断和财富报告的写作要求。账户类型和工具调用由系统自动选择。"
+                description="查看和调整资产分析报告的写作要求。账户类型和工具调用由系统自动选择。"
               >
                 <PortfolioAnalysisPromptSections
                   items={rawActiveItems}

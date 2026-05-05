@@ -52,7 +52,6 @@ const FALLBACK_BROKERS: PortfolioImportBrokerItem[] = [
 type AccountOption = 'all' | number;
 type EventType = 'trade' | 'cash' | 'corporate' | 'bank' | 'advisory' | 'insurance';
 type EntryPanelType = 'trade' | 'cash' | 'corporate' | 'manualPrice' | 'bank' | 'bankNav' | 'advisory' | 'advisoryNav' | 'insurancePolicy' | 'insuranceLedger';
-type PortfolioAnalysisMode = 'quick' | 'deep' | 'wealth_report';
 
 type FlatPosition = PortfolioPositionItem & {
   accountId: number;
@@ -98,11 +97,7 @@ type InsuranceEventOption = {
   label: string;
 };
 
-const PORTFOLIO_ANALYSIS_MODE_OPTIONS: Array<{ value: PortfolioAnalysisMode; label: string; description: string }> = [
-  { value: 'quick', label: '分析', description: '生成当前持仓的简要结构判断。' },
-  { value: 'deep', label: '深度诊断', description: '加入基金/投顾专业诊断数据。' },
-  { value: 'wealth_report', label: '财富报告', description: '生成更完整、适合留档的家庭资产报告。' },
-];
+const PORTFOLIO_ANALYSIS_DESCRIPTION = '整合本地持仓快照、风险指标和基金/投顾适用的盈米专项结果，生成一份资产分析报告。';
 
 const INSURANCE_TERMINAL_STATUS_VALUES = new Set(['surrendered', 'matured', 'expired', 'cancelled']);
 
@@ -711,7 +706,6 @@ const PortfolioPage: React.FC = () => {
   const [snapshot, setSnapshot] = useState<PortfolioSnapshotResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [portfolioAnalysis, setPortfolioAnalysis] = useState<PortfolioAnalysisResponse | null>(null);
-  const [portfolioAnalysisMode, setPortfolioAnalysisMode] = useState<PortfolioAnalysisMode>('quick');
   const [portfolioAnalysisLoading, setPortfolioAnalysisLoading] = useState(false);
   const [portfolioAnalysisError, setPortfolioAnalysisError] = useState<ParsedApiError | null>(null);
   const [portfolioAnalysisDrawerOpen, setPortfolioAnalysisDrawerOpen] = useState(false);
@@ -876,13 +870,11 @@ const PortfolioPage: React.FC = () => {
     [costMethod, selectedAccount, snapshot],
   );
   const portfolioAnalysisCacheKey = snapshotSignature
-    ? `${PORTFOLIO_ANALYSIS_CACHE_PREFIX}:${selectedAccount === 'all' ? 'all' : selectedAccount}:${costMethod}:${portfolioAnalysisMode}:${snapshotSignature}`
+    ? `${PORTFOLIO_ANALYSIS_CACHE_PREFIX}:${selectedAccount === 'all' ? 'all' : selectedAccount}:${costMethod}:standard:${snapshotSignature}`
     : '';
-  const portfolioAnalysisModeOption =
-    PORTFOLIO_ANALYSIS_MODE_OPTIONS.find((item) => item.value === portfolioAnalysisMode) || PORTFOLIO_ANALYSIS_MODE_OPTIONS[0];
   const portfolioAnalysisButtonLabel = portfolioAnalysis
-    ? `重新生成${portfolioAnalysisModeOption.label}`
-    : `生成${portfolioAnalysisModeOption.label}`;
+    ? '重新生成报告'
+    : '生成资产分析报告';
   const assetNameMaps = useMemo<AssetNameMaps>(() => {
     const stockByCode = new Map<string, string>();
     const stockAssetTypeByCode = new Map<string, string>();
@@ -1913,12 +1905,12 @@ const PortfolioPage: React.FC = () => {
     }
   };
 
-  const handleAnalyzePortfolio = async (mode: PortfolioAnalysisMode = portfolioAnalysisMode) => {
+  const handleAnalyzePortfolio = async () => {
     if (!snapshot || !snapshotSignature || portfolioAnalysisLoading) {
       return;
     }
     const cacheKey = snapshotSignature
-      ? `${PORTFOLIO_ANALYSIS_CACHE_PREFIX}:${selectedAccount === 'all' ? 'all' : selectedAccount}:${costMethod}:${mode}:${snapshotSignature}`
+      ? `${PORTFOLIO_ANALYSIS_CACHE_PREFIX}:${selectedAccount === 'all' ? 'all' : selectedAccount}:${costMethod}:standard:${snapshotSignature}`
       : '';
     try {
       setPortfolioAnalysisLoading(true);
@@ -1928,7 +1920,7 @@ const PortfolioPage: React.FC = () => {
         asOf: snapshot.asOf,
         costMethod,
         snapshotSignature,
-        mode,
+        mode: 'standard',
       });
       setPortfolioAnalysis(response);
       saveCachedPortfolioAnalysis(cacheKey, response);
@@ -2283,27 +2275,9 @@ const PortfolioPage: React.FC = () => {
             <div className="min-w-0">
               <h2 className="text-sm font-semibold text-foreground">资产分析</h2>
               <p className="mt-1 text-xs text-secondary">
-                {portfolioAnalysisModeOption.description}
+                {PORTFOLIO_ANALYSIS_DESCRIPTION}
                 {portfolioAnalysis?.generatedAt ? ` · ${portfolioAnalysis.generatedAt.replace('T', ' ')}` : ''}
               </p>
-            </div>
-            <div className="inline-flex rounded-xl border border-white/10 bg-white/[0.03] p-1">
-              {PORTFOLIO_ANALYSIS_MODE_OPTIONS.map((item) => {
-                const isActive = item.value === portfolioAnalysisMode;
-                return (
-                  <button
-                    key={item.value}
-                    type="button"
-                    disabled={portfolioAnalysisLoading}
-                    className={`min-h-8 rounded-lg px-3 text-xs font-medium transition-colors ${
-                      isActive ? 'bg-primary/20 text-foreground' : 'text-secondary hover:bg-white/[0.05] hover:text-foreground'
-                    } disabled:cursor-not-allowed disabled:opacity-60`}
-                    onClick={() => setPortfolioAnalysisMode(item.value)}
-                  >
-                    {item.label}
-                  </button>
-                );
-              })}
             </div>
           </div>
 
@@ -2315,24 +2289,22 @@ const PortfolioPage: React.FC = () => {
                 className="border-none bg-transparent px-4 py-8 shadow-none"
               />
             ) : portfolioAnalysis ? (
-              <div className="space-y-3">
+              <div className="space-y-1.5">
                 {portfolioAnalysis.summaryPoints.slice(0, 3).map((point, index) => (
-                  <div key={`${point}-${index}`} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-                    <div className="text-[11px] font-medium text-secondary">0{index + 1}</div>
-                    <p className="mt-1 text-sm leading-6 text-foreground">{point}</p>
+                  <div
+                    key={`${point}-${index}`}
+                    className="flex min-h-10 items-start gap-3 rounded-md border border-white/10 bg-white/[0.025] px-3 py-2"
+                  >
+                    <span className="mt-0.5 w-6 shrink-0 text-xs font-semibold tabular-nums text-secondary">
+                      {String(index + 1).padStart(2, '0')}
+                    </span>
+                    <p className="min-w-0 flex-1 text-sm leading-5 text-foreground">{point}</p>
                   </div>
                 ))}
-                <button
-                  type="button"
-                  className="btn-secondary w-full !py-2 text-sm"
-                  onClick={() => setPortfolioAnalysisDrawerOpen(true)}
-                >
-                  查看报告
-                </button>
               </div>
             ) : (
               <div className="rounded-lg border border-dashed border-white/12 bg-white/[0.02] px-4 py-8 text-sm leading-6 text-secondary">
-                点击“{portfolioAnalysisButtonLabel}”生成组合要点；结果会按当前持仓快照和分析模式缓存在本地。
+                点击“{portfolioAnalysisButtonLabel}”生成组合要点；结果会按当前持仓快照缓存在本地。
               </div>
             )}
           </div>
@@ -2341,10 +2313,19 @@ const PortfolioPage: React.FC = () => {
             <ApiErrorAlert error={portfolioAnalysisError} className="mt-3" />
           ) : null}
 
-          <div className="mt-4">
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            {portfolioAnalysis ? (
+              <button
+                type="button"
+                className="btn-secondary min-h-10 flex-1 !py-2 text-sm"
+                onClick={() => setPortfolioAnalysisDrawerOpen(true)}
+              >
+                查看报告
+              </button>
+            ) : null}
             <button
               type="button"
-              className="btn-secondary w-full !py-2 text-sm"
+              className="btn-secondary min-h-10 flex-1 !py-2 text-sm"
               disabled={positionRows.length === 0 || portfolioAnalysisLoading || !snapshotSignature}
               onClick={() => void handleAnalyzePortfolio()}
             >
@@ -3188,14 +3169,14 @@ const PortfolioPage: React.FC = () => {
       <Drawer
         isOpen={portfolioAnalysisDrawerOpen}
         onClose={() => setPortfolioAnalysisDrawerOpen(false)}
-        title={`${portfolioAnalysisModeOption.label}报告`}
+        title="资产分析报告"
         width="max-w-4xl"
         backdropClassName="bg-background/56 backdrop-blur-[2px]"
       >
         <div className="space-y-4">
           <div className="border-b border-white/10 pb-4">
             <div>
-              <h2 className="text-base font-semibold text-foreground">{portfolioAnalysisModeOption.label}报告</h2>
+              <h2 className="text-base font-semibold text-foreground">资产分析报告</h2>
               <p className="mt-1 text-xs text-secondary">
                 {portfolioAnalysis
                   ? `${portfolioAnalysis.asOf} · ${portfolioAnalysis.modelUsed || 'LLM'}`

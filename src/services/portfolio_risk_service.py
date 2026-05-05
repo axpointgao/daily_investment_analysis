@@ -227,6 +227,8 @@ class PortfolioRiskService:
                 market = str(pos.get("market") or account.get("market") or "").strip().lower()
                 if not symbol:
                     continue
+                if not self._is_stock_sector_eligible(symbol=symbol, market=market, display_name=pos.get("display_name")):
+                    continue
 
                 market_value = float(pos.get("market_value_base") or 0.0)
                 valuation_currency = str(pos.get("valuation_currency") or account.get("base_currency") or "CNY")
@@ -274,6 +276,19 @@ class PortfolioRiskService:
             "coverage": coverage,
             "errors": errors[:20],
         }
+
+    @staticmethod
+    def _is_stock_sector_eligible(*, symbol: str, market: str, display_name: Any = None) -> bool:
+        if market not in {"cn", "hk", "us"}:
+            return False
+        name = str(display_name or "").strip().lower()
+        if "etf" in name or "lof" in name:
+            return False
+        if market == "cn":
+            code = symbol[-6:] if "." in symbol else symbol
+            if code.startswith(("15", "16", "50", "51", "52", "56", "58")):
+                return False
+        return True
 
     def _resolve_primary_sector(
         self,

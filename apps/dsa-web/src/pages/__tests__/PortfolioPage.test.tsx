@@ -422,31 +422,14 @@ describe('PortfolioPage FX refresh', () => {
     expect(screen.getByText('场外基金')).toBeInTheDocument();
     expect(analyzePortfolio).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: '生成分析' }));
+    fireEvent.click(screen.getByRole('button', { name: '生成资产分析报告' }));
 
     expect(await screen.findByText('权益资产占比较高')).toBeInTheDocument();
     expect(analyzePortfolio).toHaveBeenCalledTimes(1);
-    expect(analyzePortfolio).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'quick' }));
+    expect(analyzePortfolio).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'standard' }));
 
     fireEvent.click(screen.getByRole('button', { name: '查看报告' }));
     expect(await screen.findByText('资产配置结构')).toBeInTheDocument();
-  });
-
-  it('uses selected wealth report mode when generating portfolio analysis', async () => {
-    getSnapshot.mockResolvedValueOnce(makeSnapshot({ fxStale: false, positions: [
-      { symbol: '510050', market: 'cn', currency: 'CNY', quantity: 100, avgCost: 2.5, totalCost: 250, lastPrice: 2.8, marketValueBase: 280, unrealizedPnlBase: 30, unrealizedPnlPct: 12, valuationCurrency: 'CNY', priceSource: 'history_close', priceDate: '2026-03-18', priceStale: false, priceAvailable: true },
-    ] }));
-
-    render(<PortfolioPage />);
-
-    await waitForInitialLoad();
-
-    fireEvent.click(screen.getByRole('button', { name: '财富报告' }));
-    fireEvent.click(screen.getByRole('button', { name: '生成财富报告' }));
-
-    await waitFor(() => {
-      expect(analyzePortfolio).toHaveBeenCalledWith(expect.objectContaining({ mode: 'wealth_report' }));
-    });
   });
 
   it('prefers disabled feedback over empty-pair feedback when refresh is disabled', async () => {
