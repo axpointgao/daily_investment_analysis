@@ -112,6 +112,7 @@ const PORTFOLIO_INPUT_CLASS =
 const PORTFOLIO_SELECT_CLASS = `${PORTFOLIO_INPUT_CLASS} appearance-none pr-10`;
 const PORTFOLIO_FILE_PICKER_CLASS =
   'input-surface input-focus-glow flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+const PORTFOLIO_FIELD_LABEL_CLASS = 'mb-1 block text-[11px] font-medium text-secondary';
 const PORTFOLIO_FORM_EPS = 1e-8;
 const PORTFOLIO_ASSET_COLORS = [
   'hsl(var(--primary))',
@@ -792,6 +793,7 @@ const PortfolioPage: React.FC = () => {
     registrationCode: '',
     linkedEntryId: '',
     quantity: '',
+    nav: '',
     startDate: '',
     maturityDate: '',
     annualRate: '',
@@ -1510,6 +1512,17 @@ const PortfolioPage: React.FC = () => {
           : undefined,
         incomeMode: bankForm.assetKind === 'wealth' ? (selectedBankProduct?.incomeMode as PortfolioBankIncomeMode | undefined) || bankForm.incomeMode : undefined,
       });
+      if (bankForm.assetKind === 'wealth' && bankForm.direction === 'in' && bankForm.nav) {
+        await portfolioApi.upsertManualPrice({
+          accountId: writableAccountId,
+          symbol: bankForm.registrationCode,
+          market: 'bank',
+          priceDate: bankForm.eventDate,
+          price: Number(bankForm.nav),
+          currency: writableAccount?.baseCurrency || 'CNY',
+          note: '买入确认净值',
+        });
+      }
       await refreshPortfolioData(eventPage, { refreshPrices: true });
       setBankForm((prev) => ({
         ...prev,
@@ -1518,6 +1531,7 @@ const PortfolioPage: React.FC = () => {
         registrationCode: '',
         linkedEntryId: '',
         quantity: '',
+        nav: '',
         startDate: '',
         maturityDate: '',
         annualRate: '',
@@ -2467,20 +2481,27 @@ const PortfolioPage: React.FC = () => {
               {selectedEntryPanel === 'bank' && isBankAccount ? (
               <form className="space-y-2" onSubmit={handleBankLedgerSubmit}>
                 <div className="grid grid-cols-2 gap-2">
-                  <input className={PORTFOLIO_INPUT_CLASS} type="date" value={bankForm.eventDate}
-                    onChange={(e) => setBankForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
-                  <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.assetKind}
-                    onChange={(e) => setBankForm((prev) => ({
-                      ...prev,
-                      assetKind: e.target.value as PortfolioBankAssetKind,
-                      linkedEntryId: '',
-                      registrationCode: '',
-                      quantity: '',
-                    }))}>
-                    <option value="demand">活期/现金</option>
-                    <option value="deposit">定期存款</option>
-                    <option value="wealth">银行理财</option>
-                  </select>
+                  <label>
+                    <span className={PORTFOLIO_FIELD_LABEL_CLASS}>流水日期</span>
+                    <input className={PORTFOLIO_INPUT_CLASS} type="date" value={bankForm.eventDate}
+                      onChange={(e) => setBankForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
+                  </label>
+                  <label>
+                    <span className={PORTFOLIO_FIELD_LABEL_CLASS}>资产类型</span>
+                    <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.assetKind}
+                      onChange={(e) => setBankForm((prev) => ({
+                        ...prev,
+                        assetKind: e.target.value as PortfolioBankAssetKind,
+                        linkedEntryId: '',
+                        registrationCode: '',
+                        quantity: '',
+                        nav: '',
+                      }))}>
+                      <option value="demand">活期/现金</option>
+                      <option value="deposit">定期存款</option>
+                      <option value="wealth">银行理财</option>
+                    </select>
+                  </label>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.direction}
@@ -2531,10 +2552,16 @@ const PortfolioPage: React.FC = () => {
                     ) : null}
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                    <input className={PORTFOLIO_INPUT_CLASS} type="date" value={bankForm.startDate}
-                      onChange={(e) => setBankForm((prev) => ({ ...prev, startDate: e.target.value }))} required={bankForm.assetKind === 'deposit'} />
-                    <input className={PORTFOLIO_INPUT_CLASS} type="date" value={bankForm.maturityDate}
-                      onChange={(e) => setBankForm((prev) => ({ ...prev, maturityDate: e.target.value }))} required={bankForm.assetKind === 'deposit'} />
+                    <label>
+                      <span className={PORTFOLIO_FIELD_LABEL_CLASS}>起息日</span>
+                      <input className={PORTFOLIO_INPUT_CLASS} type="date" value={bankForm.startDate}
+                        onChange={(e) => setBankForm((prev) => ({ ...prev, startDate: e.target.value }))} required={bankForm.assetKind === 'deposit'} />
+                    </label>
+                    <label>
+                      <span className={PORTFOLIO_FIELD_LABEL_CLASS}>到期日</span>
+                      <input className={PORTFOLIO_INPUT_CLASS} type="date" value={bankForm.maturityDate}
+                        onChange={(e) => setBankForm((prev) => ({ ...prev, maturityDate: e.target.value }))} required={bankForm.assetKind === 'deposit'} />
+                    </label>
                     </div>
                     {bankForm.assetKind === 'deposit' ? (
                       <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="存款年化利率（%）" value={bankForm.annualRate}
@@ -2557,13 +2584,15 @@ const PortfolioPage: React.FC = () => {
                     <div className="grid grid-cols-2 gap-2">
                       <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="买入确认份额" value={bankForm.quantity}
                         onChange={(e) => setBankForm((prev) => ({ ...prev, quantity: e.target.value }))} required />
+                      <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.000001" placeholder="买入确认净值" value={bankForm.nav}
+                        onChange={(e) => setBankForm((prev) => ({ ...prev, nav: e.target.value }))} required />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
                       <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.incomeMode}
                         onChange={(e) => setBankForm((prev) => ({ ...prev, incomeMode: e.target.value as PortfolioBankIncomeMode }))}>
                         <option value="reinvest">滚存</option>
                         <option value="dividend">派息</option>
                       </select>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
                       <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.investmentNature}
                         onChange={(e) => setBankForm((prev) => ({ ...prev, investmentNature: e.target.value as '' | PortfolioBankInvestmentNature }))}>
                         <option value="">投资性质（选填）</option>
