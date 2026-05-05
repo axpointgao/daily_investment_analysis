@@ -376,6 +376,108 @@ class TestAgentExecutor(unittest.TestCase):
         self.assertFalse(result.tool_calls_log[0]["cached"])
         self.assertTrue(result.tool_calls_log[1]["cached"])
 
+    def test_successful_tool_result_is_cached_within_run(self):
+        """Repeated identical successful calls should reuse the first result in one run."""
+        calls = []
+
+        def _echo(message):
+            calls.append(message)
+            return {"echo": message, "sequence": len(calls)}
+
+        registry = ToolRegistry()
+        registry.register(
+            ToolDefinition(
+                name="echo",
+                description="Echo",
+                parameters=[ToolParameter(name="message", type="string", description="Message")],
+                handler=_echo,
+            )
+        )
+        adapter = _make_mock_adapter()
+        adapter.call_with_tools.side_effect = [
+            LLMResponse(
+                content="",
+                tool_calls=[ToolCall(id="e1", name="echo", arguments={"message": "same"})],
+                usage={"total_tokens": 10},
+                provider="openai",
+            ),
+            LLMResponse(
+                content="",
+                tool_calls=[ToolCall(id="e2", name="echo", arguments={"message": "same"})],
+                usage={"total_tokens": 10},
+                provider="openai",
+            ),
+            LLMResponse(
+                content=json.dumps(SAMPLE_DASHBOARD, ensure_ascii=False),
+                tool_calls=[],
+                usage={"total_tokens": 10},
+                provider="openai",
+            ),
+        ]
+
+        result = run_agent_loop(
+            messages=[{"role": "user", "content": "test"}],
+            tool_registry=registry,
+            llm_adapter=adapter,
+            max_steps=5,
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(calls, ["same"])
+        self.assertEqual(len(result.tool_calls_log), 2)
+        self.assertFalse(result.tool_calls_log[0]["cached"])
+        self.assertTrue(result.tool_calls_log[1]["cached"])
+        self.assertTrue(result.tool_calls_log[1]["success"])
+
+    def test_duplicate_tool_calls_in_same_batch_reuse_cache(self):
+        """Duplicate calls in one assistant response should not run in parallel twice."""
+        calls = []
+
+        def _echo(message):
+            calls.append(message)
+            return {"echo": message}
+
+        registry = ToolRegistry()
+        registry.register(
+            ToolDefinition(
+                name="echo",
+                description="Echo",
+                parameters=[ToolParameter(name="message", type="string", description="Message")],
+                handler=_echo,
+            )
+        )
+        adapter = _make_mock_adapter()
+        adapter.call_with_tools.side_effect = [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCall(id="e1", name="echo", arguments={"message": "same"}),
+                    ToolCall(id="e2", name="echo", arguments={"message": "same"}),
+                ],
+                usage={"total_tokens": 10},
+                provider="openai",
+            ),
+            LLMResponse(
+                content=json.dumps(SAMPLE_DASHBOARD, ensure_ascii=False),
+                tool_calls=[],
+                usage={"total_tokens": 10},
+                provider="openai",
+            ),
+        ]
+
+        result = run_agent_loop(
+            messages=[{"role": "user", "content": "test"}],
+            tool_registry=registry,
+            llm_adapter=adapter,
+            max_steps=3,
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(calls, ["same"])
+        self.assertEqual(len(result.tool_calls_log), 2)
+        self.assertFalse(result.tool_calls_log[0]["cached"])
+        self.assertTrue(result.tool_calls_log[1]["cached"])
+
     def test_model_trace_deduplicates_and_keeps_order(self):
         """Model trace should keep call order and de-duplicate repeated models."""
         registry = _make_registry_with_echo()

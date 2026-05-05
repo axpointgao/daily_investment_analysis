@@ -15,7 +15,11 @@ from tests.litellm_stub import ensure_litellm_stub
 ensure_litellm_stub()
 
 from src.config import Config, get_config, setup_env
-from src.agent.tools.fund_tools import _handle_yingmi_get_fund_diagnosis
+from src.agent.tools.fund_tools import (
+    _compact_fund_tool_result,
+    _handle_get_fund_manager_info,
+    _handle_yingmi_get_fund_diagnosis,
+)
 from src.services.fund_analysis_service import FundAnalysisService
 from src.services.portfolio_analysis_service import PortfolioAnalysisService
 
@@ -160,6 +164,44 @@ class YingmiFundStrategyTestCase(unittest.TestCase):
         self.assertEqual(result["provider"], "yingmi_stargate")
         self.assertEqual(result["method"], "get_fund_diagnosis")
         self.assertIn("仅基础数据", result["error"])
+
+    def test_fund_agent_tool_result_compaction_keeps_key_fields(self) -> None:
+        rows = [
+            {
+                "fundCode": f"{idx:06d}",
+                "fundName": f"测试基金{idx}",
+                "returnPct": idx,
+                "managerNames": "张三",
+                "rawPayload": "x" * 900,
+            }
+            for idx in range(30)
+        ]
+
+        result = _compact_fund_tool_result(
+            "search_funds",
+            {
+                "data": {"items": rows},
+                "debug": {"headers": {"trace": "ignored"}, "huge": list(range(50))},
+            },
+            max_list_items=6,
+            max_text_length=120,
+        )
+
+        compact_rows = result["data"]["items"]["items"]
+        self.assertTrue(result["agent_compacted"])
+        self.assertTrue(result["data"]["items"]["truncated"])
+        self.assertEqual(result["data"]["items"]["total_count"], 30)
+        self.assertEqual(len(compact_rows), 6)
+        self.assertEqual(compact_rows[0]["fundCode"], "000000")
+        self.assertEqual(compact_rows[0]["managerNames"], "张三")
+        self.assertTrue(compact_rows[0]["rawPayload"]["truncated"])
+        self.assertNotIn("x" * 900, str(result))
+
+    def test_fund_manager_missing_identifier_is_non_retriable(self) -> None:
+        result = _handle_get_fund_manager_info()
+
+        self.assertIn("manager_name or manager_id is required", result["error"])
+        self.assertFalse(result["retriable"])
 
     def test_portfolio_fast_depth_only_calls_asset_allocation(self) -> None:
         positions = [{"symbol": "000001", "displayName": "测试基金", "market": "fund", "marketValueBase": 100.0}]

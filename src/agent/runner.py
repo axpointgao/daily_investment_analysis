@@ -404,7 +404,7 @@ def run_agent_loop(
 
     start_time = time.time()
     tool_calls_log: List[Dict[str, Any]] = []
-    non_retriable_tool_results: Dict[str, str] = {}
+    tool_result_cache: Dict[str, Dict[str, Any]] = {}
     total_tokens = 0
     provider_used = ""
     models_used: List[str] = []
@@ -538,7 +538,7 @@ def run_agent_loop(
                 step + 1,
                 progress_callback,
                 tool_calls_log,
-                non_retriable_tool_results,
+                tool_result_cache,
                 tool_wait_timeout_seconds=effective_tool_timeout,
             )
 
@@ -620,7 +620,7 @@ def _execute_tools(
     step: int,
     progress_callback: Optional[Callable],
     tool_calls_log: List[Dict[str, Any]],
-    non_retriable_tool_results: Optional[Dict[str, str]] = None,
+    tool_result_cache: Optional[Dict[str, Dict[str, Any]]] = None,
     tool_wait_timeout_seconds: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """Execute one or more tool calls, returning ordered result dicts.
@@ -632,32 +632,53 @@ def _execute_tools(
         t0 = time.time()
         cache_key = _build_tool_cache_key(tc_item.name, tc_item.arguments)
 
-        if cache_key and non_retriable_tool_results is not None and cache_key in non_retriable_tool_results:
+        if cache_key and tool_result_cache is not None and cache_key in tool_result_cache:
             dur = round(time.time() - t0, 2)
+            cached_entry = tool_result_cache[cache_key]
             logger.info(
-                "Tool '%s' skipped via non-retriable cache for arguments=%s",
+                "Tool '%s' skipped via run cache for arguments=%s",
                 tc_item.name,
                 tc_item.arguments,
             )
-            return tc_item, non_retriable_tool_results[cache_key], False, dur, True
+            return tc_item, cached_entry["result_str"], bool(cached_entry["success"]), dur, True
 
         try:
             res = tool_registry.execute(tc_item.name, **tc_item.arguments)
             res_str = serialize_tool_result(res)
             ok = True
-            if cache_key and non_retriable_tool_results is not None and _is_non_retriable_tool_result(res):
-                non_retriable_tool_results[cache_key] = res_str
+            if cache_key and tool_result_cache is not None:
+                tool_result_cache[cache_key] = {"result_str": res_str, "success": ok}
         except Exception as e:
             res_str = json.dumps({"error": str(e)})
             ok = False
             logger.warning("Tool '%s' failed: %s", tc_item.name, e)
+            try:
+                error_payload = json.loads(res_str)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                error_payload = {}
+            if cache_key and tool_result_cache is not None and _is_non_retriable_tool_result(error_payload):
+                tool_result_cache[cache_key] = {"result_str": res_str, "success": ok}
         dur = round(time.time() - t0, 2)
         return tc_item, res_str, ok, dur, False
 
-    results: List[Dict[str, Any]] = []
+    def _has_duplicate_cache_keys() -> bool:
+        seen: set[str] = set()
+        for tc_item in tool_calls:
+            cache_key = _build_tool_cache_key(tc_item.name, tc_item.arguments)
+            if not cache_key:
+                continue
+            if cache_key in seen:
+                return True
+            seen.add(cache_key)
+        return False
 
-    if len(tool_calls) == 1:
-        tc = tool_calls[0]
+    def _execute_sequential(tc_items) -> List[Dict[str, Any]]:
+        sequential_results: List[Dict[str, Any]] = []
+        for tc in tc_items:
+            sequential_results.append(_execute_inline(tc))
+        return sequential_results
+
+    def _execute_inline(tc) -> Dict[str, Any]:
         if progress_callback:
             progress_callback({"type": "tool_start", "step": step, "tool": tc.name})
         timeout_triggered = False
@@ -698,7 +719,14 @@ def _execute_tools(
             except (TypeError, ValueError, json.JSONDecodeError):
                 pass
         tool_calls_log.append(log_entry)
-        results.append({"tc": tc, "result_str": result_str})
+        return {"tc": tc, "result_str": result_str}
+
+    results: List[Dict[str, Any]] = []
+
+    if len(tool_calls) == 1 or _has_duplicate_cache_keys():
+        if len(tool_calls) > 1:
+            logger.info("Tool batch contains duplicate calls; executing sequentially to reuse run cache")
+        results.extend(_execute_sequential(tool_calls))
     else:
         for tc in tool_calls:
             if progress_callback:

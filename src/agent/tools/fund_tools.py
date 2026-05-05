@@ -22,24 +22,164 @@ def _invoke(skill_id: str, params: Optional[Dict[str, Any]] = None) -> Dict[str,
         }
 
 
-def _handle_search_funds(query: str, search_type: str = "fund", page_index: int = 1, page_size: int = 10) -> Dict[str, Any]:
-    return _invoke(
-        "FUND_SEARCH",
-        {
-            "query": query,
-            "search_type": search_type,
-            "page_index": page_index,
-            "page_size": page_size,
-        },
+_PRIORITY_KEYS = {
+    "code", "fcode", "fundCode", "fund_code", "fundId", "fund_id",
+    "name", "fundName", "fund_name", "shortName", "fullName",
+    "type", "fundType", "riskLevel", "risk", "rating", "level",
+    "scale", "fundSize", "latestScale", "nav", "unitNav", "accumulatedNav",
+    "date", "endDate", "startDate", "reportDate", "report_period",
+    "return", "returnPct", "yield", "maxDrawdown", "maxDrawdownPct",
+    "volatility", "sharpe", "rank", "peerCount", "percentile",
+    "manager", "managerName", "managerNames", "manager_id", "managerId",
+    "asset", "assetAllocation", "industry", "industryAllocation",
+    "holding", "holdings", "stock", "bond", "cash", "weight", "ratio",
+    "advantage", "advantages", "riskSummary", "diagnosis", "conclusion",
+    "advice", "suggestion", "suitable", "score", "provider", "method",
+    "success", "message", "data", "result", "items", "list",
+}
+
+
+def _compact_fund_tool_result(
+    tool_name: str,
+    result: Dict[str, Any],
+    *,
+    max_list_items: int = 10,
+    max_dict_keys: int = 36,
+    max_text_length: int = 700,
+) -> Dict[str, Any]:
+    """Return an Agent-facing compact copy of a fund tool result.
+
+    The upstream fund gateways often return large raw arrays and wrapper
+    metadata.  The Agent needs stable decision facts, not full raw payloads,
+    so this keeps representative fields and marks truncated collections.
+    """
+    if not isinstance(result, dict):
+        return {"agent_compacted": True, "tool": tool_name, "data": result}
+    if result.get("error"):
+        return result
+
+    compacted = _compact_value(
+        result,
+        max_list_items=max_list_items,
+        max_dict_keys=max_dict_keys,
+        max_text_length=max_text_length,
+    )
+    if not isinstance(compacted, dict):
+        compacted = {"data": compacted}
+    compacted.setdefault("agent_compacted", True)
+    compacted.setdefault("tool", tool_name)
+    return compacted
+
+
+def _compact_value(
+    value: Any,
+    *,
+    max_list_items: int,
+    max_dict_keys: int,
+    max_text_length: int,
+    depth: int = 0,
+) -> Any:
+    if isinstance(value, dict):
+        items = list(value.items())
+        omitted_count = 0
+        if len(items) > max_dict_keys:
+            priority_items = [(k, v) for k, v in items if str(k) in _PRIORITY_KEYS]
+            other_items = [(k, v) for k, v in items if str(k) not in _PRIORITY_KEYS]
+            selected = priority_items[:max_dict_keys]
+            selected.extend(other_items[: max(0, max_dict_keys - len(selected))])
+            omitted_count = len(items) - len(selected)
+            items = selected
+
+        compacted: Dict[str, Any] = {}
+        for key, item in items:
+            compacted[str(key)] = _compact_value(
+                item,
+                max_list_items=max_list_items,
+                max_dict_keys=max(16, max_dict_keys - 8),
+                max_text_length=max_text_length,
+                depth=depth + 1,
+            )
+        if omitted_count > 0:
+            compacted["truncated"] = True
+            compacted["omitted_key_count"] = omitted_count
+        return compacted
+
+    if isinstance(value, list):
+        total_count = len(value)
+        if total_count <= max_list_items:
+            return [
+                _compact_value(
+                    item,
+                    max_list_items=max(4, max_list_items // 2),
+                    max_dict_keys=max_dict_keys,
+                    max_text_length=max_text_length,
+                    depth=depth + 1,
+                )
+                for item in value
+            ]
+
+        head_count = max(1, max_list_items // 2)
+        tail_count = max(1, max_list_items - head_count)
+        selected = value[:head_count] + value[-tail_count:]
+        return {
+            "items": [
+                _compact_value(
+                    item,
+                    max_list_items=max(4, max_list_items // 2),
+                    max_dict_keys=max_dict_keys,
+                    max_text_length=max_text_length,
+                    depth=depth + 1,
+                )
+                for item in selected
+            ],
+            "total_count": total_count,
+            "truncated": True,
+        }
+
+    if isinstance(value, str) and len(value) > max_text_length:
+        return {
+            "text": f"{value[:max_text_length]}...",
+            "truncated": True,
+            "original_length": len(value),
+        }
+
+    return value
+
+
+def _handle_search_funds(
+    query: str,
+    search_type: str = "fund",
+    page_index: int = 1,
+    page_size: int = 10,
+) -> Dict[str, Any]:
+    return _compact_fund_tool_result(
+        "search_funds",
+        _invoke(
+            "FUND_SEARCH",
+            {
+                "query": query,
+                "search_type": search_type,
+                "page_index": page_index,
+                "page_size": page_size,
+            },
+        ),
+        max_list_items=5,
     )
 
 
 def _handle_get_fund_base_info(fcode: str) -> Dict[str, Any]:
-    return _invoke("FUND_BASE_INFOS", {"fcode": fcode})
+    return _compact_fund_tool_result(
+        "get_fund_base_info",
+        _invoke("FUND_BASE_INFOS", {"fcode": fcode}),
+    )
 
 
 def _handle_get_fund_nav_info(fund_id: str, range: str = "n") -> Dict[str, Any]:
-    return _invoke("FUND_NAV_INFO", {"fund_id": fund_id, "range": range})
+    return _compact_fund_tool_result(
+        "get_fund_nav_info",
+        _invoke("FUND_NAV_INFO", {"fund_id": fund_id, "range": range}),
+        max_list_items=8,
+    )
 
 
 def _handle_get_fund_holding_info(
@@ -50,7 +190,11 @@ def _handle_get_fund_holding_info(
     params: Dict[str, Any] = {"fund_id": fund_id, "holding_type": holding_type}
     if report_period:
         params["report_period"] = report_period
-    return _invoke("FUND_HOLDING_INFO", params)
+    return _compact_fund_tool_result(
+        "get_fund_holding_info",
+        _invoke("FUND_HOLDING_INFO", params),
+        max_list_items=10,
+    )
 
 
 def _handle_get_fund_manager_info(
@@ -64,7 +208,11 @@ def _handle_get_fund_manager_info(
         params["manager_name"] = manager_name
     if not params:
         return {"error": "manager_name or manager_id is required", "retriable": False}
-    return _invoke("FUND_MANAGER_INFO", params)
+    return _compact_fund_tool_result(
+        "get_fund_manager_info",
+        _invoke("FUND_MANAGER_INFO", params),
+        max_list_items=8,
+    )
 
 
 def _handle_select_funds(
@@ -92,15 +240,27 @@ def _handle_select_funds(
     }.items():
         if value:
             params[key] = value
-    return _invoke("FUND_CONDITION_SELECT", params)
+    return _compact_fund_tool_result(
+        "select_funds",
+        _invoke("FUND_CONDITION_SELECT", params),
+        max_list_items=8,
+    )
 
 
 def _handle_get_fund_index_info(index_id: str) -> Dict[str, Any]:
-    return _invoke("FUND_INDEX_INFO", {"index_id": index_id})
+    return _compact_fund_tool_result(
+        "get_fund_index_info",
+        _invoke("FUND_INDEX_INFO", {"index_id": index_id}),
+        max_list_items=8,
+    )
 
 
 def _handle_get_bond_market() -> Dict[str, Any]:
-    return _invoke("BOND_MARKET", {})
+    return _compact_fund_tool_result(
+        "get_bond_market",
+        _invoke("BOND_MARKET", {}),
+        max_list_items=8,
+    )
 
 
 def _invoke_yingmi(method: str, *args: Any, **kwargs: Any) -> Dict[str, Any]:
@@ -126,40 +286,76 @@ def _invoke_yingmi(method: str, *args: Any, **kwargs: Any) -> Dict[str, Any]:
 
 
 def _handle_yingmi_get_fund_diagnosis(fund_name_or_code: str) -> Dict[str, Any]:
-    return _invoke_yingmi("get_fund_diagnosis", fund_name_or_code)
+    return _compact_fund_tool_result(
+        "yingmi_get_fund_diagnosis",
+        _invoke_yingmi("get_fund_diagnosis", fund_name_or_code),
+        max_list_items=8,
+    )
 
 
 def _handle_yingmi_analyze_fund_risk(fund_codes: Any) -> Dict[str, Any]:
-    return _invoke_yingmi("analyze_fund_risk", _normalize_code_list(fund_codes))
+    return _compact_fund_tool_result(
+        "yingmi_analyze_fund_risk",
+        _invoke_yingmi("analyze_fund_risk", _normalize_code_list(fund_codes)),
+        max_list_items=8,
+    )
 
 
 def _handle_yingmi_get_asset_allocation(fund_list: Any) -> Dict[str, Any]:
-    return _invoke_yingmi("get_asset_allocation", _normalize_fund_list(fund_list))
+    return _compact_fund_tool_result(
+        "yingmi_get_asset_allocation",
+        _invoke_yingmi("get_asset_allocation", _normalize_fund_list(fund_list)),
+        max_list_items=10,
+    )
 
 
 def _handle_yingmi_get_funds_backtest(fund_list: Any) -> Dict[str, Any]:
-    return _invoke_yingmi("get_funds_backtest", _normalize_fund_list(fund_list))
+    return _compact_fund_tool_result(
+        "yingmi_get_funds_backtest",
+        _invoke_yingmi("get_funds_backtest", _normalize_fund_list(fund_list)),
+        max_list_items=8,
+    )
 
 
 def _handle_yingmi_get_funds_correlation(fund_codes: Any) -> Dict[str, Any]:
-    return _invoke_yingmi("get_funds_correlation", _normalize_code_list(fund_codes))
+    return _compact_fund_tool_result(
+        "yingmi_get_funds_correlation",
+        _invoke_yingmi("get_funds_correlation", _normalize_code_list(fund_codes)),
+        max_list_items=8,
+    )
 
 
 def _handle_yingmi_analyze_portfolio_risk(holdings: Any) -> Dict[str, Any]:
     normalized = holdings if isinstance(holdings, list) else []
-    return _invoke_yingmi("analyze_portfolio_risk", normalized)
+    return _compact_fund_tool_result(
+        "yingmi_analyze_portfolio_risk",
+        _invoke_yingmi("analyze_portfolio_risk", normalized),
+        max_list_items=8,
+    )
 
 
 def _handle_yingmi_search_strategies(keyword: str, page_num: int = 1, page_size: int = 10) -> Dict[str, Any]:
-    return _invoke_yingmi("search_strategies", keyword, page_num, page_size)
+    return _compact_fund_tool_result(
+        "yingmi_search_strategies",
+        _invoke_yingmi("search_strategies", keyword, page_num, page_size),
+        max_list_items=5,
+    )
 
 
 def _handle_yingmi_get_strategy_details(strategy_codes: Any) -> Dict[str, Any]:
-    return _invoke_yingmi("get_strategy_details", _normalize_code_list(strategy_codes))
+    return _compact_fund_tool_result(
+        "yingmi_get_strategy_details",
+        _invoke_yingmi("get_strategy_details", _normalize_code_list(strategy_codes)),
+        max_list_items=8,
+    )
 
 
 def _handle_yingmi_get_strategy_composition(strategy_codes: Any) -> Dict[str, Any]:
-    return _invoke_yingmi("get_strategy_composition", _normalize_code_list(strategy_codes))
+    return _compact_fund_tool_result(
+        "yingmi_get_strategy_composition",
+        _invoke_yingmi("get_strategy_composition", _normalize_code_list(strategy_codes)),
+        max_list_items=8,
+    )
 
 
 def _normalize_code_list(value: Any) -> list[str]:
