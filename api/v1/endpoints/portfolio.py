@@ -876,6 +876,7 @@ def analyze_portfolio(request: PortfolioAnalysisRequest) -> PortfolioAnalysisRes
             as_of=request.as_of,
             cost_method=request.cost_method,
             snapshot_signature=request.snapshot_signature,
+            mode=request.mode,
         )
         return PortfolioAnalysisResponse(**data)
     except PortfolioAnalysisError as exc:

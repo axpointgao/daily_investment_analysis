@@ -30,6 +30,8 @@ import type {
   PortfolioImportParseResponse,
   PortfolioInsuranceEventType,
   PortfolioInsuranceLedgerListItem,
+  PortfolioInsuranceDesignType,
+  PortfolioInsuranceKind,
   PortfolioInsurancePaymentMode,
   PortfolioInsurancePolicyItem,
   PortfolioMarket,
@@ -799,8 +801,8 @@ const PortfolioPage: React.FC = () => {
     policyName: '',
     insurer: '',
     policyNo: '',
-    insuranceKind: 'annuity',
-    designType: 'ordinary',
+    insuranceKind: 'annuity' as PortfolioInsuranceKind,
+    designType: 'ordinary' as PortfolioInsuranceDesignType,
     paymentMode: 'annual' as PortfolioInsurancePaymentMode,
     premiumPerPeriod: '',
     firstPaymentDate: getTodayIso(),
@@ -843,8 +845,9 @@ const PortfolioPage: React.FC = () => {
     () => buildSnapshotSignature(snapshot, selectedAccount, costMethod),
     [costMethod, selectedAccount, snapshot],
   );
+  const portfolioAnalysisMode = portfolioAnalysis?.analysisMode || 'quick';
   const portfolioAnalysisCacheKey = snapshotSignature
-    ? `${PORTFOLIO_ANALYSIS_CACHE_PREFIX}:${selectedAccount === 'all' ? 'all' : selectedAccount}:${costMethod}:${snapshotSignature}`
+    ? `${PORTFOLIO_ANALYSIS_CACHE_PREFIX}:${selectedAccount === 'all' ? 'all' : selectedAccount}:${costMethod}:${portfolioAnalysisMode}:${snapshotSignature}`
     : '';
   const assetNameMaps = useMemo<AssetNameMaps>(() => {
     const stockByCode = new Map<string, string>();
@@ -1592,8 +1595,8 @@ const PortfolioPage: React.FC = () => {
         policyName: insurancePolicyForm.policyName,
         insurer: insurancePolicyForm.insurer || undefined,
         policyNo: insurancePolicyForm.policyNo || undefined,
-        insuranceKind: insurancePolicyForm.insuranceKind as any,
-        designType: insurancePolicyForm.designType as any,
+        insuranceKind: insurancePolicyForm.insuranceKind,
+        designType: insurancePolicyForm.designType,
         currency: writableAccount.baseCurrency || 'CNY',
         paymentMode: insurancePolicyForm.paymentMode,
         premiumPerPeriod: insurancePolicyForm.premiumPerPeriod ? Number(insurancePolicyForm.premiumPerPeriod) : undefined,
@@ -1875,10 +1878,13 @@ const PortfolioPage: React.FC = () => {
     }
   };
 
-  const handleAnalyzePortfolio = async () => {
+  const handleAnalyzePortfolio = async (mode: 'quick' | 'deep' = 'quick') => {
     if (!snapshot || !snapshotSignature || portfolioAnalysisLoading) {
       return;
     }
+    const cacheKey = snapshotSignature
+      ? `${PORTFOLIO_ANALYSIS_CACHE_PREFIX}:${selectedAccount === 'all' ? 'all' : selectedAccount}:${costMethod}:${mode}:${snapshotSignature}`
+      : '';
     try {
       setPortfolioAnalysisLoading(true);
       setPortfolioAnalysisError(null);
@@ -1887,9 +1893,10 @@ const PortfolioPage: React.FC = () => {
         asOf: snapshot.asOf,
         costMethod,
         snapshotSignature,
+        mode,
       });
       setPortfolioAnalysis(response);
-      saveCachedPortfolioAnalysis(portfolioAnalysisCacheKey, response);
+      saveCachedPortfolioAnalysis(cacheKey, response);
     } catch (err) {
       setPortfolioAnalysisError(getParsedApiError(err));
     } finally {
@@ -2239,7 +2246,7 @@ const PortfolioPage: React.FC = () => {
             <ApiErrorAlert error={portfolioAnalysisError} className="mt-3" />
           ) : null}
 
-          <div className="mt-4 grid grid-cols-2 gap-2">
+          <div className="mt-4 grid grid-cols-3 gap-2">
             <button
               type="button"
               className="btn-secondary !py-2 text-sm"
@@ -2247,6 +2254,14 @@ const PortfolioPage: React.FC = () => {
               onClick={() => void handleAnalyzePortfolio()}
             >
               {portfolioAnalysisLoading ? '分析中...' : '重新分析'}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary !py-2 text-sm"
+              disabled={positionRows.length === 0 || portfolioAnalysisLoading || !snapshotSignature}
+              onClick={() => void handleAnalyzePortfolio('deep')}
+            >
+              深度诊断
             </button>
             <button
               type="button"
@@ -2680,7 +2695,7 @@ const PortfolioPage: React.FC = () => {
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <select className={PORTFOLIO_SELECT_CLASS} value={insurancePolicyForm.insuranceKind}
-                    onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, insuranceKind: e.target.value }))}>
+                    onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, insuranceKind: e.target.value as PortfolioInsuranceKind }))}>
                     <option value="annuity">年金险</option>
                     <option value="whole_life">终身寿险</option>
                     <option value="endowment">两全保险</option>
@@ -2689,7 +2704,7 @@ const PortfolioPage: React.FC = () => {
                     <option value="other">其他保险</option>
                   </select>
                   <select className={PORTFOLIO_SELECT_CLASS} value={insurancePolicyForm.designType}
-                    onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, designType: e.target.value }))}>
+                    onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, designType: e.target.value as PortfolioInsuranceDesignType }))}>
                     <option value="ordinary">普通型</option>
                     <option value="participating">分红型</option>
                     <option value="universal">万能型</option>
@@ -3137,14 +3152,24 @@ const PortfolioPage: React.FC = () => {
                   : '尚未生成当前快照的资产分析'}
               </p>
             </div>
-            <button
-              type="button"
-              className="btn-secondary !px-4 !py-2 text-sm"
-              disabled={positionRows.length === 0 || portfolioAnalysisLoading || !snapshotSignature}
-              onClick={() => void handleAnalyzePortfolio()}
-            >
-              {portfolioAnalysisLoading ? '分析中...' : '重新分析'}
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn-secondary !px-4 !py-2 text-sm"
+                disabled={positionRows.length === 0 || portfolioAnalysisLoading || !snapshotSignature}
+                onClick={() => void handleAnalyzePortfolio()}
+              >
+                {portfolioAnalysisLoading ? '分析中...' : '重新分析'}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary !px-4 !py-2 text-sm"
+                disabled={positionRows.length === 0 || portfolioAnalysisLoading || !snapshotSignature}
+                onClick={() => void handleAnalyzePortfolio('deep')}
+              >
+                深度诊断
+              </button>
+            </div>
           </div>
 
           {portfolioAnalysis ? (

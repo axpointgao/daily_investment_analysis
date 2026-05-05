@@ -176,6 +176,7 @@ export const portfolioApi = {
       as_of: payload.asOf,
       cost_method: payload.costMethod,
       snapshot_signature: payload.snapshotSignature,
+      mode: payload.mode,
     }, {
       timeout: PORTFOLIO_ANALYSIS_TIMEOUT_MS,
     });

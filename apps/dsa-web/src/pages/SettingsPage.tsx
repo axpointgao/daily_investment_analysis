@@ -17,8 +17,8 @@ import {
 } from '../components/settings';
 import { WEB_BUILD_INFO } from '../utils/constants';
 import { getCategoryDescriptionZh } from '../utils/systemConfigI18n';
-import type { SystemConfigCategory } from '../types/systemConfig';
-import type { TestDataSourceResponse, TestDataSourceSource } from '../types/systemConfig';
+import type { ConfigValidationIssue, SystemConfigCategory } from '../types/systemConfig';
+import type { SystemConfigItem, TestDataSourceResponse, TestDataSourceSource } from '../types/systemConfig';
 
 type DesktopWindow = Window & {
   dsaDesktop?: {
@@ -60,6 +60,16 @@ type DataSourceTestState = {
   error?: ParsedApiError;
 };
 
+type AgentConfigGroup = {
+  id: string;
+  title: string;
+  description: string;
+  impact: string;
+  keys: string[];
+  collapsible?: boolean;
+  defaultOpen?: boolean;
+};
+
 const PORTFOLIO_DATA_SOURCE_TESTS: Array<{ source: TestDataSourceSource; label: string; description: string }> = [
   {
     source: 'tushare_third_party',
@@ -82,9 +92,45 @@ const AGENT_DATA_SOURCE_TESTS: Array<{ source: TestDataSourceSource; label: stri
   {
     source: 'ttfund_skills',
     label: '天天基金 Skills',
-    description: '验证 TTFUND_APIKEY 是否可调用官方基金 Skills 网关。',
+    description: '验证基金搜索、基础资料、经理、持仓和交易规则等补充数据能力。',
+  },
+  {
+    source: 'yingmi_stargate',
+    label: '盈米 StarGate',
+    description: '验证首页基金专业诊断、诊基专业分析、持仓组合诊断、投顾策略和财富规划能力。',
   },
 ];
+
+const AGENT_CONFIG_GROUPS: AgentConfigGroup[] = [
+  {
+    id: 'fund-advisory',
+    title: '基金投顾能力',
+    description: '影响首页基金分析、诊基对话和持仓里的“深度诊断”。盈米负责专业判断，天天基金负责基础资料补充。',
+    impact: '建议优先配置盈米 StarGate；未配置时这些页面仍可运行，但基金投顾分析会退回本地指标和天天基金基础数据。',
+    keys: ['YINGMI_ENABLED', 'YINGMI_API_KEY', 'YINGMI_FUND_ANALYSIS_DEPTH', 'YINGMI_FUND_DATA_STRATEGY', 'YINGMI_MCP_DAILY_LIMIT', 'YINGMI_SKILL_DAILY_LIMIT', 'TTFUND_APIKEY'],
+    defaultOpen: true,
+  },
+  {
+    id: 'stock-chat',
+    title: '股票问股策略',
+    description: '影响问股/股票分析 Agent，不影响基金诊断、保险、银行和持仓账本。',
+    impact: '普通使用通常只需要开启 Agent；策略列表、策略目录和多 Agent 架构属于进阶调参。',
+    keys: ['AGENT_MODE', 'AGENT_MAX_STEPS', 'AGENT_SKILLS', 'AGENT_SKILL_DIR', 'AGENT_NL_ROUTING', 'AGENT_ARCH', 'AGENT_ORCHESTRATOR_MODE', 'AGENT_ORCHESTRATOR_TIMEOUT_S', 'AGENT_RISK_OVERRIDE'],
+    defaultOpen: true,
+  },
+  {
+    id: 'automation',
+    title: '后台研究与自动化',
+    description: '只影响后台深度研究、历史记忆、策略自动加权和事件监控。没有自动化需求时可以保持默认。',
+    impact: '这些项会增加后台任务或模型调用成本；不确定含义时先不要开启。',
+    keys: ['AGENT_DEEP_RESEARCH_BUDGET', 'AGENT_DEEP_RESEARCH_TIMEOUT', 'AGENT_MEMORY_ENABLED', 'AGENT_SKILL_AUTOWEIGHT', 'AGENT_SKILL_ROUTING', 'AGENT_EVENT_MONITOR_ENABLED', 'AGENT_EVENT_MONITOR_INTERVAL_MINUTES', 'AGENT_EVENT_ALERT_RULES_JSON'],
+    collapsible: true,
+    defaultOpen: false,
+  },
+];
+
+const AGENT_GROUP_KEY_SET = new Set(AGENT_CONFIG_GROUPS.flatMap((group) => group.keys));
+const AGENT_ALWAYS_HIDDEN_KEYS = new Set(['YINGMI_STARGATE_BASE_URL']);
 
 function trimDesktopRuntimeString(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
@@ -171,6 +217,138 @@ function formatDesktopEnvFilename() {
   return `dsa-desktop-env_${date}_${time}.env`;
 }
 
+function AgentFieldGroup({
+  group,
+  items,
+  isSaving,
+  issueByKey,
+  onChange,
+}: {
+  group: AgentConfigGroup;
+  items: SystemConfigItem[];
+  isSaving: boolean;
+  issueByKey: Record<string, ConfigValidationIssue[]>;
+  onChange: (key: string, value: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(group.defaultOpen !== false);
+  if (!items.length) {
+    return null;
+  }
+
+  const content = (
+    <div className="space-y-3">
+      {items.map((item) => (
+        <SettingsField
+          key={item.key}
+          item={item}
+          value={item.value}
+          disabled={isSaving}
+          onChange={onChange}
+          issues={issueByKey[item.key] || []}
+        />
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="rounded-2xl border settings-border bg-background/30 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-foreground">{group.title}</h3>
+          <p className="mt-1 text-xs leading-5 text-muted-text">{group.description}</p>
+          <p className="mt-2 text-xs leading-5 text-secondary-text">{group.impact}</p>
+        </div>
+        {group.collapsible ? (
+          <Button
+            type="button"
+            variant="settings-secondary"
+            size="sm"
+            className="shrink-0"
+            onClick={() => setIsOpen((current) => !current)}
+          >
+            {isOpen ? '收起' : '展开'}
+          </Button>
+        ) : null}
+      </div>
+      {isOpen ? <div className="mt-4">{content}</div> : null}
+    </div>
+  );
+}
+
+function AgentSettingsSections({
+  items,
+  isSaving,
+  issueByKey,
+  onChange,
+}: {
+  items: SystemConfigItem[];
+  isSaving: boolean;
+  issueByKey: Record<string, ConfigValidationIssue[]>;
+  onChange: (key: string, value: string) => void;
+}) {
+  const itemByKey = new Map(items.map((item) => [item.key, item]));
+  const groupedKeys = new Set<string>();
+  const groups = AGENT_CONFIG_GROUPS.map((group) => {
+    const groupItems = group.keys
+      .map((key) => itemByKey.get(key))
+      .filter((item): item is SystemConfigItem => Boolean(item));
+    groupItems.forEach((item) => groupedKeys.add(item.key));
+    return { group, items: groupItems };
+  });
+  const otherItems = items.filter((item) => !groupedKeys.has(item.key) && !AGENT_ALWAYS_HIDDEN_KEYS.has(item.key));
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border settings-border bg-background/35 p-4">
+        <h3 className="text-sm font-semibold text-foreground">先看这三件事</h3>
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="rounded-xl border settings-border bg-card/70 p-3">
+            <p className="text-xs font-semibold text-foreground">基金分析更专业</p>
+            <p className="mt-1 text-xs leading-5 text-muted-text">配置盈米后，首页基金分析、诊基和持仓深度诊断会优先使用盈米。</p>
+          </div>
+          <div className="rounded-xl border settings-border bg-card/70 p-3">
+            <p className="text-xs font-semibold text-foreground">天天基金做补充</p>
+            <p className="mt-1 text-xs leading-5 text-muted-text">天天基金 Skills 主要补搜索、净值、持仓、经理和交易规则。</p>
+          </div>
+          <div className="rounded-xl border settings-border bg-card/70 p-3">
+            <p className="text-xs font-semibold text-foreground">高级项可以先不动</p>
+            <p className="mt-1 text-xs leading-5 text-muted-text">多 Agent、深研、事件监控会影响成本、耗时或后台任务。</p>
+          </div>
+        </div>
+      </div>
+
+      {groups.map(({ group, items: groupItems }) => (
+        <AgentFieldGroup
+          key={group.id}
+          group={group}
+          items={groupItems}
+          isSaving={isSaving}
+          issueByKey={issueByKey}
+          onChange={onChange}
+        />
+      ))}
+
+      {otherItems.length ? (
+        <AgentFieldGroup
+          group={{
+            id: 'other',
+            title: '其他 Agent 配置',
+            description: '暂未归入主流程的兼容字段。通常不需要修改。',
+            impact: '保留给旧版本或特殊部署使用。',
+            keys: [],
+            collapsible: true,
+            defaultOpen: false,
+          }}
+          items={otherItems}
+          isSaving={isSaving}
+          issueByKey={issueByKey}
+          onChange={onChange}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 const SettingsPage: React.FC = () => {
   const { passwordChangeable } = useAuth();
   const [desktopActionError, setDesktopActionError] = useState<ParsedApiError | null>(null);
@@ -185,6 +363,7 @@ const SettingsPage: React.FC = () => {
     tiantian_fund: { loading: false },
     crypto_quote: { loading: false },
     ttfund_skills: { loading: false },
+    yingmi_stargate: { loading: false },
   });
   const desktopImportRef = useRef<HTMLInputElement | null>(null);
   const desktopRuntimeApi = getDesktopRuntimeApi();
@@ -325,7 +504,7 @@ const SettingsPage: React.FC = () => {
   const SYSTEM_HIDDEN_KEYS = new Set([
     'ADMIN_AUTH_ENABLED',
   ]);
-  const AGENT_HIDDEN_KEYS = new Set<string>();
+  const AGENT_HIDDEN_KEYS = AGENT_GROUP_KEY_SET;
   const activeItems =
     activeCategory === 'ai_model'
       ? rawActiveItems.filter((item) => {
@@ -768,7 +947,7 @@ const SettingsPage: React.FC = () => {
             {activeCategory === 'agent' ? (
               <SettingsSectionCard
                 title="Agent 数据能力连通性"
-                description="使用当前已保存配置检查 Agent 外部工具是否可用；未保存的草稿需先保存后再测试。"
+                description="先保存配置，再测试外部能力是否可用。测试只验证连接，不会修改持仓或发起交易。"
               >
                 <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
                   {AGENT_DATA_SOURCE_TESTS.map((item) => {
@@ -819,10 +998,23 @@ const SettingsPage: React.FC = () => {
                 </div>
               </SettingsSectionCard>
             ) : null}
+            {activeCategory === 'agent' ? (
+              <SettingsSectionCard
+                title="Agent 能力配置"
+                description="按前端功能分组展示配置项。常用项放在前面，高成本或后台能力默认收起。"
+              >
+                <AgentSettingsSections
+                  items={rawActiveItems}
+                  isSaving={isSaving}
+                  issueByKey={issueByKey}
+                  onChange={setDraftValue}
+                />
+              </SettingsSectionCard>
+            ) : null}
             {activeCategory === 'system' && passwordChangeable ? (
               <ChangePasswordCard />
             ) : null}
-            {activeItems.length ? (
+            {activeCategory !== 'agent' && activeItems.length ? (
               <SettingsSectionCard
                 title="当前分类配置项"
                 description={getCategoryDescriptionZh(activeCategory as SystemConfigCategory, '') || '使用统一字段卡片维护当前分类的系统配置。'}
@@ -838,13 +1030,13 @@ const SettingsPage: React.FC = () => {
                   />
                 ))}
               </SettingsSectionCard>
-            ) : (
+            ) : activeCategory !== 'agent' ? (
               <EmptyState
                 title="当前分类下暂无配置项"
                 description="当前分类没有可编辑字段；可切换左侧分类继续查看其它系统配置。"
                 className="settings-surface-panel settings-border-strong border-none bg-transparent shadow-none"
               />
-            )}
+            ) : null}
           </section>
         </div>
       )}

@@ -9,7 +9,12 @@ from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from src.analyzer import GeminiAnalyzer
-from src.config import Config, get_config
+from src.config import (
+    Config,
+    get_config,
+    normalize_yingmi_fund_analysis_depth,
+    normalize_yingmi_fund_data_strategy,
+)
 from src.services.portfolio_risk_service import PortfolioRiskService
 from src.services.portfolio_service import PortfolioService
 
@@ -41,10 +46,12 @@ class PortfolioAnalysisService:
         as_of: Optional[date] = None,
         cost_method: str = "fifo",
         snapshot_signature: str = "",
+        mode: str = "quick",
     ) -> Dict[str, Any]:
         if not self.analyzer.is_available():
             raise PortfolioAnalysisError("LLM API Key 未配置，无法生成资产分析。")
 
+        analysis_mode = "deep" if mode == "deep" else "quick"
         as_of_date = as_of or date.today()
         snapshot = self.portfolio_service.get_portfolio_snapshot(
             account_id=account_id,
@@ -62,6 +69,26 @@ class PortfolioAnalysisService:
             account_id=account_id,
             snapshot_signature=snapshot_signature,
         )
+        provider_status: List[Dict[str, Any]] = []
+        if analysis_mode == "deep":
+            strategy = normalize_yingmi_fund_data_strategy(getattr(self.config, "yingmi_fund_data_strategy", None))
+            if strategy == "basic_only":
+                professional = {
+                    "data": {},
+                    "providerStatus": [
+                        {
+                            "provider": "yingmi_stargate",
+                            "stage": "configure",
+                            "available": False,
+                            "message": "基金数据策略为仅基础数据，已跳过盈米持仓深度诊断。",
+                        }
+                    ],
+                }
+            else:
+                professional = self._build_professional_analysis(self._flatten_positions(snapshot))
+            compact_payload["专业投顾诊断"] = professional.get("data") or {}
+            provider_status = professional.get("providerStatus") or []
+        compact_payload["analysisMode"] = analysis_mode
         prompt = self._build_prompt(compact_payload)
         raw_text = self.analyzer.generate_text(prompt, max_tokens=2400, temperature=0.25)
         if not raw_text:
@@ -80,6 +107,8 @@ class PortfolioAnalysisService:
             "summary_points": summary_points,
             "full_markdown": full_markdown,
             "model_used": (getattr(self.config, "litellm_model", "") or None),
+            "analysis_mode": analysis_mode,
+            "provider_status": provider_status,
         }
 
     def _build_compact_payload(
@@ -189,6 +218,137 @@ class PortfolioAnalysisService:
             totals[group] = totals.get(group, 0.0) + float(item.get("marketValueBase") or 0.0)
         return self._format_breakdown(totals)
 
+    def _build_professional_analysis(self, positions: List[Dict[str, Any]]) -> Dict[str, Any]:
+        provider_status: List[Dict[str, Any]] = []
+        data: Dict[str, Any] = {}
+        fund_positions = self._extract_yingmi_fund_positions(positions)
+        advisory_positions = [item for item in positions if item.get("market") == "advisory"]
+
+        try:
+            from src.services.yingmi_stargate_client import YingmiStargateClient, YingmiStargateError
+
+            client = YingmiStargateClient(timeout=12.0)
+        except Exception as exc:
+            return {
+                "data": data,
+                "providerStatus": [
+                    {
+                        "provider": "yingmi_stargate",
+                        "stage": "configure",
+                        "available": False,
+                        "message": str(exc),
+                    }
+                ],
+            }
+
+        if fund_positions:
+            depth = normalize_yingmi_fund_analysis_depth(getattr(self.config, "yingmi_fund_analysis_depth", None))
+            fund_list = [
+                {
+                    "fundCode": item["fundCode"],
+                    "fundName": item.get("fundName"),
+                    "amount": item.get("amount"),
+                }
+                for item in fund_positions
+            ]
+            total_amount = sum(float(item.get("amount") or 0.0) for item in fund_positions)
+            holdings = [
+                {
+                    "fundCode": item["fundCode"],
+                    "weight": round(float(item.get("amount") or 0.0) / total_amount, 6) if total_amount > 0 else 0,
+                }
+                for item in fund_positions
+            ]
+            calls = [
+                ("asset_allocation", lambda: client.get_asset_allocation(fund_list)),
+            ]
+            if depth != "fast":
+                calls.append(("portfolio_risk", lambda: client.analyze_portfolio_risk(holdings)))
+            if depth == "deep":
+                calls.append(("funds_backtest", lambda: client.get_funds_backtest(fund_list)))
+            if depth == "deep" and len(fund_positions) >= 2:
+                calls.append(("funds_correlation", lambda: client.get_funds_correlation([item["fundCode"] for item in fund_positions])))
+            for stage, caller in calls:
+                self._call_yingmi_stage(data, provider_status, stage, caller, YingmiStargateError)
+        else:
+            provider_status.append(
+                {
+                    "provider": "yingmi_stargate",
+                    "stage": "fund_portfolio",
+                    "available": False,
+                    "message": "当前持仓没有可用于盈米组合诊断的场外基金。",
+                }
+            )
+
+        for item in advisory_positions[:3]:
+            keyword = str(item.get("displayName") or item.get("symbol") or "").strip()
+            if not keyword:
+                continue
+            self._call_yingmi_stage(
+                data,
+                provider_status,
+                f"strategy_search:{keyword}",
+                lambda keyword=keyword: client.search_strategies(keyword, page_size=5),
+                YingmiStargateError,
+            )
+
+        return {"data": data, "providerStatus": provider_status}
+
+    def _call_yingmi_stage(
+        self,
+        data: Dict[str, Any],
+        provider_status: List[Dict[str, Any]],
+        stage: str,
+        caller: Any,
+        error_cls: Any,
+    ) -> None:
+        try:
+            data[stage] = caller()
+            provider_status.append(
+                {
+                    "provider": "yingmi_stargate",
+                    "stage": stage,
+                    "available": True,
+                    "message": "ok",
+                }
+            )
+        except error_cls as exc:
+            provider_status.append(
+                {
+                    "provider": "yingmi_stargate",
+                    "stage": stage,
+                    "available": False,
+                    "message": str(exc),
+                }
+            )
+        except Exception as exc:
+            provider_status.append(
+                {
+                    "provider": "yingmi_stargate",
+                    "stage": stage,
+                    "available": False,
+                    "message": str(exc),
+                }
+            )
+
+    def _extract_yingmi_fund_positions(self, positions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        result: List[Dict[str, Any]] = []
+        for item in positions:
+            symbol = str(item.get("symbol") or "").strip()
+            if item.get("market") != "fund" or not re.fullmatch(r"\d{6}", symbol):
+                continue
+            amount = float(item.get("marketValueBase") or 0.0)
+            if amount <= 0:
+                continue
+            result.append(
+                {
+                    "fundCode": symbol,
+                    "fundName": item.get("displayName") or symbol,
+                    "amount": amount,
+                }
+            )
+        return result
+
     def _build_prompt(self, payload: Dict[str, Any]) -> str:
         return (
             "你是一名面向个人投资者的多资产组合分析师。请基于用户当前持仓快照，生成简洁、专业、非交易指令式的资产分析。\n\n"
@@ -200,6 +360,9 @@ class PortfolioAnalysisService:
             "- 简要要点只能输出 3 条，每条不超过 45 个中文字符。\n"
             "- 完整分析用 Markdown 输出，控制在 800-1200 字。\n"
             "- 行业/主题集中度只用于股票类资产；基金、银行和数字货币不要强行归入股票行业。\n\n"
+            "专业数据使用要求：\n"
+            "- 当 analysisMode 为 deep 且存在“专业投顾诊断”时，基金和投顾组合部分优先采用盈米专业诊断、组合风险、资产配置、相关性和回测信息。\n"
+            "- 当盈米数据缺失、失败或只覆盖部分基金时，要明确写出覆盖不足，并用本地快照继续完成组合分析。\n\n"
             "表达要求：\n"
             "- 面向普通用户写作，禁止在报告正文中出现任何输入 JSON 字段名、代码式变量名或英文 camelCase 标识。\n"
             "- 不要写“assetTypeBreakdown、marketBreakdown、topPositions、risk.topPositions、sectorConcentration、drawdown、stopLoss”等字段名。\n"

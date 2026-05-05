@@ -14,7 +14,11 @@ from urllib.parse import urlencode
 
 import requests
 
-from src.config import get_config
+from src.config import (
+    get_config,
+    normalize_yingmi_fund_analysis_depth,
+    normalize_yingmi_fund_data_strategy,
+)
 from src.storage import DatabaseManager
 
 logger = logging.getLogger(__name__)
@@ -155,11 +159,15 @@ class FundAnalysisService:
             if len(nav_series) < 2:
                 raise FundAnalysisError("基金历史净值不足，无法生成分析。")
 
+            config = get_config()
+            data_strategy = normalize_yingmi_fund_data_strategy(getattr(config, "yingmi_fund_data_strategy", None))
+            use_basic_enrichment = data_strategy != "yingmi_only"
+
             emit(52, f"{code}：正在获取收益、排名与经理数据")
             performance = self._fetch_period_increase(client, code)
-            ranking = self._fetch_rank_diagram(client, code)
-            managers = self._fetch_managers(client, code)
-            grade = self._fetch_grade(client, code)
+            ranking = self._fetch_rank_diagram(client, code) if use_basic_enrichment else []
+            managers = self._fetch_managers(client, code) if use_basic_enrichment else []
+            grade = self._fetch_grade(client, code) if use_basic_enrichment else []
 
             emit(65, f"{code}：正在计算风险收益指标")
             risk = self._calculate_risk(nav_series)
@@ -173,6 +181,12 @@ class FundAnalysisService:
                 "navSeries": nav_series,
                 "dataCoverage": self._build_data_coverage(profile, performance, risk, ranking, managers, grade, nav_series),
             }
+
+            emit(68, f"{profile['fundName']}：正在调用盈米专业诊断")
+            yingmi_data = self._fetch_yingmi_professional_data(code, profile["fundName"])
+            data_snapshot["yingmi"] = yingmi_data.get("data") or {}
+            data_snapshot["providerStatus"] = yingmi_data.get("providerStatus") or []
+            data_snapshot["dataCoverage"]["yingmi"] = bool(data_snapshot["yingmi"])
 
             emit(75, f"{profile['fundName']}：正在生成基金诊断")
             report = self._build_report_with_llm(
@@ -452,6 +466,75 @@ class FundAnalysisService:
             coverage[key] = bool(block)
         return coverage
 
+    def _fetch_yingmi_professional_data(self, code: str, fund_name: str) -> Dict[str, Any]:
+        provider_status: List[Dict[str, Any]] = []
+        professional: Dict[str, Any] = {}
+        config = get_config()
+        strategy = normalize_yingmi_fund_data_strategy(getattr(config, "yingmi_fund_data_strategy", None))
+        depth = normalize_yingmi_fund_analysis_depth(getattr(config, "yingmi_fund_analysis_depth", None))
+        if strategy == "basic_only":
+            return {
+                "data": professional,
+                "providerStatus": [
+                    {
+                        "provider": "yingmi_stargate",
+                        "stage": "configure",
+                        "available": False,
+                        "message": "基金数据策略为仅基础数据，已跳过盈米专业诊断。",
+                    }
+                ],
+            }
+        try:
+            from src.services.yingmi_stargate_client import YingmiStargateClient, YingmiStargateError
+
+            client = YingmiStargateClient(timeout=10.0)
+        except Exception as exc:
+            return {
+                "data": professional,
+                "providerStatus": [
+                    {
+                        "provider": "yingmi_stargate",
+                        "stage": "configure",
+                        "available": False,
+                        "message": str(exc),
+                    }
+                ],
+            }
+
+        for stage, caller in (
+            ("fund_diagnosis", lambda: client.get_fund_diagnosis(code or fund_name)),
+            *([] if depth == "fast" else [("fund_risk", lambda: client.analyze_fund_risk([code]))]),
+        ):
+            try:
+                professional[stage] = caller()
+                provider_status.append(
+                    {
+                        "provider": "yingmi_stargate",
+                        "stage": stage,
+                        "available": True,
+                        "message": "ok",
+                    }
+                )
+            except YingmiStargateError as exc:
+                provider_status.append(
+                    {
+                        "provider": "yingmi_stargate",
+                        "stage": stage,
+                        "available": False,
+                        "message": str(exc),
+                    }
+                )
+            except Exception as exc:
+                provider_status.append(
+                    {
+                        "provider": "yingmi_stargate",
+                        "stage": stage,
+                        "available": False,
+                        "message": str(exc),
+                    }
+                )
+        return {"data": professional, "providerStatus": provider_status}
+
     def _build_report_with_llm(
         self,
         *,
@@ -505,6 +588,7 @@ class FundAnalysisService:
                 "ranking": data_snapshot.get("ranking", [])[-20:],
                 "manager": data_snapshot.get("manager", []),
                 "grade": data_snapshot.get("grade", []),
+                "yingmi": data_snapshot.get("yingmi", {}),
             },
             "details": {
                 "advantages": details.get("advantages") if isinstance(details.get("advantages"), list) else [],
@@ -512,6 +596,7 @@ class FundAnalysisService:
                 "watchItems": details.get("watchItems") if isinstance(details.get("watchItems"), list) else [],
                 "rawText": text,
                 "dataCoverage": data_snapshot.get("dataCoverage", {}),
+                "providerStatus": data_snapshot.get("providerStatus", []),
             },
         }
 
@@ -520,6 +605,8 @@ class FundAnalysisService:
         compact["navSeries"] = data_snapshot.get("navSeries", [])[-180:]
         return (
             "你是中国公募场外基金分析师。请只基于给定结构化数据分析，不要编造新闻、持仓或未提供的信息。\n"
+            "如果数据里包含 yingmi 字段，盈米专业诊断和风险分析应作为专业判断的优先依据；天天基金、自建净值和本地指标用于补充、校验和解释。\n"
+            "如果盈米不可用或部分失败，请保持原有基金分析质量，并在风险/观察项里说明专业数据覆盖不足。\n"
             "不要使用股票交易语言，不要给精确止损价/止盈价。输出 JSON，不要 Markdown。\n"
             "JSON 结构：{\n"
             '  "summary": {"allocationRating": "适合配置|谨慎观察|不建议新增|可替换", '

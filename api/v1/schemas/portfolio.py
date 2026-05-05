@@ -523,6 +523,7 @@ class PortfolioAnalysisRequest(BaseModel):
     as_of: Optional[date] = None
     cost_method: Literal["fifo", "avg"] = "fifo"
     snapshot_signature: str = Field(..., min_length=1, max_length=128)
+    mode: Literal["quick", "deep"] = "quick"
 
 
 class PortfolioAnalysisResponse(BaseModel):
@@ -532,3 +533,5 @@ class PortfolioAnalysisResponse(BaseModel):
     summary_points: List[str] = Field(default_factory=list)
     full_markdown: str
     model_used: Optional[str] = None
+    analysis_mode: Literal["quick", "deep"] = "quick"
+    provider_status: List[Dict[str, Any]] = Field(default_factory=list)

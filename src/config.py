@@ -71,6 +71,8 @@ NEWS_STRATEGY_WINDOWS: Dict[str, int] = {
     "medium": 7,
     "long": 30,
 }
+YINGMI_FUND_ANALYSIS_DEPTH_VALUES = {"fast", "professional", "deep"}
+YINGMI_FUND_DATA_STRATEGY_VALUES = {"balanced", "yingmi_only", "basic_only"}
 
 
 def parse_env_bool(value: Optional[str], default: bool = False) -> bool:
@@ -184,6 +186,16 @@ def resolve_news_window_days(news_max_age_days: int, news_strategy_profile: Opti
     profile = normalize_news_strategy_profile(news_strategy_profile)
     profile_days = NEWS_STRATEGY_WINDOWS.get(profile, NEWS_STRATEGY_WINDOWS["short"])
     return max(1, min(max(1, int(news_max_age_days)), profile_days))
+
+
+def normalize_yingmi_fund_analysis_depth(value: Optional[str]) -> str:
+    candidate = (value or "professional").strip().lower()
+    return candidate if candidate in YINGMI_FUND_ANALYSIS_DEPTH_VALUES else "professional"
+
+
+def normalize_yingmi_fund_data_strategy(value: Optional[str]) -> str:
+    candidate = (value or "balanced").strip().lower()
+    return candidate if candidate in YINGMI_FUND_DATA_STRATEGY_VALUES else "balanced"
 
 
 def canonicalize_llm_channel_protocol(value: Optional[str]) -> str:
@@ -597,6 +609,13 @@ class Config:
     tushare_third_party_token: Optional[str] = None
     tiantian_fund_api_base_url: Optional[str] = None
     ttfund_apikey: Optional[str] = None
+    yingmi_api_key: Optional[str] = None
+    yingmi_stargate_base_url: str = "https://stargate.yingmi.com/api"
+    yingmi_enabled: bool = True
+    yingmi_fund_analysis_depth: str = "professional"
+    yingmi_fund_data_strategy: str = "balanced"
+    yingmi_mcp_daily_limit: int = 1000
+    yingmi_skill_daily_limit: int = 100
     tickflow_api_key: Optional[str] = None
     longbridge_app_key: Optional[str] = None
     longbridge_app_secret: Optional[str] = None
@@ -937,6 +956,11 @@ class Config:
             "SCHEDULE_ENABLED",
             "SCHEDULE_TIME",
             "SCHEDULE_RUN_IMMEDIATELY",
+            "TTFUND_APIKEY",
+            "YINGMI_API_KEY",
+            "YINGMI_ENABLED",
+            "YINGMI_FUND_ANALYSIS_DEPTH",
+            "YINGMI_FUND_DATA_STRATEGY",
         }
     )
     _BOOTSTRAP_RUNTIME_ENV_OVERRIDES_CAPTURED = False
@@ -1296,7 +1320,31 @@ class Config:
             tushare_third_party_api_url=os.getenv('TUSHARE_THIRD_PARTY_API_URL') or None,
             tushare_third_party_token=os.getenv('TUSHARE_THIRD_PARTY_TOKEN') or None,
             tiantian_fund_api_base_url=os.getenv('TIANTIAN_FUND_API_BASE_URL') or None,
-            ttfund_apikey=os.getenv('TTFUND_APIKEY') or None,
+            ttfund_apikey=cls._resolve_env_value('TTFUND_APIKEY') or None,
+            yingmi_api_key=cls._resolve_env_value('YINGMI_API_KEY') or None,
+            yingmi_stargate_base_url=(
+                os.getenv('YINGMI_STARGATE_BASE_URL', 'https://stargate.yingmi.com/api').strip().rstrip("/")
+                or 'https://stargate.yingmi.com/api'
+            ),
+            yingmi_enabled=parse_env_bool(cls._resolve_env_value('YINGMI_ENABLED'), default=True),
+            yingmi_fund_analysis_depth=normalize_yingmi_fund_analysis_depth(
+                cls._resolve_env_value('YINGMI_FUND_ANALYSIS_DEPTH')
+            ),
+            yingmi_fund_data_strategy=normalize_yingmi_fund_data_strategy(
+                cls._resolve_env_value('YINGMI_FUND_DATA_STRATEGY')
+            ),
+            yingmi_mcp_daily_limit=parse_env_int(
+                os.getenv('YINGMI_MCP_DAILY_LIMIT'),
+                1000,
+                field_name='YINGMI_MCP_DAILY_LIMIT',
+                minimum=1,
+            ),
+            yingmi_skill_daily_limit=parse_env_int(
+                os.getenv('YINGMI_SKILL_DAILY_LIMIT'),
+                100,
+                field_name='YINGMI_SKILL_DAILY_LIMIT',
+                minimum=1,
+            ),
             tickflow_api_key=os.getenv('TICKFLOW_API_KEY'),
             longbridge_app_key=os.getenv('LONGBRIDGE_APP_KEY') or None,
             longbridge_app_secret=os.getenv('LONGBRIDGE_APP_SECRET') or None,

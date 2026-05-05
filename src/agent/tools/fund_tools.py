@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Fund Agent tools backed by Tiantian Fund official Skills."""
+"""Fund Agent tools backed by Yingmi StarGate and Tiantian Fund Skills."""
 
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
 from src.agent.tools.registry import ToolDefinition, ToolParameter
+from src.config import get_config, normalize_yingmi_fund_data_strategy
 from src.services.ttfund_skills_client import TtfundSkillsClient, TtfundSkillsError
+from src.services.yingmi_stargate_client import YingmiStargateClient, YingmiStargateError
 
 
 def _invoke(skill_id: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -99,6 +101,90 @@ def _handle_get_fund_index_info(index_id: str) -> Dict[str, Any]:
 
 def _handle_get_bond_market() -> Dict[str, Any]:
     return _invoke("BOND_MARKET", {})
+
+
+def _invoke_yingmi(method: str, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+    strategy = normalize_yingmi_fund_data_strategy(getattr(get_config(), "yingmi_fund_data_strategy", None))
+    if strategy == "basic_only":
+        return {
+            "error": "基金数据策略为仅基础数据，已跳过盈米专业工具。",
+            "retriable": False,
+            "provider": "yingmi_stargate",
+            "method": method,
+        }
+    try:
+        client = YingmiStargateClient()
+        handler = getattr(client, method)
+        return handler(*args, **kwargs)
+    except YingmiStargateError as exc:
+        return {
+            "error": str(exc),
+            "retriable": False,
+            "provider": "yingmi_stargate",
+            "method": method,
+        }
+
+
+def _handle_yingmi_get_fund_diagnosis(fund_name_or_code: str) -> Dict[str, Any]:
+    return _invoke_yingmi("get_fund_diagnosis", fund_name_or_code)
+
+
+def _handle_yingmi_analyze_fund_risk(fund_codes: Any) -> Dict[str, Any]:
+    return _invoke_yingmi("analyze_fund_risk", _normalize_code_list(fund_codes))
+
+
+def _handle_yingmi_get_asset_allocation(fund_list: Any) -> Dict[str, Any]:
+    return _invoke_yingmi("get_asset_allocation", _normalize_fund_list(fund_list))
+
+
+def _handle_yingmi_get_funds_backtest(fund_list: Any) -> Dict[str, Any]:
+    return _invoke_yingmi("get_funds_backtest", _normalize_fund_list(fund_list))
+
+
+def _handle_yingmi_get_funds_correlation(fund_codes: Any) -> Dict[str, Any]:
+    return _invoke_yingmi("get_funds_correlation", _normalize_code_list(fund_codes))
+
+
+def _handle_yingmi_analyze_portfolio_risk(holdings: Any) -> Dict[str, Any]:
+    normalized = holdings if isinstance(holdings, list) else []
+    return _invoke_yingmi("analyze_portfolio_risk", normalized)
+
+
+def _handle_yingmi_search_strategies(keyword: str, page_num: int = 1, page_size: int = 10) -> Dict[str, Any]:
+    return _invoke_yingmi("search_strategies", keyword, page_num, page_size)
+
+
+def _handle_yingmi_get_strategy_details(strategy_codes: Any) -> Dict[str, Any]:
+    return _invoke_yingmi("get_strategy_details", _normalize_code_list(strategy_codes))
+
+
+def _handle_yingmi_get_strategy_composition(strategy_codes: Any) -> Dict[str, Any]:
+    return _invoke_yingmi("get_strategy_composition", _normalize_code_list(strategy_codes))
+
+
+def _normalize_code_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [item.strip() for item in str(value or "").split(",") if item.strip()]
+
+
+def _normalize_fund_list(value: Any) -> list[Dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    normalized = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("fundCode") or item.get("fund_code") or item.get("code") or "").strip()
+        if not code:
+            continue
+        row = {"fundCode": code}
+        if item.get("fundName") or item.get("fund_name") or item.get("name"):
+            row["fundName"] = item.get("fundName") or item.get("fund_name") or item.get("name")
+        if item.get("amount") is not None:
+            row["amount"] = item.get("amount")
+        normalized.append(row)
+    return normalized
 
 
 search_funds_tool = ToolDefinition(
@@ -213,8 +299,93 @@ get_bond_market_tool = ToolDefinition(
     category="data",
 )
 
+yingmi_get_fund_diagnosis_tool = ToolDefinition(
+    name="yingmi_get_fund_diagnosis",
+    description="Get Yingmi professional diagnosis for a fund by fund code or name. Prefer this for single-fund suitability, risk, hold/add/watch judgments.",
+    parameters=[ToolParameter(name="fund_name_or_code", type="string", description="Fund code or fund name.")],
+    handler=_handle_yingmi_get_fund_diagnosis,
+    category="analysis",
+)
+
+yingmi_analyze_fund_risk_tool = ToolDefinition(
+    name="yingmi_analyze_fund_risk",
+    description="Analyze professional risk for one or more fund codes with Yingmi.",
+    parameters=[ToolParameter(name="fund_codes", type="array", description="List of 6-digit fund codes.")],
+    handler=_handle_yingmi_analyze_fund_risk,
+    category="analysis",
+)
+
+yingmi_get_asset_allocation_tool = ToolDefinition(
+    name="yingmi_get_asset_allocation",
+    description="Analyze fund-portfolio asset allocation with Yingmi. fund_list items should include fundCode and optional fundName/amount.",
+    parameters=[ToolParameter(name="fund_list", type="array", description="List of fund holdings, each with fundCode, optional fundName and amount.")],
+    handler=_handle_yingmi_get_asset_allocation,
+    category="analysis",
+)
+
+yingmi_get_funds_backtest_tool = ToolDefinition(
+    name="yingmi_get_funds_backtest",
+    description="Run Yingmi fund-combination backtest for a list of fund holdings.",
+    parameters=[ToolParameter(name="fund_list", type="array", description="List of fund holdings, each with fundCode, optional fundName and amount.")],
+    handler=_handle_yingmi_get_funds_backtest,
+    category="analysis",
+)
+
+yingmi_get_funds_correlation_tool = ToolDefinition(
+    name="yingmi_get_funds_correlation",
+    description="Analyze correlation between multiple funds with Yingmi. Use only when there are at least two fund codes.",
+    parameters=[ToolParameter(name="fund_codes", type="array", description="List of 6-digit fund codes.")],
+    handler=_handle_yingmi_get_funds_correlation,
+    category="analysis",
+)
+
+yingmi_analyze_portfolio_risk_tool = ToolDefinition(
+    name="yingmi_analyze_portfolio_risk",
+    description="Analyze fund-portfolio risk with Yingmi. holdings items should include fundCode and weight.",
+    parameters=[ToolParameter(name="holdings", type="array", description="List of holdings, each with fundCode and weight.")],
+    handler=_handle_yingmi_analyze_portfolio_risk,
+    category="analysis",
+)
+
+yingmi_search_strategies_tool = ToolDefinition(
+    name="yingmi_search_strategies",
+    description="Search Yingmi advisory strategy products by keyword. Prefer this for investment-advisory or strategy-product questions.",
+    parameters=[
+        ToolParameter(name="keyword", type="string", description="Strategy keyword or product name."),
+        ToolParameter(name="page_num", type="integer", description="Page number.", required=False, default=1),
+        ToolParameter(name="page_size", type="integer", description="Page size.", required=False, default=10),
+    ],
+    handler=_handle_yingmi_search_strategies,
+    category="search",
+)
+
+yingmi_get_strategy_details_tool = ToolDefinition(
+    name="yingmi_get_strategy_details",
+    description="Get Yingmi advisory strategy details by strategy codes.",
+    parameters=[ToolParameter(name="strategy_codes", type="array", description="List of strategy codes.")],
+    handler=_handle_yingmi_get_strategy_details,
+    category="analysis",
+)
+
+yingmi_get_strategy_composition_tool = ToolDefinition(
+    name="yingmi_get_strategy_composition",
+    description="Get Yingmi advisory strategy composition by strategy codes.",
+    parameters=[ToolParameter(name="strategy_codes", type="array", description="List of strategy codes.")],
+    handler=_handle_yingmi_get_strategy_composition,
+    category="analysis",
+)
+
 
 ALL_FUND_TOOLS = [
+    yingmi_get_fund_diagnosis_tool,
+    yingmi_analyze_fund_risk_tool,
+    yingmi_get_asset_allocation_tool,
+    yingmi_get_funds_backtest_tool,
+    yingmi_get_funds_correlation_tool,
+    yingmi_analyze_portfolio_risk_tool,
+    yingmi_search_strategies_tool,
+    yingmi_get_strategy_details_tool,
+    yingmi_get_strategy_composition_tool,
     search_funds_tool,
     get_fund_base_info_tool,
     get_fund_nav_info_tool,

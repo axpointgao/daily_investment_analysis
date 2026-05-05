@@ -576,6 +576,8 @@ class SystemConfigService:
             return self._test_tiantian_fund(config_map=config_map, timeout=timeout)
         if source_norm == "ttfund_skills":
             return self._test_ttfund_skills(config_map=config_map, timeout=timeout)
+        if source_norm == "yingmi_stargate":
+            return self._test_yingmi_stargate(config_map=config_map, timeout=timeout)
         if source_norm == "crypto_quote":
             return self._test_crypto_quote(timeout=timeout)
         raise ValueError("Unsupported data source")
@@ -1852,6 +1854,41 @@ class SystemConfigService:
                 "skill_id": "FUND_BASE_INFOS",
                 "fund_code": "000001",
                 "response_keys": list(payload.keys())[:10] if isinstance(payload, dict) else [],
+            },
+        )
+
+    def _test_yingmi_stargate(self, *, config_map: Dict[str, str], timeout: float) -> Dict[str, Any]:
+        source = "yingmi_stargate"
+        api_key = (config_map.get("YINGMI_API_KEY") or "").strip()
+        base_url = (config_map.get("YINGMI_STARGATE_BASE_URL") or "https://stargate.yingmi.com/api").strip()
+        if not api_key:
+            return self._build_data_source_result(
+                success=False,
+                source=source,
+                message="未连接",
+                error="请先在 Agent 设置中填写 YINGMI_API_KEY。",
+            )
+        try:
+            from src.services.yingmi_stargate_client import test_yingmi_stargate_connection
+
+            payload, latency_ms = test_yingmi_stargate_connection(api_key=api_key, base_url=base_url, timeout=timeout)
+        except Exception as exc:
+            return self._build_data_source_result(
+                success=False,
+                source=source,
+                message="未连接",
+                error=str(exc),
+            )
+
+        return self._build_data_source_result(
+            success=True,
+            source=source,
+            message="已连接",
+            latency_ms=latency_ms,
+            details={
+                "base_url": base_url,
+                "operation_count": payload.get("operation_count"),
+                "sample_operations": payload.get("sample_operations") or [],
             },
         )
 

@@ -215,6 +215,7 @@ export interface PortfolioAnalysisRequest {
   asOf?: string;
   costMethod: PortfolioCostMethod;
   snapshotSignature: string;
+  mode?: 'quick' | 'deep';
 }
 
 export interface PortfolioAnalysisResponse {
@@ -224,6 +225,8 @@ export interface PortfolioAnalysisResponse {
   summaryPoints: string[];
   fullMarkdown: string;
   modelUsed?: string | null;
+  analysisMode?: 'quick' | 'deep';
+  providerStatus?: Array<Record<string, unknown>>;
 }
 
 export interface PortfolioTradeCreateRequest {
