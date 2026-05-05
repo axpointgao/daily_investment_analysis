@@ -452,7 +452,7 @@ class PortfolioAccount(Base):
     owner_id = Column(String(64), index=True)
     name = Column(String(64), nullable=False)
     broker = Column(String(64))
-    market = Column(String(8), nullable=False, default='cn', index=True)  # cn/hk/us
+    market = Column(String(16), nullable=False, default='cn', index=True)  # cn/hk/us/fund/crypto/bank/advisory/insurance
     base_currency = Column(String(8), nullable=False, default='CNY')
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     created_at = Column(DateTime, default=datetime.now, index=True)
@@ -472,7 +472,7 @@ class PortfolioTrade(Base):
     account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
     trade_uid = Column(String(128))
     symbol = Column(String(16), nullable=False, index=True)
-    market = Column(String(8), nullable=False, default='cn')
+    market = Column(String(16), nullable=False, default='cn')
     currency = Column(String(8), nullable=False, default='CNY')
     trade_date = Column(Date, nullable=False, index=True)
     side = Column(String(8), nullable=False)  # buy/sell
@@ -518,7 +518,7 @@ class PortfolioCorporateAction(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
     symbol = Column(String(16), nullable=False, index=True)
-    market = Column(String(8), nullable=False, default='cn')
+    market = Column(String(16), nullable=False, default='cn')
     currency = Column(String(8), nullable=False, default='CNY')
     effective_date = Column(Date, nullable=False, index=True)
     action_type = Column(String(24), nullable=False)  # cash_dividend/split_adjustment
@@ -541,7 +541,7 @@ class PortfolioPosition(Base):
     account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
     cost_method = Column(String(8), nullable=False, default='fifo')
     symbol = Column(String(16), nullable=False, index=True)
-    market = Column(String(8), nullable=False, default='cn')
+    market = Column(String(16), nullable=False, default='cn')
     currency = Column(String(8), nullable=False, default='CNY')
     quantity = Column(Float, nullable=False, default=0.0)
     avg_cost = Column(Float, nullable=False, default=0.0)
@@ -573,7 +573,7 @@ class PortfolioPositionLot(Base):
     account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
     cost_method = Column(String(8), nullable=False, default='fifo')
     symbol = Column(String(16), nullable=False, index=True)
-    market = Column(String(8), nullable=False, default='cn')
+    market = Column(String(16), nullable=False, default='cn')
     currency = Column(String(8), nullable=False, default='CNY')
     open_date = Column(Date, nullable=False, index=True)
     remaining_quantity = Column(Float, nullable=False, default=0.0)
@@ -717,6 +717,57 @@ class PortfolioAdvisoryLedger(Base):
     __table_args__ = (
         Index('ix_portfolio_advisory_account_date', 'account_id', 'event_date'),
         Index('ix_portfolio_advisory_account_product', 'account_id', 'product_code', 'product_name'),
+    )
+
+
+class PortfolioInsurancePolicy(Base):
+    """Insurance policy metadata for savings/wealth-style policies."""
+
+    __tablename__ = 'portfolio_insurance_policies'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
+    policy_name = Column(String(128), nullable=False)
+    insurer = Column(String(64))
+    policy_no = Column(String(64), index=True)
+    insurance_kind = Column(String(32))  # annuity/whole_life/endowment/universal/linked/other
+    design_type = Column(String(32))  # ordinary/participating/universal/unit_linked/other
+    currency = Column(String(8), nullable=False, default='CNY')
+    status = Column(String(24), nullable=False, default='active')
+    payment_mode = Column(String(24), nullable=False, default='single')
+    premium_per_period = Column(Float)
+    first_payment_date = Column(Date)
+    total_periods = Column(Integer)
+    note = Column(String(255))
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        Index('ix_portfolio_insurance_policy_account_status', 'account_id', 'status'),
+        Index('ix_portfolio_insurance_policy_account_no', 'account_id', 'policy_no'),
+    )
+
+
+class PortfolioInsuranceLedger(Base):
+    """Insurance premium, return/benefit and valuation events."""
+
+    __tablename__ = 'portfolio_insurance_ledger'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
+    policy_id = Column(Integer, ForeignKey('portfolio_insurance_policies.id'), nullable=False, index=True)
+    event_date = Column(Date, nullable=False, index=True)
+    event_type = Column(String(32), nullable=False)
+    amount = Column(Float, nullable=False)
+    currency = Column(String(8), nullable=False, default='CNY')
+    period_no = Column(Integer)
+    note = Column(String(255))
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+    __table_args__ = (
+        Index('ix_portfolio_insurance_ledger_account_date', 'account_id', 'event_date'),
+        Index('ix_portfolio_insurance_ledger_policy_date', 'policy_id', 'event_date'),
+        Index('ix_portfolio_insurance_ledger_type', 'event_type'),
     )
 
 
@@ -949,27 +1000,25 @@ class DatabaseManager:
 
         inspector = inspect(self._engine)
         table_names = set(inspector.get_table_names())
-        if "portfolio_bank_ledger" not in table_names:
-            return
-
-        existing_columns = {column["name"] for column in inspector.get_columns("portfolio_bank_ledger")}
-        additions = {
-            "registration_code": "VARCHAR(64)",
-            "linked_entry_id": "INTEGER",
-            "quantity": "FLOAT",
-            "start_date": "DATE",
-            "annual_rate": "FLOAT",
-            "investment_nature": "VARCHAR(32)",
-            "risk_level": "VARCHAR(8)",
-            "income_mode": "VARCHAR(16)",
-        }
         with self._engine.begin() as connection:
-            for column_name, column_type in additions.items():
-                if column_name in existing_columns:
-                    continue
-                connection.execute(
-                    text(f"ALTER TABLE portfolio_bank_ledger ADD COLUMN {column_name} {column_type}")
-                )
+            if "portfolio_bank_ledger" in table_names:
+                existing_columns = {column["name"] for column in inspector.get_columns("portfolio_bank_ledger")}
+                additions = {
+                    "registration_code": "VARCHAR(64)",
+                    "linked_entry_id": "INTEGER",
+                    "quantity": "FLOAT",
+                    "start_date": "DATE",
+                    "annual_rate": "FLOAT",
+                    "investment_nature": "VARCHAR(32)",
+                    "risk_level": "VARCHAR(8)",
+                    "income_mode": "VARCHAR(16)",
+                }
+                for column_name, column_type in additions.items():
+                    if column_name in existing_columns:
+                        continue
+                    connection.execute(
+                        text(f"ALTER TABLE portfolio_bank_ledger ADD COLUMN {column_name} {column_type}")
+                    )
 
     @staticmethod
     def _normalize_daily_date(value: Any) -> Any:

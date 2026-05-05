@@ -28,6 +28,10 @@ import type {
   PortfolioImportBrokerItem,
   PortfolioImportCommitResponse,
   PortfolioImportParseResponse,
+  PortfolioInsuranceEventType,
+  PortfolioInsuranceLedgerListItem,
+  PortfolioInsurancePaymentMode,
+  PortfolioInsurancePolicyItem,
   PortfolioMarket,
   PortfolioPositionItem,
   PortfolioSide,
@@ -44,8 +48,8 @@ const FALLBACK_BROKERS: PortfolioImportBrokerItem[] = [
 ];
 
 type AccountOption = 'all' | number;
-type EventType = 'trade' | 'cash' | 'corporate' | 'bank' | 'advisory';
-type EntryPanelType = 'trade' | 'cash' | 'corporate' | 'manualPrice' | 'bank' | 'bankNav' | 'advisory' | 'advisoryNav';
+type EventType = 'trade' | 'cash' | 'corporate' | 'bank' | 'advisory' | 'insurance';
+type EntryPanelType = 'trade' | 'cash' | 'corporate' | 'manualPrice' | 'bank' | 'bankNav' | 'advisory' | 'advisoryNav' | 'insurancePolicy' | 'insuranceLedger';
 
 type FlatPosition = PortfolioPositionItem & {
   accountId: number;
@@ -65,7 +69,8 @@ type PendingDelete =
   | { eventType: 'cash'; id: number; message: string }
   | { eventType: 'corporate'; id: number; message: string }
   | { eventType: 'bank'; id: number; message: string }
-  | { eventType: 'advisory'; id: number; message: string };
+  | { eventType: 'advisory'; id: number; message: string }
+  | { eventType: 'insurance'; id: number; message: string };
 
 type FxRefreshFeedback = {
   tone: 'neutral' | 'success' | 'warning';
@@ -84,6 +89,13 @@ type PortfolioToast = {
   title: string;
   message: string;
 };
+
+type InsuranceEventOption = {
+  value: PortfolioInsuranceEventType;
+  label: string;
+};
+
+const INSURANCE_TERMINAL_STATUS_VALUES = new Set(['surrendered', 'matured', 'expired', 'cancelled']);
 
 type AssetNameMaps = {
   stockByCode: Map<string, string>;
@@ -182,6 +194,9 @@ function getPositionPriceLabel(row: PortfolioPositionItem): string {
   }
   if (row.priceSource === 'advisory_confirmed_nav') return row.priceDate ? `确认净值 · ${row.priceDate}` : '确认净值';
   if (row.priceSource === 'bank_cost_nav') return row.priceDate ? `成本净值 · ${row.priceDate}` : '成本净值';
+  if (row.priceSource === 'insurance_value_update') return row.priceDate ? `保单价值 · ${row.priceDate}` : '保单价值';
+  if (row.priceSource === 'insurance_no_value') return '待录入价值';
+  if (row.priceSource === 'insurance_net_invested') return '净投入暂估';
   if (row.priceSource === 'fund_nav') return row.priceDate ? `基金净值 · ${row.priceDate}` : '基金净值';
   if (row.priceSource === 'crypto_price') return row.priceProvider ? `数字货币价格 · ${row.priceProvider}` : '数字货币价格';
   if (row.priceSource === 'manual_amount') return '手工金额';
@@ -216,6 +231,7 @@ function formatMarketLabel(value: string): string {
     crypto: '数字货币',
     bank: '银行',
     advisory: '投顾组合',
+    insurance: '保险',
   };
   return labels[value] || value;
 }
@@ -258,6 +274,9 @@ function getPositionDisplayName(row: PortfolioPositionItem): string {
   if (row.market === 'advisory') {
     return row.productName || row.displayName || row.productCode || row.symbol;
   }
+  if (row.market === 'insurance') {
+    return row.policyName || row.displayName || row.symbol;
+  }
   if (row.market === 'bank') {
     return row.productName || row.bankName || row.symbol;
   }
@@ -266,6 +285,104 @@ function getPositionDisplayName(row: PortfolioPositionItem): string {
 
 function formatAdvisoryDirectionLabel(value: PortfolioAdvisoryDirection | string): string {
   return value === 'redeem' ? '赎回' : '申购';
+}
+
+function formatInsuranceKind(value?: string | null): string {
+  const labels: Record<string, string> = {
+    annuity: '年金险',
+    whole_life: '终身寿险',
+    endowment: '两全保险',
+    universal: '万能险',
+    unit_linked: '投连险',
+    other: '其他保险',
+  };
+  return value ? labels[value] || value : '';
+}
+
+function formatInsuranceDesignType(value?: string | null): string {
+  const labels: Record<string, string> = {
+    ordinary: '普通型',
+    participating: '分红型',
+    universal: '万能型',
+    unit_linked: '投资连结型',
+    other: '其他',
+  };
+  return value ? labels[value] || value : '';
+}
+
+function formatInsurancePaymentMode(value?: string | null): string {
+  const labels: Record<string, string> = {
+    single: '趸交',
+    annual: '年交',
+    semiannual: '半年交',
+    quarterly: '季交',
+    monthly: '月交',
+    irregular: '不定期',
+  };
+  return value ? labels[value] || value : '';
+}
+
+function formatInsuranceEventType(value?: string | null): string {
+  const labels: Record<string, string> = {
+    premium: '缴费',
+    value_update: '价值更新',
+    survival_benefit: '生存金',
+    annuity_payment: '年金领取',
+    maturity_benefit: '满期金',
+    dividend: '分红',
+    partial_withdrawal: '部分领取',
+    surrender: '退保到账',
+    refund: '退费',
+    other_inflow: '其他返还',
+    other_outflow: '其他支出',
+  };
+  return value ? labels[value] || value : '';
+}
+
+function isTerminalInsuranceStatus(value?: string | null): boolean {
+  return INSURANCE_TERMINAL_STATUS_VALUES.has(String(value || '').trim().toLowerCase());
+}
+
+function getInsuranceEventOptions(policy?: PortfolioInsurancePolicyItem | null): InsuranceEventOption[] {
+  const options: InsuranceEventOption[] = [];
+  if (!policy) return options;
+
+  const kind = String(policy.insuranceKind || 'other').trim().toLowerCase();
+  const designType = String(policy.designType || 'ordinary').trim().toLowerCase();
+  const status = String(policy.status || 'active').trim().toLowerCase();
+
+  if (isTerminalInsuranceStatus(status)) return options;
+
+  if (status !== 'paid_up') {
+    options.push({ value: 'premium', label: '缴费' });
+  }
+  options.push({ value: 'value_update', label: '价值更新' });
+  if (['annuity', 'endowment'].includes(kind)) {
+    options.push({ value: 'survival_benefit', label: '生存金' });
+  }
+  if (kind === 'annuity') {
+    options.push({ value: 'annuity_payment', label: '年金领取' });
+  }
+  if (kind === 'endowment') {
+    options.push({ value: 'maturity_benefit', label: '满期金' });
+  }
+  if (designType === 'participating') {
+    options.push({ value: 'dividend', label: '分红' });
+  }
+  if (['whole_life', 'universal', 'unit_linked'].includes(kind) || ['universal', 'unit_linked'].includes(designType)) {
+    options.push({ value: 'partial_withdrawal', label: '部分领取' });
+  }
+  options.push(
+    { value: 'surrender', label: '退保到账' },
+    { value: 'refund', label: '退费' },
+    { value: 'other_inflow', label: '其他返还' },
+    { value: 'other_outflow', label: '其他支出' },
+  );
+  return options;
+}
+
+function getDefaultInsuranceEventType(policy?: PortfolioInsurancePolicyItem | null): PortfolioInsuranceEventType {
+  return getInsuranceEventOptions(policy)[0]?.value || 'value_update';
 }
 
 function formatAdvisoryPositionOption(row: PortfolioPositionItem): string {
@@ -360,6 +477,16 @@ function getPositionSecondaryName(row: PortfolioPositionItem, assetNameMaps: Ass
   if (row.market === 'advisory') {
     return [row.platform, row.productCode, row.riskLevel, row.investmentStyle].filter(Boolean).join(' · ');
   }
+  if (row.market === 'insurance') {
+    return [
+      row.insurer,
+      formatInsuranceKind(row.insuranceKind),
+      formatInsuranceDesignType(row.designType),
+      formatInsurancePaymentMode(row.paymentMode),
+      row.nextPaymentDate ? `下次缴费 ${row.nextPaymentDate}` : '',
+      row.valueEstimated ? '按净投入暂估' : '',
+    ].filter(Boolean).join(' · ');
+  }
   if (row.market === 'bank') {
     const hints = [
       row.bankName,
@@ -398,6 +525,7 @@ function isExchangeTradedFundName(name: string | undefined): boolean {
 
 function getPositionAssetType(row: PortfolioPositionItem, assetNameMaps: AssetNameMaps): string {
   if (row.market === 'advisory') return '投顾组合';
+  if (row.market === 'insurance') return '保险';
   if (row.market === 'bank') {
     if (row.registrationCode) return '银行理财';
     return row.maturityDate ? '定期存款' : '活期/现金';
@@ -580,6 +708,7 @@ const PortfolioPage: React.FC = () => {
   const [eventActionType, setEventActionType] = useState<'' | PortfolioCorporateActionType>('');
   const [eventBankAssetKind, setEventBankAssetKind] = useState<'' | PortfolioBankAssetKind>('');
   const [eventAdvisoryDirection, setEventAdvisoryDirection] = useState<'' | PortfolioAdvisoryDirection>('');
+  const [eventInsuranceEventType, setEventInsuranceEventType] = useState<'' | PortfolioInsuranceEventType>('');
   const [eventPage, setEventPage] = useState(1);
   const [eventTotal, setEventTotal] = useState(0);
   const [eventLoading, setEventLoading] = useState(false);
@@ -588,6 +717,8 @@ const PortfolioPage: React.FC = () => {
   const [corporateEvents, setCorporateEvents] = useState<PortfolioCorporateActionListItem[]>([]);
   const [bankEvents, setBankEvents] = useState<PortfolioBankLedgerListItem[]>([]);
   const [advisoryEvents, setAdvisoryEvents] = useState<PortfolioAdvisoryLedgerListItem[]>([]);
+  const [insurancePolicies, setInsurancePolicies] = useState<PortfolioInsurancePolicyItem[]>([]);
+  const [insuranceEvents, setInsuranceEvents] = useState<PortfolioInsuranceLedgerListItem[]>([]);
   const [showEventFilters, setShowEventFilters] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -664,6 +795,26 @@ const PortfolioPage: React.FC = () => {
     priceDate: getTodayIso(),
     price: '',
   });
+  const [insurancePolicyForm, setInsurancePolicyForm] = useState({
+    policyName: '',
+    insurer: '',
+    policyNo: '',
+    insuranceKind: 'annuity',
+    designType: 'ordinary',
+    paymentMode: 'annual' as PortfolioInsurancePaymentMode,
+    premiumPerPeriod: '',
+    firstPaymentDate: getTodayIso(),
+    totalPeriods: '',
+    note: '',
+  });
+  const [insuranceLedgerForm, setInsuranceLedgerForm] = useState({
+    policyId: '',
+    eventDate: getTodayIso(),
+    eventType: 'premium' as PortfolioInsuranceEventType,
+    amount: '',
+    periodNo: '',
+    note: '',
+  });
 
   const queryAccountId = selectedAccount === 'all' ? undefined : selectedAccount;
   const refreshViewKey = `${selectedAccount === 'all' ? 'all' : `account:${selectedAccount}`}:cost:${costMethod}`;
@@ -678,6 +829,7 @@ const PortfolioPage: React.FC = () => {
   const isCryptoAccount = selectedMarket === 'crypto';
   const isBankAccount = selectedMarket === 'bank';
   const isAdvisoryAccount = selectedMarket === 'advisory';
+  const isInsuranceAccount = selectedMarket === 'insurance';
   const supportsCashLedger = isStockAccount || isFundAccount || isCryptoAccount || isAdvisoryAccount;
   const advisoryDerivedNav = useMemo(() => {
     const amount = parsePositiveFormNumber(advisoryForm.amount);
@@ -724,7 +876,9 @@ const PortfolioPage: React.FC = () => {
         ? corporateEvents.length
         : eventType === 'bank'
           ? bankEvents.length
-          : advisoryEvents.length;
+          : eventType === 'advisory'
+            ? advisoryEvents.length
+            : insuranceEvents.length;
   const entryPanelOptions = [
     ...((isStockAccount || isFundAccount || isCryptoAccount)
       ? [{ value: 'trade' as const, label: isFundAccount ? '基金' : isCryptoAccount ? '买卖' : '交易' }]
@@ -738,6 +892,8 @@ const PortfolioPage: React.FC = () => {
     ...(isBankAccount ? [{ value: 'bankNav' as const, label: '净值更新' }] : []),
     ...(isAdvisoryAccount ? [{ value: 'advisory' as const, label: '投顾流水' }] : []),
     ...(isAdvisoryAccount ? [{ value: 'advisoryNav' as const, label: '净值更新' }] : []),
+    ...(isInsuranceAccount ? [{ value: 'insurancePolicy' as const, label: '保单' }] : []),
+    ...(isInsuranceAccount ? [{ value: 'insuranceLedger' as const, label: '缴费/返还' }] : []),
   ];
   const activeEntryPanelAvailable = entryPanelOptions.some((item) => item.value === activeEntryPanel);
   const selectedEntryPanel = activeEntryPanelAvailable ? activeEntryPanel : entryPanelOptions[0]?.value;
@@ -750,6 +906,7 @@ const PortfolioPage: React.FC = () => {
     eventType === 'corporate' && eventActionType ? formatCorporateActionLabel(eventActionType) : null,
     eventType === 'bank' && eventBankAssetKind ? formatBankAssetKind(eventBankAssetKind) : null,
     eventType === 'advisory' && eventAdvisoryDirection ? formatAdvisoryDirectionLabel(eventAdvisoryDirection) : null,
+    eventType === 'insurance' && eventInsuranceEventType ? formatInsuranceEventType(eventInsuranceEventType) : null,
   ].filter(Boolean) as string[];
   const hasEventFilters = eventFilterChips.length > 0;
 
@@ -809,6 +966,22 @@ const PortfolioPage: React.FC = () => {
       }
     }
   }, [selectedBroker]);
+
+  const loadInsurancePolicies = useCallback(async () => {
+    if (!writableAccountId || writableAccount?.market !== 'insurance') {
+      setInsurancePolicies([]);
+      return;
+    }
+    try {
+      const response = await portfolioApi.listInsurancePolicies({
+        accountId: writableAccountId,
+        includeInactive: true,
+      });
+      setInsurancePolicies(response.policies || []);
+    } catch (err) {
+      setError(getParsedApiError(err));
+    }
+  }, [writableAccount?.market, writableAccountId]);
 
   const loadSnapshot = useCallback(async (options: { refreshPrices?: boolean } = {}) => {
     setIsLoading(true);
@@ -877,7 +1050,7 @@ const PortfolioPage: React.FC = () => {
         });
         setBankEvents(response.items || []);
         setEventTotal(response.total || 0);
-      } else {
+      } else if (eventType === 'advisory') {
         const response = await portfolioApi.listAdvisoryLedger({
           accountId: queryAccountId,
           dateFrom: eventDateFrom || undefined,
@@ -887,6 +1060,17 @@ const PortfolioPage: React.FC = () => {
           pageSize: DEFAULT_PAGE_SIZE,
         });
         setAdvisoryEvents(response.items || []);
+        setEventTotal(response.total || 0);
+      } else {
+        const response = await portfolioApi.listInsuranceLedger({
+          accountId: queryAccountId,
+          dateFrom: eventDateFrom || undefined,
+          dateTo: eventDateTo || undefined,
+          eventType: eventInsuranceEventType || undefined,
+          page,
+          pageSize: DEFAULT_PAGE_SIZE,
+        });
+        setInsuranceEvents(response.items || []);
         setEventTotal(response.total || 0);
       }
     } catch (err) {
@@ -901,6 +1085,7 @@ const PortfolioPage: React.FC = () => {
     eventDateFrom,
     eventDateTo,
     eventDirection,
+    eventInsuranceEventType,
     eventSide,
     eventSymbol,
     eventType,
@@ -912,13 +1097,17 @@ const PortfolioPage: React.FC = () => {
   }, [eventPage, loadEventsPage]);
 
   const refreshPortfolioData = useCallback(async (page = eventPage, options: { refreshPrices?: boolean } = {}) => {
-    await Promise.all([loadSnapshot({ refreshPrices: options.refreshPrices ?? false }), loadEventsPage(page)]);
-  }, [eventPage, loadEventsPage, loadSnapshot]);
+    await Promise.all([loadSnapshot({ refreshPrices: options.refreshPrices ?? false }), loadEventsPage(page), loadInsurancePolicies()]);
+  }, [eventPage, loadEventsPage, loadInsurancePolicies, loadSnapshot]);
 
   useEffect(() => {
     void loadAccounts();
     void loadBrokers();
   }, [loadAccounts, loadBrokers]);
+
+  useEffect(() => {
+    void loadInsurancePolicies();
+  }, [loadInsurancePolicies]);
 
   useEffect(() => {
     void loadSnapshot();
@@ -950,6 +1139,7 @@ const PortfolioPage: React.FC = () => {
     eventActionType,
     eventBankAssetKind,
     eventAdvisoryDirection,
+    eventInsuranceEventType,
   ]);
 
   useEffect(() => {
@@ -957,20 +1147,28 @@ const PortfolioPage: React.FC = () => {
       setEventType('bank');
       return;
     }
+    if (selectedMarket === 'insurance') {
+      setEventType('insurance');
+      return;
+    }
     if (selectedMarket === 'advisory') {
       setEventType((prev) => (prev === 'cash' ? prev : 'advisory'));
       return;
     }
     if (selectedMarket === 'fund' || selectedMarket === 'crypto') {
-      setEventType((prev) => (prev === 'corporate' || prev === 'bank' || prev === 'advisory' ? 'trade' : prev));
+      setEventType((prev) => (prev === 'corporate' || prev === 'bank' || prev === 'advisory' || prev === 'insurance' ? 'trade' : prev));
       return;
     }
-    setEventType((prev) => (prev === 'bank' || prev === 'advisory' ? 'trade' : prev));
+    setEventType((prev) => (prev === 'bank' || prev === 'advisory' || prev === 'insurance' ? 'trade' : prev));
   }, [selectedMarket]);
 
   useEffect(() => {
     if (selectedMarket === 'bank') {
       setActiveEntryPanel('bank');
+      return;
+    }
+    if (selectedMarket === 'insurance') {
+      setActiveEntryPanel((prev) => (prev === 'insuranceLedger' ? prev : 'insurancePolicy'));
       return;
     }
     if (selectedMarket === 'advisory') {
@@ -1046,6 +1244,17 @@ const PortfolioPage: React.FC = () => {
   );
   const selectedAdvisoryOption = advisoryOptions.find((item) => item.optionValue === advisoryForm.selectedProduct);
   const selectedNavAdvisoryOption = advisoryOptions.find((item) => item.optionValue === advisoryNavForm.selectedProduct);
+  const selectedInsurancePolicy = insurancePolicies.find((item) => String(item.id) === insuranceLedgerForm.policyId);
+  const insuranceLedgerEventOptions = useMemo(
+    () => getInsuranceEventOptions(selectedInsurancePolicy),
+    [selectedInsurancePolicy],
+  );
+  useEffect(() => {
+    if (!selectedInsurancePolicy || insuranceLedgerEventOptions.length === 0) return;
+    if (!insuranceLedgerEventOptions.some((item) => item.value === insuranceLedgerForm.eventType)) {
+      setInsuranceLedgerForm((prev) => ({ ...prev, eventType: insuranceLedgerEventOptions[0].value }));
+    }
+  }, [insuranceLedgerEventOptions, insuranceLedgerForm.eventType, selectedInsurancePolicy]);
   const advisoryRedeemEstimate = useMemo(() => {
     if (advisoryForm.direction !== 'redeem' || !selectedAdvisoryOption) return null;
     const quantity = parsePositiveFormNumber(advisoryForm.quantity);
@@ -1370,6 +1579,85 @@ const PortfolioPage: React.FC = () => {
     }
   };
 
+  const handleInsurancePolicySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!writableAccountId || writableAccount?.market !== 'insurance') {
+      setWriteWarning('请先选择具体保险账户。');
+      return;
+    }
+    try {
+      setWriteWarning(null);
+      const created = await portfolioApi.createInsurancePolicy({
+        accountId: writableAccountId,
+        policyName: insurancePolicyForm.policyName,
+        insurer: insurancePolicyForm.insurer || undefined,
+        policyNo: insurancePolicyForm.policyNo || undefined,
+        insuranceKind: insurancePolicyForm.insuranceKind as any,
+        designType: insurancePolicyForm.designType as any,
+        currency: writableAccount.baseCurrency || 'CNY',
+        paymentMode: insurancePolicyForm.paymentMode,
+        premiumPerPeriod: insurancePolicyForm.premiumPerPeriod ? Number(insurancePolicyForm.premiumPerPeriod) : undefined,
+        firstPaymentDate: insurancePolicyForm.firstPaymentDate || undefined,
+        totalPeriods: insurancePolicyForm.totalPeriods ? Number(insurancePolicyForm.totalPeriods) : undefined,
+        note: insurancePolicyForm.note || undefined,
+      });
+      await refreshPortfolioData(eventPage, { refreshPrices: true });
+      setInsuranceLedgerForm((prev) => ({
+        ...prev,
+        policyId: String(created.id),
+        amount: insurancePolicyForm.premiumPerPeriod || prev.amount,
+        eventDate: insurancePolicyForm.firstPaymentDate || prev.eventDate,
+        eventType: getDefaultInsuranceEventType(created),
+        periodNo: '1',
+      }));
+      setInsurancePolicyForm((prev) => ({ ...prev, policyName: '', policyNo: '', note: '' }));
+      showPortfolioToast('保单已创建', `${created.policyName} 已加入保险账户。`);
+    } catch (err) {
+      setError(getParsedApiError(err));
+    }
+  };
+
+  const handleInsuranceLedgerSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!writableAccountId || writableAccount?.market !== 'insurance') {
+      setWriteWarning('请先选择具体保险账户。');
+      return;
+    }
+    if (!selectedInsurancePolicy) {
+      setWriteWarning('请先选择保单。');
+      return;
+    }
+    if (insuranceLedgerEventOptions.length === 0) {
+      setWriteWarning('这张保单已经终止，不能继续录入新的保险流水。');
+      return;
+    }
+    if (!insuranceLedgerEventOptions.some((item) => item.value === insuranceLedgerForm.eventType)) {
+      setWriteWarning('当前保单类型不支持这个操作，请重新选择。');
+      return;
+    }
+    try {
+      setWriteWarning(null);
+      await portfolioApi.createInsuranceLedger({
+        accountId: writableAccountId,
+        policyId: selectedInsurancePolicy.id,
+        eventDate: insuranceLedgerForm.eventDate,
+        eventType: insuranceLedgerForm.eventType,
+        amount: Number(insuranceLedgerForm.amount),
+        currency: selectedInsurancePolicy.currency || writableAccount.baseCurrency || 'CNY',
+        periodNo: insuranceLedgerForm.periodNo ? Number(insuranceLedgerForm.periodNo) : undefined,
+        note: insuranceLedgerForm.note || undefined,
+      });
+      await refreshPortfolioData(eventPage, { refreshPrices: true });
+      setInsuranceLedgerForm((prev) => ({ ...prev, amount: '', note: '' }));
+      showPortfolioToast(
+        '保险流水已记录',
+        `${selectedInsurancePolicy.policyName} · ${formatInsuranceEventType(insuranceLedgerForm.eventType)} ${formatMoney(Number(insuranceLedgerForm.amount), selectedInsurancePolicy.currency || 'CNY')}。`,
+      );
+    } catch (err) {
+      setError(getParsedApiError(err));
+    }
+  };
+
   const handleParseCsv = async () => {
     if (!csvFile) return;
     try {
@@ -1439,8 +1727,10 @@ const PortfolioPage: React.FC = () => {
         await portfolioApi.deleteCorporateAction(pendingDelete.id);
       } else if (pendingDelete.eventType === 'bank') {
         await portfolioApi.deleteBankLedger(pendingDelete.id);
-      } else {
+      } else if (pendingDelete.eventType === 'advisory') {
         await portfolioApi.deleteAdvisoryLedger(pendingDelete.id);
+      } else {
+        await portfolioApi.deleteInsuranceLedger(pendingDelete.id);
       }
       setPendingDelete(null);
       if (nextPage !== eventPage) {
@@ -1505,6 +1795,7 @@ const PortfolioPage: React.FC = () => {
     setEventActionType('');
     setEventBankAssetKind('');
     setEventAdvisoryDirection('');
+    setEventInsuranceEventType('');
   };
 
   const reloadSnapshotForScope = useCallback(async (
@@ -1766,6 +2057,7 @@ const PortfolioPage: React.FC = () => {
               <option value="crypto">数字货币</option>
               <option value="bank">银行</option>
               <option value="advisory">投顾组合</option>
+              <option value="insurance">保险</option>
             </select>
             <button type="submit" className="btn-secondary text-sm" disabled={accountCreating}>
               {accountCreating ? '创建中...' : '创建账户'}
@@ -2375,6 +2667,106 @@ const PortfolioPage: React.FC = () => {
                 <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>保存投顾净值</button>
               </form>
               ) : null}
+
+              {selectedEntryPanel === 'insurancePolicy' && isInsuranceAccount ? (
+              <form className="space-y-2" onSubmit={handleInsurancePolicySubmit}>
+                <input className={PORTFOLIO_INPUT_CLASS} placeholder="保单名称（必填）" value={insurancePolicyForm.policyName}
+                  onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, policyName: e.target.value }))} required />
+                <div className="grid grid-cols-2 gap-2">
+                  <input className={PORTFOLIO_INPUT_CLASS} placeholder="保险公司（选填）" value={insurancePolicyForm.insurer}
+                    onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, insurer: e.target.value }))} />
+                  <input className={PORTFOLIO_INPUT_CLASS} placeholder="保单号（选填）" value={insurancePolicyForm.policyNo}
+                    onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, policyNo: e.target.value }))} />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <select className={PORTFOLIO_SELECT_CLASS} value={insurancePolicyForm.insuranceKind}
+                    onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, insuranceKind: e.target.value }))}>
+                    <option value="annuity">年金险</option>
+                    <option value="whole_life">终身寿险</option>
+                    <option value="endowment">两全保险</option>
+                    <option value="universal">万能险</option>
+                    <option value="unit_linked">投连险</option>
+                    <option value="other">其他保险</option>
+                  </select>
+                  <select className={PORTFOLIO_SELECT_CLASS} value={insurancePolicyForm.designType}
+                    onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, designType: e.target.value }))}>
+                    <option value="ordinary">普通型</option>
+                    <option value="participating">分红型</option>
+                    <option value="universal">万能型</option>
+                    <option value="unit_linked">投资连结型</option>
+                    <option value="other">其他</option>
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <select className={PORTFOLIO_SELECT_CLASS} value={insurancePolicyForm.paymentMode}
+                    onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, paymentMode: e.target.value as PortfolioInsurancePaymentMode }))}>
+                    <option value="single">趸交</option>
+                    <option value="annual">年交</option>
+                    <option value="semiannual">半年交</option>
+                    <option value="quarterly">季交</option>
+                    <option value="monthly">月交</option>
+                    <option value="irregular">不定期</option>
+                  </select>
+                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder="每期保费（选填）" value={insurancePolicyForm.premiumPerPeriod}
+                    onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, premiumPerPeriod: e.target.value }))} />
+                </div>
+                {insurancePolicyForm.paymentMode !== 'irregular' ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <input className={PORTFOLIO_INPUT_CLASS} type="date" value={insurancePolicyForm.firstPaymentDate}
+                      onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, firstPaymentDate: e.target.value }))} />
+                    <input className={PORTFOLIO_INPUT_CLASS} type="number" min="1" step="1" placeholder="应交期数（选填）" value={insurancePolicyForm.totalPeriods}
+                      onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, totalPeriods: e.target.value }))} />
+                  </div>
+                ) : null}
+                <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>保存保单</button>
+              </form>
+              ) : null}
+
+              {selectedEntryPanel === 'insuranceLedger' && isInsuranceAccount ? (
+              <form className="space-y-2" onSubmit={handleInsuranceLedgerSubmit}>
+                <select className={PORTFOLIO_SELECT_CLASS} value={insuranceLedgerForm.policyId}
+                  onChange={(e) => {
+                    const policy = insurancePolicies.find((item) => String(item.id) === e.target.value);
+                    const nextEventType = getDefaultInsuranceEventType(policy);
+                    setInsuranceLedgerForm((prev) => ({
+                      ...prev,
+                      policyId: e.target.value,
+                      eventType: nextEventType,
+                      amount: prev.amount || (policy?.premiumPerPeriod ? String(policy.premiumPerPeriod) : ''),
+                    }));
+                  }} required>
+                  <option value="">选择保单</option>
+                  {insurancePolicies.map((item) => (
+                    <option key={item.id} value={item.id}>{item.policyName}{item.insurer ? ` · ${item.insurer}` : ''}</option>
+                  ))}
+                </select>
+                <div className="grid grid-cols-2 gap-2">
+                  <input className={PORTFOLIO_INPUT_CLASS} type="date" value={insuranceLedgerForm.eventDate}
+                    onChange={(e) => setInsuranceLedgerForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
+                  <select className={PORTFOLIO_SELECT_CLASS} value={insuranceLedgerForm.eventType}
+                    onChange={(e) => setInsuranceLedgerForm((prev) => ({ ...prev, eventType: e.target.value as PortfolioInsuranceEventType }))} disabled={!selectedInsurancePolicy}>
+                    {insuranceLedgerEventOptions.length === 0 ? (
+                      <option value={insuranceLedgerForm.eventType}>{selectedInsurancePolicy ? '保单已终止' : '先选择保单'}</option>
+                    ) : insuranceLedgerEventOptions.map((item) => (
+                      <option key={item.value} value={item.value}>{item.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder={insuranceLedgerForm.eventType === 'value_update' ? '当前现金价值/账户价值' : '金额'} value={insuranceLedgerForm.amount}
+                    onChange={(e) => setInsuranceLedgerForm((prev) => ({ ...prev, amount: e.target.value }))} required />
+                  {insuranceLedgerForm.eventType === 'premium' ? (
+                    <input className={PORTFOLIO_INPUT_CLASS} type="number" min="1" step="1" placeholder="期数（选填）" value={insuranceLedgerForm.periodNo}
+                      onChange={(e) => setInsuranceLedgerForm((prev) => ({ ...prev, periodNo: e.target.value }))} />
+                  ) : (
+                    <input className={PORTFOLIO_INPUT_CLASS} placeholder="系统自动归类为返还/价值" disabled />
+                  )}
+                </div>
+                <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId || insurancePolicies.length === 0 || insuranceLedgerEventOptions.length === 0}>
+                  {insuranceLedgerForm.eventType === 'value_update' ? '保存保单价值' : '提交保险流水'}
+                </button>
+              </form>
+              ) : null}
             </div>
           </Card>
         </section>
@@ -2454,6 +2846,7 @@ const PortfolioPage: React.FC = () => {
                 {isStockAccount || selectedAccount === 'all' ? <option value="corporate">公司行为</option> : null}
                 {isBankAccount || selectedAccount === 'all' ? <option value="bank">银行流水</option> : null}
                 {isAdvisoryAccount || selectedAccount === 'all' ? <option value="advisory">投顾流水</option> : null}
+                {isInsuranceAccount || selectedAccount === 'all' ? <option value="insurance">保险流水</option> : null}
               </select>
               <button
                 type="button"
@@ -2526,6 +2919,23 @@ const PortfolioPage: React.FC = () => {
                     <option value="">全部投顾方向</option>
                     <option value="subscribe">申购</option>
                     <option value="redeem">赎回</option>
+                  </select>
+                ) : null}
+                {eventType === 'insurance' ? (
+                  <select className={PORTFOLIO_SELECT_CLASS} value={eventInsuranceEventType}
+                    onChange={(e) => setEventInsuranceEventType(e.target.value as '' | PortfolioInsuranceEventType)}>
+                    <option value="">全部保险事件</option>
+                    <option value="premium">缴费</option>
+                    <option value="value_update">价值更新</option>
+                    <option value="survival_benefit">生存金</option>
+                    <option value="annuity_payment">年金领取</option>
+                    <option value="maturity_benefit">满期金</option>
+                    <option value="dividend">分红</option>
+                    <option value="partial_withdrawal">部分领取</option>
+                    <option value="surrender">退保到账</option>
+                    <option value="refund">退费</option>
+                    <option value="other_inflow">其他返还</option>
+                    <option value="other_outflow">其他支出</option>
                   </select>
                 ) : null}
               </div>
@@ -2632,12 +3042,36 @@ const PortfolioPage: React.FC = () => {
                   ) : null}
                 </div>
               ))}
+              {eventType === 'insurance' && insuranceEvents.map((item) => {
+                const policy = insurancePolicies.find((candidate) => candidate.id === item.policyId);
+                return (
+                <div key={`i-${item.id}`} className="flex items-start justify-between gap-3 border-b border-white/5 py-2 text-xs text-secondary">
+                  <div className="min-w-0">
+                    {item.eventDate} {formatInsuranceEventType(item.eventType)} {policy?.policyName || `保单 #${item.policyId}`} · {item.amount} {item.currency}{item.periodNo ? ` · 第 ${item.periodNo} 期` : ''}
+                  </div>
+                  {!writeBlocked ? (
+                    <button
+                      type="button"
+                      className="btn-secondary shrink-0 !px-3 !py-1 !text-[11px]"
+                      onClick={() => openDeleteDialog({
+                        eventType: 'insurance',
+                        id: item.id,
+                        message: `确认删除 ${item.eventDate} 的保险流水（${formatInsuranceEventType(item.eventType)} ${policy?.policyName || `保单 #${item.policyId}` }）吗？`,
+                      })}
+                    >
+                      删除
+                    </button>
+                  ) : null}
+                </div>
+                );
+              })}
               {!eventLoading
                 && ((eventType === 'trade' && tradeEvents.length === 0)
                   || (eventType === 'cash' && cashEvents.length === 0)
                   || (eventType === 'corporate' && corporateEvents.length === 0)
                   || (eventType === 'bank' && bankEvents.length === 0)
-                  || (eventType === 'advisory' && advisoryEvents.length === 0)) ? (
+                  || (eventType === 'advisory' && advisoryEvents.length === 0)
+                  || (eventType === 'insurance' && insuranceEvents.length === 0)) ? (
                     <EmptyState
                       title="暂无流水"
                       description="调整筛选条件或先录入一笔流水。"

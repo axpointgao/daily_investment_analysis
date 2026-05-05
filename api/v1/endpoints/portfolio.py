@@ -32,6 +32,12 @@ from api.v1.schemas.portfolio import (
     PortfolioImportCommitResponse,
     PortfolioImportParseResponse,
     PortfolioImportTradeItem,
+    PortfolioInsuranceLedgerCreateRequest,
+    PortfolioInsuranceLedgerListResponse,
+    PortfolioInsurancePolicyCreateRequest,
+    PortfolioInsurancePolicyItem,
+    PortfolioInsurancePolicyListResponse,
+    PortfolioInsurancePolicyUpdateRequest,
     PortfolioManualPriceItem,
     PortfolioManualPriceUpsertRequest,
     PortfolioRiskResponse,
@@ -503,6 +509,189 @@ def delete_advisory_ledger(entry_id: int) -> PortfolioDeleteResponse:
         raise
     except Exception as exc:
         raise _internal_error("Delete advisory ledger event failed", exc)
+
+
+@router.post(
+    "/insurance-policies",
+    response_model=PortfolioInsurancePolicyItem,
+    responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Create insurance policy",
+)
+def create_insurance_policy(request: PortfolioInsurancePolicyCreateRequest) -> PortfolioInsurancePolicyItem:
+    service = PortfolioService()
+    try:
+        data = service.create_insurance_policy(
+            account_id=request.account_id,
+            policy_name=request.policy_name,
+            insurer=request.insurer,
+            policy_no=request.policy_no,
+            insurance_kind=request.insurance_kind,
+            design_type=request.design_type,
+            currency=request.currency,
+            status=request.status,
+            payment_mode=request.payment_mode,
+            premium_per_period=request.premium_per_period,
+            first_payment_date=request.first_payment_date,
+            total_periods=request.total_periods,
+            note=request.note,
+        )
+        return PortfolioInsurancePolicyItem(**data)
+    except PortfolioBusyError as exc:
+        raise _conflict_error(error="portfolio_busy", message=str(exc))
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Create insurance policy failed", exc)
+
+
+@router.get(
+    "/insurance-policies",
+    response_model=PortfolioInsurancePolicyListResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="List insurance policies",
+)
+def list_insurance_policies(
+    account_id: Optional[int] = Query(None, description="Optional insurance account id"),
+    include_inactive: bool = Query(False, description="Whether to include terminal/inactive policies"),
+) -> PortfolioInsurancePolicyListResponse:
+    service = PortfolioService()
+    try:
+        data = service.list_insurance_policies(account_id=account_id, include_inactive=include_inactive)
+        return PortfolioInsurancePolicyListResponse(
+            policies=[PortfolioInsurancePolicyItem(**item) for item in data["policies"]]
+        )
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("List insurance policies failed", exc)
+
+
+@router.put(
+    "/insurance-policies/{policy_id}",
+    response_model=PortfolioInsurancePolicyItem,
+    responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Update insurance policy",
+)
+def update_insurance_policy(
+    policy_id: int,
+    request: PortfolioInsurancePolicyUpdateRequest,
+) -> PortfolioInsurancePolicyItem:
+    service = PortfolioService()
+    try:
+        updated = service.update_insurance_policy(
+            policy_id,
+            policy_name=request.policy_name,
+            insurer=request.insurer,
+            policy_no=request.policy_no,
+            insurance_kind=request.insurance_kind,
+            design_type=request.design_type,
+            currency=request.currency,
+            status=request.status,
+            payment_mode=request.payment_mode,
+            premium_per_period=request.premium_per_period,
+            first_payment_date=request.first_payment_date,
+            total_periods=request.total_periods,
+            note=request.note,
+        )
+        if updated is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "not_found", "message": f"Insurance policy not found: {policy_id}"},
+            )
+        return PortfolioInsurancePolicyItem(**updated)
+    except PortfolioBusyError as exc:
+        raise _conflict_error(error="portfolio_busy", message=str(exc))
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Update insurance policy failed", exc)
+
+
+@router.post(
+    "/insurance-ledger",
+    response_model=PortfolioEventCreatedResponse,
+    responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Record insurance premium, return or valuation event",
+)
+def create_insurance_ledger(request: PortfolioInsuranceLedgerCreateRequest) -> PortfolioEventCreatedResponse:
+    service = PortfolioService()
+    try:
+        data = service.record_insurance_ledger(
+            account_id=request.account_id,
+            policy_id=request.policy_id,
+            event_date=request.event_date,
+            event_type=request.event_type,
+            amount=request.amount,
+            currency=request.currency,
+            period_no=request.period_no,
+            note=request.note,
+        )
+        return PortfolioEventCreatedResponse(**data)
+    except PortfolioBusyError as exc:
+        raise _conflict_error(error="portfolio_busy", message=str(exc))
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Create insurance ledger event failed", exc)
+
+
+@router.get(
+    "/insurance-ledger",
+    response_model=PortfolioInsuranceLedgerListResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="List insurance ledger events",
+)
+def list_insurance_ledger(
+    account_id: Optional[int] = Query(None, description="Optional insurance account id"),
+    policy_id: Optional[int] = Query(None, description="Optional policy id"),
+    date_from: Optional[date] = Query(None, description="Insurance event date from"),
+    date_to: Optional[date] = Query(None, description="Insurance event date to"),
+    event_type: Optional[str] = Query(None, description="Optional insurance event type"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> PortfolioInsuranceLedgerListResponse:
+    service = PortfolioService()
+    try:
+        data = service.list_insurance_ledger_events(
+            account_id=account_id,
+            policy_id=policy_id,
+            date_from=date_from,
+            date_to=date_to,
+            event_type=event_type,
+            page=page,
+            page_size=page_size,
+        )
+        return PortfolioInsuranceLedgerListResponse(**data)
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("List insurance ledger events failed", exc)
+
+
+@router.delete(
+    "/insurance-ledger/{entry_id}",
+    response_model=PortfolioDeleteResponse,
+    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Delete insurance ledger event",
+)
+def delete_insurance_ledger(entry_id: int) -> PortfolioDeleteResponse:
+    service = PortfolioService()
+    try:
+        ok = service.delete_insurance_ledger_event(entry_id)
+        if not ok:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "not_found", "message": f"Insurance ledger entry not found: {entry_id}"},
+            )
+        return PortfolioDeleteResponse(deleted=1)
+    except PortfolioBusyError as exc:
+        raise _conflict_error(error="portfolio_busy", message=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _internal_error("Delete insurance ledger event failed", exc)
 
 
 @router.get(

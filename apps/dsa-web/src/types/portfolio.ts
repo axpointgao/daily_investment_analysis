@@ -2,9 +2,25 @@ export type PortfolioCostMethod = 'fifo' | 'avg';
 export type PortfolioSide = 'buy' | 'sell';
 export type PortfolioCashDirection = 'in' | 'out';
 export type PortfolioCorporateActionType = 'cash_dividend' | 'split_adjustment';
-export type PortfolioMarket = 'cn' | 'hk' | 'us' | 'fund' | 'crypto' | 'bank' | 'advisory';
+export type PortfolioMarket = 'cn' | 'hk' | 'us' | 'fund' | 'crypto' | 'bank' | 'advisory' | 'insurance';
 export type PortfolioBankAssetKind = 'demand' | 'deposit' | 'wealth';
 export type PortfolioAdvisoryDirection = 'subscribe' | 'redeem';
+export type PortfolioInsuranceKind = 'annuity' | 'whole_life' | 'endowment' | 'universal' | 'unit_linked' | 'other';
+export type PortfolioInsuranceDesignType = 'ordinary' | 'participating' | 'universal' | 'unit_linked' | 'other';
+export type PortfolioInsuranceStatus = 'active' | 'paid_up' | 'surrendered' | 'matured' | 'expired' | 'cancelled';
+export type PortfolioInsurancePaymentMode = 'single' | 'annual' | 'semiannual' | 'quarterly' | 'monthly' | 'irregular';
+export type PortfolioInsuranceEventType =
+  | 'premium'
+  | 'value_update'
+  | 'survival_benefit'
+  | 'annuity_payment'
+  | 'maturity_benefit'
+  | 'dividend'
+  | 'partial_withdrawal'
+  | 'surrender'
+  | 'refund'
+  | 'other_inflow'
+  | 'other_outflow';
 export type PortfolioBankInvestmentNature =
   | 'fixed_income'
   | 'mixed'
@@ -70,6 +86,24 @@ export interface PortfolioPositionItem {
   platform?: string | null;
   productCode?: string | null;
   investmentStyle?: string | null;
+  policyId?: number | null;
+  policyName?: string | null;
+  insurer?: string | null;
+  policyNo?: string | null;
+  insuranceKind?: string | null;
+  designType?: string | null;
+  policyStatus?: string | null;
+  paymentMode?: string | null;
+  premiumPerPeriod?: number | null;
+  firstPaymentDate?: string | null;
+  totalPeriods?: number | null;
+  paidPeriods?: number | null;
+  paidPremium?: number | null;
+  receivedAmount?: number | null;
+  cashValue?: number | null;
+  valueDate?: string | null;
+  nextPaymentDate?: string | null;
+  valueEstimated?: boolean | null;
 }
 
 export interface PortfolioAccountSnapshot {
@@ -381,6 +415,76 @@ export interface PortfolioAdvisoryLedgerListItem {
 
 export interface PortfolioAdvisoryLedgerListResponse {
   items: PortfolioAdvisoryLedgerListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface PortfolioInsurancePolicyCreateRequest {
+  accountId: number;
+  policyName: string;
+  insurer?: string;
+  policyNo?: string;
+  insuranceKind?: PortfolioInsuranceKind;
+  designType?: PortfolioInsuranceDesignType;
+  currency?: string;
+  status?: PortfolioInsuranceStatus;
+  paymentMode?: PortfolioInsurancePaymentMode;
+  premiumPerPeriod?: number;
+  firstPaymentDate?: string;
+  totalPeriods?: number;
+  note?: string;
+}
+
+export interface PortfolioInsurancePolicyItem {
+  id: number;
+  accountId: number;
+  policyName: string;
+  insurer?: string | null;
+  policyNo?: string | null;
+  insuranceKind?: string | null;
+  designType?: string | null;
+  currency: string;
+  status: PortfolioInsuranceStatus;
+  paymentMode: PortfolioInsurancePaymentMode;
+  premiumPerPeriod?: number | null;
+  firstPaymentDate?: string | null;
+  totalPeriods?: number | null;
+  note?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface PortfolioInsurancePolicyListResponse {
+  policies: PortfolioInsurancePolicyItem[];
+}
+
+export interface PortfolioInsuranceLedgerCreateRequest {
+  accountId: number;
+  policyId: number;
+  eventDate: string;
+  eventType: PortfolioInsuranceEventType;
+  amount: number;
+  currency?: string;
+  periodNo?: number;
+  note?: string;
+}
+
+export interface PortfolioInsuranceLedgerListItem {
+  id: number;
+  accountId: number;
+  policyId: number;
+  eventDate: string;
+  eventType: PortfolioInsuranceEventType;
+  amount: number;
+  currency: string;
+  periodNo?: number | null;
+  note?: string | null;
+  createdAt?: string | null;
+}
+
+export interface PortfolioInsuranceLedgerListResponse {
+  items: PortfolioInsuranceLedgerListItem[];
   total: number;
   page: number;
   pageSize: number;

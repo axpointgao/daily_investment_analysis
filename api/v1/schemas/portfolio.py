@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-PortfolioMarket = Literal["cn", "hk", "us", "fund", "crypto", "bank", "advisory"]
+PortfolioMarket = Literal["cn", "hk", "us", "fund", "crypto", "bank", "advisory", "insurance"]
 
 
 class PortfolioAccountCreateRequest(BaseModel):
@@ -199,6 +199,103 @@ class PortfolioAdvisoryLedgerListResponse(BaseModel):
     page_size: int
 
 
+class PortfolioInsurancePolicyCreateRequest(BaseModel):
+    account_id: int
+    policy_name: str = Field(..., min_length=1, max_length=128)
+    insurer: Optional[str] = Field(None, max_length=64)
+    policy_no: Optional[str] = Field(None, max_length=64)
+    insurance_kind: Optional[Literal["annuity", "whole_life", "endowment", "universal", "unit_linked", "other"]] = "other"
+    design_type: Optional[Literal["ordinary", "participating", "universal", "unit_linked", "other"]] = "ordinary"
+    currency: Optional[str] = Field(None, min_length=3, max_length=8)
+    status: Literal["active", "paid_up", "surrendered", "matured", "expired", "cancelled"] = "active"
+    payment_mode: Literal["single", "annual", "semiannual", "quarterly", "monthly", "irregular"] = "single"
+    premium_per_period: Optional[float] = Field(None, gt=0)
+    first_payment_date: Optional[date] = None
+    total_periods: Optional[int] = Field(None, gt=0)
+    note: Optional[str] = Field(None, max_length=255)
+
+
+class PortfolioInsurancePolicyUpdateRequest(BaseModel):
+    policy_name: Optional[str] = Field(None, min_length=1, max_length=128)
+    insurer: Optional[str] = Field(None, max_length=64)
+    policy_no: Optional[str] = Field(None, max_length=64)
+    insurance_kind: Optional[Literal["annuity", "whole_life", "endowment", "universal", "unit_linked", "other"]] = None
+    design_type: Optional[Literal["ordinary", "participating", "universal", "unit_linked", "other"]] = None
+    currency: Optional[str] = Field(None, min_length=3, max_length=8)
+    status: Optional[Literal["active", "paid_up", "surrendered", "matured", "expired", "cancelled"]] = None
+    payment_mode: Optional[Literal["single", "annual", "semiannual", "quarterly", "monthly", "irregular"]] = None
+    premium_per_period: Optional[float] = Field(None, gt=0)
+    first_payment_date: Optional[date] = None
+    total_periods: Optional[int] = Field(None, gt=0)
+    note: Optional[str] = Field(None, max_length=255)
+
+
+class PortfolioInsurancePolicyItem(BaseModel):
+    id: int
+    account_id: int
+    policy_name: str
+    insurer: Optional[str] = None
+    policy_no: Optional[str] = None
+    insurance_kind: Optional[str] = None
+    design_type: Optional[str] = None
+    currency: str
+    status: str
+    payment_mode: str
+    premium_per_period: Optional[float] = None
+    first_payment_date: Optional[str] = None
+    total_periods: Optional[int] = None
+    note: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class PortfolioInsurancePolicyListResponse(BaseModel):
+    policies: List[PortfolioInsurancePolicyItem] = Field(default_factory=list)
+
+
+class PortfolioInsuranceLedgerCreateRequest(BaseModel):
+    account_id: int
+    policy_id: int
+    event_date: date
+    event_type: Literal[
+        "premium",
+        "value_update",
+        "survival_benefit",
+        "annuity_payment",
+        "maturity_benefit",
+        "dividend",
+        "partial_withdrawal",
+        "surrender",
+        "refund",
+        "other_inflow",
+        "other_outflow",
+    ]
+    amount: float = Field(..., gt=0)
+    currency: Optional[str] = Field(None, min_length=3, max_length=8)
+    period_no: Optional[int] = Field(None, gt=0)
+    note: Optional[str] = Field(None, max_length=255)
+
+
+class PortfolioInsuranceLedgerListItem(BaseModel):
+    id: int
+    account_id: int
+    policy_id: int
+    event_date: str
+    event_type: str
+    amount: float
+    currency: str
+    period_no: Optional[int] = None
+    note: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class PortfolioInsuranceLedgerListResponse(BaseModel):
+    items: List[PortfolioInsuranceLedgerListItem] = Field(default_factory=list)
+    total: int
+    page: int
+    page_size: int
+
+
 class PortfolioDeleteResponse(BaseModel):
     deleted: int
 
@@ -297,6 +394,24 @@ class PortfolioPositionItem(BaseModel):
     platform: Optional[str] = None
     product_code: Optional[str] = None
     investment_style: Optional[str] = None
+    policy_id: Optional[int] = None
+    policy_name: Optional[str] = None
+    insurer: Optional[str] = None
+    policy_no: Optional[str] = None
+    insurance_kind: Optional[str] = None
+    design_type: Optional[str] = None
+    policy_status: Optional[str] = None
+    payment_mode: Optional[str] = None
+    premium_per_period: Optional[float] = None
+    first_payment_date: Optional[str] = None
+    total_periods: Optional[int] = None
+    paid_periods: Optional[int] = None
+    paid_premium: Optional[float] = None
+    received_amount: Optional[float] = None
+    cash_value: Optional[float] = None
+    value_date: Optional[str] = None
+    next_payment_date: Optional[str] = None
+    value_estimated: Optional[bool] = None
 
 
 class PortfolioAccountSnapshot(BaseModel):

@@ -595,6 +595,123 @@ class PortfolioApiTestCase(unittest.TestCase):
         self.assertEqual(delete_resp.status_code, 200)
         self.assertEqual(delete_resp.json()["deleted"], 1)
 
+    def test_insurance_policy_and_ledger_api_flow(self) -> None:
+        create_resp = self.client.post(
+            "/api/v1/portfolio/accounts",
+            json={"name": "保险账户", "broker": "示例保险", "market": "insurance", "base_currency": "CNY"},
+        )
+        self.assertEqual(create_resp.status_code, 200)
+        account_id = create_resp.json()["id"]
+
+        policy_resp = self.client.post(
+            "/api/v1/portfolio/insurance-policies",
+            json={
+                "account_id": account_id,
+                "policy_name": "养老年金",
+                "insurer": "示例保险",
+                "insurance_kind": "annuity",
+                "design_type": "participating",
+                "payment_mode": "annual",
+                "premium_per_period": 10000,
+                "first_payment_date": "2026-01-01",
+                "total_periods": 3,
+            },
+        )
+        self.assertEqual(policy_resp.status_code, 200)
+        policy_id = policy_resp.json()["id"]
+
+        list_policy_resp = self.client.get(
+            "/api/v1/portfolio/insurance-policies",
+            params={"account_id": account_id},
+        )
+        self.assertEqual(list_policy_resp.status_code, 200)
+        self.assertEqual(len(list_policy_resp.json()["policies"]), 1)
+
+        ledger_resp = self.client.post(
+            "/api/v1/portfolio/insurance-ledger",
+            json={
+                "account_id": account_id,
+                "policy_id": policy_id,
+                "event_date": "2026-01-01",
+                "event_type": "premium",
+                "amount": 10000,
+                "period_no": 1,
+            },
+        )
+        self.assertEqual(ledger_resp.status_code, 200)
+
+        update_name_resp = self.client.put(
+            f"/api/v1/portfolio/insurance-policies/{policy_id}",
+            json={"policy_name": "养老年金 A 款"},
+        )
+        self.assertEqual(update_name_resp.status_code, 200)
+        self.assertEqual(update_name_resp.json()["policy_name"], "养老年金 A 款")
+
+        update_kind_resp = self.client.put(
+            f"/api/v1/portfolio/insurance-policies/{policy_id}",
+            json={"insurance_kind": "whole_life"},
+        )
+        self.assertEqual(update_kind_resp.status_code, 400)
+
+        self.assertEqual(
+            self.client.post(
+                "/api/v1/portfolio/insurance-ledger",
+                json={
+                    "account_id": account_id,
+                    "policy_id": policy_id,
+                    "event_date": "2026-12-31",
+                    "event_type": "value_update",
+                    "amount": 10300,
+                },
+            ).status_code,
+            200,
+        )
+
+        ledger_list_resp = self.client.get(
+            "/api/v1/portfolio/insurance-ledger",
+            params={"account_id": account_id, "event_type": "premium"},
+        )
+        self.assertEqual(ledger_list_resp.status_code, 200)
+        self.assertEqual(ledger_list_resp.json()["total"], 1)
+
+        snapshot_resp = self.client.get(
+            "/api/v1/portfolio/snapshot",
+            params={"account_id": account_id, "as_of": "2026-12-31"},
+        )
+        self.assertEqual(snapshot_resp.status_code, 200)
+        position = snapshot_resp.json()["accounts"][0]["positions"][0]
+        self.assertEqual(position["market"], "insurance")
+        self.assertEqual(position["policy_name"], "养老年金 A 款")
+        self.assertAlmostEqual(position["market_value_base"], 10300.0, places=6)
+        self.assertAlmostEqual(snapshot_resp.json()["asset_breakdown"]["insurance"], 10300.0, places=6)
+
+        delete_resp = self.client.delete(f"/api/v1/portfolio/insurance-ledger/{ledger_resp.json()['id']}")
+        self.assertEqual(delete_resp.status_code, 200)
+        self.assertEqual(delete_resp.json()["deleted"], 1)
+
+        surrender_resp = self.client.post(
+            "/api/v1/portfolio/insurance-ledger",
+            json={
+                "account_id": account_id,
+                "policy_id": policy_id,
+                "event_date": "2027-01-01",
+                "event_type": "surrender",
+                "amount": 11000,
+            },
+        )
+        self.assertEqual(surrender_resp.status_code, 200)
+
+        active_only_resp = self.client.get("/api/v1/portfolio/insurance-policies", params={"account_id": account_id})
+        self.assertEqual(active_only_resp.status_code, 200)
+        self.assertEqual(active_only_resp.json()["policies"], [])
+
+        include_inactive_resp = self.client.get(
+            "/api/v1/portfolio/insurance-policies",
+            params={"account_id": account_id, "include_inactive": True},
+        )
+        self.assertEqual(include_inactive_resp.status_code, 200)
+        self.assertEqual(include_inactive_resp.json()["policies"][0]["status"], "surrendered")
+
     def test_csv_broker_list_endpoint(self) -> None:
         resp = self.client.get("/api/v1/portfolio/imports/csv/brokers")
         self.assertEqual(resp.status_code, 200)

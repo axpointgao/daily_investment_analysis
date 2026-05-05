@@ -1443,6 +1443,188 @@ class PortfolioServiceTestCase(unittest.TestCase):
                 currency="CNY",
             )
 
+    def test_insurance_account_tracks_premium_returns_and_value(self) -> None:
+        account = self.service.create_account(name="Insurance", broker="保险公司", market="insurance", base_currency="CNY")
+        aid = account["id"]
+        today = date.today()
+
+        policy = self.service.create_insurance_policy(
+            account_id=aid,
+            policy_name="养老年金",
+            insurer="示例保险",
+            insurance_kind="annuity",
+            design_type="participating",
+            payment_mode="annual",
+            premium_per_period=10000,
+            first_payment_date=today,
+            total_periods=3,
+        )
+        self.service.record_insurance_ledger(
+            account_id=aid,
+            policy_id=policy["id"],
+            event_date=today,
+            event_type="premium",
+            amount=10000,
+            period_no=1,
+        )
+
+        initial = self.service.get_portfolio_snapshot(account_id=aid, as_of=today, refresh_prices=True)
+        account_snapshot = initial["accounts"][0]
+        self.assertAlmostEqual(account_snapshot["total_cash"], -10000.0, places=6)
+        self.assertAlmostEqual(account_snapshot["total_market_value"], 10000.0, places=6)
+        position = account_snapshot["positions"][0]
+        self.assertEqual(position["market"], "insurance")
+        self.assertTrue(position["value_estimated"])
+        self.assertIsNotNone(position["next_payment_date"])
+        self.assertTrue(str(position["next_payment_date"]).startswith(str(today.year + 1)))
+
+        self.service.record_insurance_ledger(
+            account_id=aid,
+            policy_id=policy["id"],
+            event_date=today,
+            event_type="value_update",
+            amount=10500,
+        )
+        self.service.record_insurance_ledger(
+            account_id=aid,
+            policy_id=policy["id"],
+            event_date=today,
+            event_type="annuity_payment",
+            amount=500,
+        )
+        updated = self.service.get_portfolio_snapshot(account_id=aid, as_of=today, refresh_prices=True)
+        updated_position = updated["accounts"][0]["positions"][0]
+        self.assertFalse(updated_position["value_estimated"])
+        self.assertAlmostEqual(updated_position["market_value_base"], 10500.0, places=6)
+        self.assertAlmostEqual(updated_position["received_amount"], 500.0, places=6)
+        self.assertAlmostEqual(updated_position["unrealized_pnl_base"], 1000.0, places=6)
+        self.assertAlmostEqual(updated["asset_breakdown"]["insurance"], 10500.0, places=6)
+
+        self.service.record_insurance_ledger(
+            account_id=aid,
+            policy_id=policy["id"],
+            event_date=today,
+            event_type="surrender",
+            amount=11000,
+        )
+        surrendered = self.service.get_portfolio_snapshot(account_id=aid, as_of=today, refresh_prices=True)
+        self.assertEqual(surrendered["accounts"][0]["positions"][0]["market_value_base"], 0.0)
+        self.assertAlmostEqual(surrendered["accounts"][0]["total_cash"], 1500.0, places=6)
+
+    def test_insurance_ledger_event_type_must_match_policy_type(self) -> None:
+        account = self.service.create_account(name="Insurance", broker="保险公司", market="insurance", base_currency="CNY")
+        aid = account["id"]
+
+        annuity = self.service.create_insurance_policy(
+            account_id=aid,
+            policy_name="养老年金",
+            insurance_kind="annuity",
+            payment_mode="annual",
+        )
+        whole_life = self.service.create_insurance_policy(
+            account_id=aid,
+            policy_name="增额终身寿",
+            insurance_kind="whole_life",
+            payment_mode="annual",
+        )
+
+        self.service.record_insurance_ledger(
+            account_id=aid,
+            policy_id=annuity["id"],
+            event_date=date(2026, 1, 1),
+            event_type="annuity_payment",
+            amount=1000,
+        )
+        self.service.record_insurance_ledger(
+            account_id=aid,
+            policy_id=whole_life["id"],
+            event_date=date(2026, 1, 1),
+            event_type="partial_withdrawal",
+            amount=1000,
+        )
+        with self.assertRaisesRegex(ValueError, "event_type is not available"):
+            self.service.record_insurance_ledger(
+                account_id=aid,
+                policy_id=whole_life["id"],
+                event_date=date(2026, 1, 1),
+                event_type="annuity_payment",
+                amount=1000,
+            )
+
+    def test_insurance_ledger_rejects_events_after_terminal_event(self) -> None:
+        account = self.service.create_account(name="Insurance", broker="保险公司", market="insurance", base_currency="CNY")
+        aid = account["id"]
+        policy = self.service.create_insurance_policy(
+            account_id=aid,
+            policy_name="增额终身寿",
+            insurance_kind="whole_life",
+            payment_mode="annual",
+        )
+
+        self.service.record_insurance_ledger(
+            account_id=aid,
+            policy_id=policy["id"],
+            event_date=date(2026, 1, 1),
+            event_type="surrender",
+            amount=10000,
+        )
+        policies = self.service.list_insurance_policies(account_id=aid, include_inactive=True)["policies"]
+        self.assertEqual(policies[0]["status"], "surrendered")
+        with self.assertRaisesRegex(ValueError, "event_type is not available"):
+            self.service.record_insurance_ledger(
+                account_id=aid,
+                policy_id=policy["id"],
+                event_date=date(2026, 1, 2),
+                event_type="premium",
+                amount=1000,
+            )
+
+    def test_deleting_terminal_insurance_event_restores_active_policy(self) -> None:
+        account = self.service.create_account(name="Insurance", broker="保险公司", market="insurance", base_currency="CNY")
+        aid = account["id"]
+        policy = self.service.create_insurance_policy(
+            account_id=aid,
+            policy_name="增额终身寿",
+            insurance_kind="whole_life",
+            payment_mode="annual",
+        )
+
+        terminal = self.service.record_insurance_ledger(
+            account_id=aid,
+            policy_id=policy["id"],
+            event_date=date(2026, 1, 1),
+            event_type="surrender",
+            amount=10000,
+        )
+        self.assertTrue(self.service.delete_insurance_ledger_event(terminal["id"]))
+        policies = self.service.list_insurance_policies(account_id=aid, include_inactive=True)["policies"]
+        self.assertEqual(policies[0]["status"], "active")
+
+    def test_insurance_policy_update_locks_contract_fields_after_ledger_exists(self) -> None:
+        account = self.service.create_account(name="Insurance", broker="保险公司", market="insurance", base_currency="CNY")
+        aid = account["id"]
+        policy = self.service.create_insurance_policy(
+            account_id=aid,
+            policy_name="养老年金",
+            insurance_kind="annuity",
+            design_type="ordinary",
+            payment_mode="annual",
+        )
+        self.service.record_insurance_ledger(
+            account_id=aid,
+            policy_id=policy["id"],
+            event_date=date(2026, 1, 1),
+            event_type="premium",
+            amount=1000,
+        )
+
+        updated = self.service.update_insurance_policy(policy["id"], policy_name="养老年金 A 款")
+        self.assertIsNotNone(updated)
+        self.assertEqual(updated["policy_name"], "养老年金 A 款")
+
+        with self.assertRaisesRegex(ValueError, "cannot be changed after ledger events exist"):
+            self.service.update_insurance_policy(policy["id"], insurance_kind="whole_life")
+
 
 if __name__ == "__main__":
     unittest.main()

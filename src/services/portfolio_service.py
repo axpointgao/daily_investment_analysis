@@ -34,11 +34,41 @@ except Exception:  # pragma: no cover - optional dependency path
     yf = None
 
 EPS = 1e-8
-VALID_MARKETS = {"cn", "hk", "us", "fund", "crypto", "bank", "advisory"}
+VALID_MARKETS = {"cn", "hk", "us", "fund", "crypto", "bank", "advisory", "insurance"}
 VALID_COST_METHODS = {"fifo", "avg"}
 VALID_SIDES = {"buy", "sell"}
 VALID_CASH_DIRECTIONS = {"in", "out"}
 VALID_ADVISORY_DIRECTIONS = {"subscribe", "redeem"}
+VALID_INSURANCE_KINDS = {"annuity", "whole_life", "endowment", "universal", "unit_linked", "other"}
+VALID_INSURANCE_DESIGN_TYPES = {"ordinary", "participating", "universal", "unit_linked", "other"}
+VALID_INSURANCE_STATUSES = {"active", "paid_up", "surrendered", "matured", "expired", "cancelled"}
+VALID_INSURANCE_PAYMENT_MODES = {"single", "annual", "semiannual", "quarterly", "monthly", "irregular"}
+VALID_INSURANCE_EVENT_TYPES = {
+    "premium",
+    "value_update",
+    "survival_benefit",
+    "annuity_payment",
+    "maturity_benefit",
+    "dividend",
+    "partial_withdrawal",
+    "surrender",
+    "refund",
+    "other_inflow",
+    "other_outflow",
+}
+INSURANCE_OUTFLOW_EVENTS = {"premium", "other_outflow"}
+INSURANCE_RETURN_EVENTS = {
+    "survival_benefit",
+    "annuity_payment",
+    "maturity_benefit",
+    "dividend",
+    "partial_withdrawal",
+    "surrender",
+    "refund",
+    "other_inflow",
+}
+INSURANCE_TERMINAL_EVENTS = {"surrender", "maturity_benefit"}
+TERMINAL_INSURANCE_STATUSES = {"surrendered", "matured", "expired", "cancelled"}
 VALID_BANK_ASSET_KINDS = {"demand", "deposit", "wealth"}
 LEGACY_BANK_ASSET_KIND_ALIASES = {"term": "deposit"}
 VALID_BANK_INVESTMENT_NATURES = {
@@ -574,6 +604,192 @@ class PortfolioService:
     def delete_advisory_ledger_event(self, entry_id: int) -> bool:
         return self.repo.delete_advisory_ledger(entry_id)
 
+    def create_insurance_policy(
+        self,
+        *,
+        account_id: int,
+        policy_name: str,
+        insurer: Optional[str] = None,
+        policy_no: Optional[str] = None,
+        insurance_kind: Optional[str] = None,
+        design_type: Optional[str] = None,
+        currency: Optional[str] = None,
+        status: str = "active",
+        payment_mode: str = "single",
+        premium_per_period: Optional[float] = None,
+        first_payment_date: Optional[date] = None,
+        total_periods: Optional[int] = None,
+        note: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        account = self._require_active_account(account_id)
+        if account.market != "insurance":
+            raise ValueError("insurance policies can only be created in insurance accounts")
+        fields = self._normalize_insurance_policy_fields(
+            account=account,
+            policy_name=policy_name,
+            insurer=insurer,
+            policy_no=policy_no,
+            insurance_kind=insurance_kind,
+            design_type=design_type,
+            currency=currency,
+            status=status,
+            payment_mode=payment_mode,
+            premium_per_period=premium_per_period,
+            first_payment_date=first_payment_date,
+            total_periods=total_periods,
+            note=note,
+            partial=False,
+        )
+        row = self.repo.add_insurance_policy(account_id=account_id, **fields)
+        return self._insurance_policy_row_to_dict(row)
+
+    def update_insurance_policy(
+        self,
+        policy_id: int,
+        *,
+        policy_name: Optional[str] = None,
+        insurer: Optional[str] = None,
+        policy_no: Optional[str] = None,
+        insurance_kind: Optional[str] = None,
+        design_type: Optional[str] = None,
+        currency: Optional[str] = None,
+        status: Optional[str] = None,
+        payment_mode: Optional[str] = None,
+        premium_per_period: Optional[float] = None,
+        first_payment_date: Optional[date] = None,
+        total_periods: Optional[int] = None,
+        note: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        existing = self.repo.get_insurance_policy(policy_id)
+        if existing is None:
+            return None
+        account = self._require_active_account(int(existing.account_id))
+        fields = self._normalize_insurance_policy_fields(
+            account=account,
+            policy_name=policy_name,
+            insurer=insurer,
+            policy_no=policy_no,
+            insurance_kind=insurance_kind,
+            design_type=design_type,
+            currency=currency,
+            status=status,
+            payment_mode=payment_mode,
+            premium_per_period=premium_per_period,
+            first_payment_date=first_payment_date,
+            total_periods=total_periods,
+            note=note,
+            partial=True,
+        )
+        if not fields:
+            raise ValueError("No fields provided for update")
+        locked_fields = {"insurance_kind", "design_type", "currency"}
+        if locked_fields.intersection(fields) and self.repo.count_insurance_ledger(policy_id) > 0:
+            raise ValueError("insurance_kind, design_type and currency cannot be changed after ledger events exist")
+        row = self.repo.update_insurance_policy(policy_id, fields)
+        if row is None:
+            return None
+        return self._insurance_policy_row_to_dict(row)
+
+    def list_insurance_policies(
+        self,
+        *,
+        account_id: Optional[int] = None,
+        include_inactive: bool = False,
+    ) -> Dict[str, Any]:
+        if account_id is not None:
+            account = self._require_active_account(account_id)
+            if account.market != "insurance":
+                raise ValueError("insurance policies can only be listed for insurance accounts")
+        rows = self.repo.query_insurance_policies(account_id=account_id, include_inactive=include_inactive)
+        return {"policies": [self._insurance_policy_row_to_dict(row) for row in rows]}
+
+    def record_insurance_ledger(
+        self,
+        *,
+        account_id: int,
+        policy_id: int,
+        event_date: date,
+        event_type: str,
+        amount: float,
+        currency: Optional[str] = None,
+        period_no: Optional[int] = None,
+        note: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        account = self._require_active_account(account_id)
+        if account.market != "insurance":
+            raise ValueError("insurance ledger can only be recorded in insurance accounts")
+        policy = self.repo.get_insurance_policy(policy_id)
+        if policy is None:
+            raise ValueError("policy_id is invalid")
+        if int(policy.account_id) != int(account_id):
+            raise ValueError("policy_id does not belong to this account")
+        event_type_norm = self._normalize_insurance_event_type(event_type)
+        self._validate_insurance_event_for_policy(policy, event_type_norm, event_date)
+        if amount <= 0:
+            raise ValueError("amount must be > 0")
+        if period_no is not None and period_no <= 0:
+            raise ValueError("period_no must be > 0")
+        currency_norm = self._normalize_currency(currency or policy.currency or account.base_currency)
+        if currency_norm != self._normalize_currency(policy.currency or account.base_currency):
+            raise ValueError("currency must match policy currency")
+        row = self.repo.add_insurance_ledger(
+            account_id=account_id,
+            policy_id=policy_id,
+            event_date=event_date,
+            event_type=event_type_norm,
+            amount=float(amount),
+            currency=currency_norm,
+            period_no=int(period_no) if period_no is not None else None,
+            note=(note or "").strip() or None,
+        )
+        return {"id": int(row.id)}
+
+    def list_insurance_ledger_events(
+        self,
+        *,
+        account_id: Optional[int] = None,
+        policy_id: Optional[int] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        event_type: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        if account_id is not None:
+            account = self._require_active_account(account_id)
+            if account.market != "insurance":
+                raise ValueError("insurance ledger can only be listed for insurance accounts")
+        if policy_id is not None:
+            policy = self.repo.get_insurance_policy(policy_id)
+            if policy is None:
+                raise ValueError("policy_id is invalid")
+            if account_id is not None and int(policy.account_id) != int(account_id):
+                raise ValueError("policy_id does not belong to this account")
+        page, page_size = self._validate_paging(page=page, page_size=page_size)
+        if date_from is not None and date_to is not None and date_from > date_to:
+            raise ValueError("date_from must be <= date_to")
+        event_type_norm: Optional[str] = None
+        if event_type is not None and event_type.strip():
+            event_type_norm = self._normalize_insurance_event_type(event_type)
+        rows, total = self.repo.query_insurance_ledger(
+            account_id=account_id,
+            policy_id=policy_id,
+            date_from=date_from,
+            date_to=date_to,
+            event_type=event_type_norm,
+            page=page,
+            page_size=page_size,
+        )
+        return {
+            "items": [self._insurance_ledger_row_to_dict(row) for row in rows],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    def delete_insurance_ledger_event(self, entry_id: int) -> bool:
+        return self.repo.delete_insurance_ledger(entry_id)
+
     def list_trade_events(
         self,
         *,
@@ -902,6 +1118,7 @@ class PortfolioService:
             "crypto": 0.0,
             "bank": 0.0,
             "advisory": 0.0,
+            "insurance": 0.0,
             "cash": 0.0,
         }
         if not has_missing_fx:
@@ -913,7 +1130,7 @@ class PortfolioService:
                     to_currency=aggregate_currency,
                     as_of_date=as_of_date,
                 )
-                key = account.market if account.market in {"fund", "crypto", "bank", "advisory"} else "stock"
+                key = account.market if account.market in {"fund", "crypto", "bank", "advisory", "insurance"} else "stock"
                 asset_breakdown[key] += float(converted_mv.amount or 0.0)
             asset_breakdown = {key: round(value, 6) for key, value in asset_breakdown.items()}
 
@@ -1058,6 +1275,7 @@ class PortfolioService:
             "crypto": 0.0,
             "bank": 0.0,
             "advisory": 0.0,
+            "insurance": 0.0,
             "cash": 0.0,
         }
         if not has_missing_fx:
@@ -1069,7 +1287,7 @@ class PortfolioService:
                     to_currency=aggregate_currency,
                     as_of_date=as_of_date,
                 )
-                key = account.market if account.market in {"fund", "crypto", "bank", "advisory"} else "stock"
+                key = account.market if account.market in {"fund", "crypto", "bank", "advisory", "insurance"} else "stock"
                 asset_breakdown[key] += float(converted_mv.amount or 0.0)
             asset_breakdown = {key: round(value, 6) for key, value in asset_breakdown.items()}
 
@@ -1305,6 +1523,12 @@ class PortfolioService:
         advisory_ledger = (
             self.repo.list_advisory_ledger(account.id, as_of=as_of_date) if account.market == "advisory" else []
         )
+        insurance_policies = (
+            self.repo.list_insurance_policies(account.id, as_of=as_of_date) if account.market == "insurance" else []
+        )
+        insurance_ledger = (
+            self.repo.list_insurance_ledger(account.id, as_of=as_of_date) if account.market == "insurance" else []
+        )
 
         events = []
         for row in cash_ledger:
@@ -1317,9 +1541,11 @@ class PortfolioService:
             events.append(("bank", row.event_date, row.id, row))
         for row in advisory_ledger:
             events.append(("advisory", row.event_date, row.id, row))
+        for row in insurance_ledger:
+            events.append(("insurance", row.event_date, row.id, row))
 
         # Same-day deterministic ordering: cash -> corporate action -> trade.
-        event_priority = {"cash": 0, "bank": 0, "advisory": 0, "corp": 1, "trade": 2}
+        event_priority = {"cash": 0, "bank": 0, "advisory": 0, "insurance": 0, "corp": 1, "trade": 2}
         events.sort(key=lambda item: (item[1], event_priority[item[0]], item[2]))
 
         cash_balances: Dict[str, float] = defaultdict(float)
@@ -1332,8 +1558,85 @@ class PortfolioService:
         avg_state: Dict[Tuple[str, str, str], _AvgState] = defaultdict(_AvgState)
         bank_assets: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
         advisory_assets: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        insurance_assets: Dict[int, Dict[str, Any]] = {}
+
+        for policy in insurance_policies:
+            policy_id = int(policy.id)
+            insurance_assets[policy_id] = {
+                "symbol": f"INS:{policy_id}",
+                "display_name": policy.policy_name,
+                "market": "insurance",
+                "currency": self._normalize_currency(policy.currency or account.base_currency),
+                "policy_id": policy_id,
+                "policy_name": policy.policy_name,
+                "insurer": policy.insurer,
+                "policy_no": policy.policy_no,
+                "insurance_kind": policy.insurance_kind,
+                "design_type": policy.design_type,
+                "policy_status": policy.status,
+                "payment_mode": policy.payment_mode,
+                "premium_per_period": policy.premium_per_period,
+                "first_payment_date": policy.first_payment_date.isoformat() if policy.first_payment_date else None,
+                "total_periods": policy.total_periods,
+                "paid_periods": 0,
+                "paid_premium": 0.0,
+                "received_amount": 0.0,
+                "cash_value": None,
+                "value_date": None,
+                "terminal": str(policy.status or "").strip().lower() in {"surrendered", "matured", "expired", "cancelled"},
+                "quantity": 1.0,
+                "avg_cost": 0.0,
+                "total_cost": 0.0,
+                "last_price": 0.0,
+                "market_value_base": 0.0,
+                "unrealized_pnl_base": 0.0,
+                "unrealized_pnl_pct": None,
+                "valuation_currency": account.base_currency,
+                "price_source": "insurance_no_value",
+                "price_provider": "insurance_ledger",
+                "price_date": None,
+                "price_stale": True,
+                "price_available": True,
+                "value_estimated": True,
+            }
 
         for event_type, event_date, _, event in events:
+            if event_type == "insurance":
+                policy_id = int(event.policy_id)
+                item = insurance_assets.get(policy_id)
+                if item is None:
+                    continue
+                currency = self._normalize_currency(event.currency or item["currency"])
+                amount = float(event.amount or 0.0)
+                insurance_event_type = self._normalize_insurance_event_type(event.event_type)
+                item["currency"] = currency
+                if insurance_event_type == "value_update":
+                    item["cash_value"] = amount
+                    item["value_date"] = event_date
+                    item["price_date"] = event_date.isoformat()
+                    item["price_source"] = "insurance_value_update"
+                    item["price_provider"] = "insurance_ledger"
+                    item["price_stale"] = event_date < as_of_date
+                    item["price_available"] = True
+                    item["value_estimated"] = False
+                    continue
+                if insurance_event_type in INSURANCE_OUTFLOW_EVENTS:
+                    cash_balances[currency] -= amount
+                    if insurance_event_type == "premium":
+                        item["paid_premium"] += amount
+                        if event.period_no is not None:
+                            item["paid_periods"] = max(int(item["paid_periods"] or 0), int(event.period_no or 0))
+                        else:
+                            item["paid_periods"] = int(item["paid_periods"] or 0) + 1
+                    continue
+                if insurance_event_type in INSURANCE_RETURN_EVENTS:
+                    cash_balances[currency] += amount
+                    item["received_amount"] += amount
+                    if insurance_event_type in INSURANCE_TERMINAL_EVENTS:
+                        item["terminal"] = True
+                        item["policy_status"] = "surrendered" if insurance_event_type == "surrender" else "matured"
+                    continue
+
             if event_type == "advisory":
                 currency = self._normalize_currency(event.currency)
                 amount = float(event.amount or 0.0)
@@ -1800,6 +2103,68 @@ class PortfolioService:
             if cost_base is not None:
                 total_cost_base += cost_base
         position_rows.extend(advisory_position_rows)
+
+        insurance_position_rows: List[Dict[str, Any]] = []
+        for item in insurance_assets.values():
+            paid_premium = float(item.get("paid_premium") or 0.0)
+            received_amount = float(item.get("received_amount") or 0.0)
+            cash_value = item.get("cash_value")
+            estimated_value = max(0.0, paid_premium - received_amount) if cash_value is None else float(cash_value or 0.0)
+            if bool(item.get("terminal")):
+                estimated_value = 0.0
+            if cash_value is None and paid_premium > EPS:
+                item["price_source"] = "insurance_net_invested"
+            market_conversion = self._convert_amount(
+                amount=estimated_value,
+                from_currency=item["currency"],
+                to_currency=account.base_currency,
+                as_of_date=as_of_date,
+            )
+            cost_conversion = self._convert_amount(
+                amount=paid_premium,
+                from_currency=item["currency"],
+                to_currency=account.base_currency,
+                as_of_date=as_of_date,
+            )
+            received_conversion = self._convert_amount(
+                amount=received_amount,
+                from_currency=item["currency"],
+                to_currency=account.base_currency,
+                as_of_date=as_of_date,
+            )
+            market_base = market_conversion.amount
+            cost_base = cost_conversion.amount
+            received_base = received_conversion.amount
+            fx_stale = fx_stale or market_conversion.is_stale or cost_conversion.is_stale or received_conversion.is_stale
+            unrealized_base = (
+                (market_base or 0.0) + (received_base or 0.0) - (cost_base or 0.0)
+                if cost_base is not None and market_base is not None and received_base is not None
+                else 0.0
+            )
+            next_payment_date = self._calculate_next_insurance_payment_date(
+                first_payment_date=item.get("first_payment_date"),
+                payment_mode=str(item.get("payment_mode") or ""),
+                paid_periods=int(item.get("paid_periods") or 0),
+                total_periods=item.get("total_periods"),
+            )
+            item["quantity"] = 1.0
+            item["avg_cost"] = round(paid_premium, 8)
+            item["total_cost"] = round(paid_premium, 8)
+            item["last_price"] = round(estimated_value, 8)
+            item["market_value_base"] = round(market_base or 0.0, 8)
+            item["unrealized_pnl_base"] = round(unrealized_base, 8)
+            item["unrealized_pnl_pct"] = round((unrealized_base / cost_base) * 100, 8) if cost_base else None
+            item["paid_premium"] = round(paid_premium, 8)
+            item["received_amount"] = round(received_amount, 8)
+            item["cash_value"] = round(float(cash_value), 8) if cash_value is not None else None
+            item["value_date"] = item["value_date"].isoformat() if isinstance(item.get("value_date"), date) else item.get("value_date")
+            item["next_payment_date"] = next_payment_date.isoformat() if next_payment_date else None
+            insurance_position_rows.append(item)
+            if market_base is not None:
+                market_value_base += market_base
+            if cost_base is not None:
+                total_cost_base += cost_base
+        position_rows.extend(insurance_position_rows)
 
         total_cash_base = 0.0
         for currency, amount in cash_balances.items():
@@ -2793,6 +3158,42 @@ class PortfolioService:
         }
 
     @staticmethod
+    def _insurance_policy_row_to_dict(row: Any) -> Dict[str, Any]:
+        return {
+            "id": int(row.id),
+            "account_id": int(row.account_id),
+            "policy_name": row.policy_name,
+            "insurer": row.insurer,
+            "policy_no": row.policy_no,
+            "insurance_kind": row.insurance_kind,
+            "design_type": row.design_type,
+            "currency": row.currency,
+            "status": row.status,
+            "payment_mode": row.payment_mode,
+            "premium_per_period": float(row.premium_per_period) if row.premium_per_period is not None else None,
+            "first_payment_date": row.first_payment_date.isoformat() if row.first_payment_date else None,
+            "total_periods": int(row.total_periods) if row.total_periods is not None else None,
+            "note": row.note,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+
+    @staticmethod
+    def _insurance_ledger_row_to_dict(row: Any) -> Dict[str, Any]:
+        return {
+            "id": int(row.id),
+            "account_id": int(row.account_id),
+            "policy_id": int(row.policy_id),
+            "event_date": row.event_date.isoformat() if row.event_date else "",
+            "event_type": row.event_type,
+            "amount": float(row.amount or 0.0),
+            "currency": row.currency,
+            "period_no": int(row.period_no) if row.period_no is not None else None,
+            "note": row.note,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+
+    @staticmethod
     def _build_asset_breakdown(accounts: List[Dict[str, Any]]) -> Dict[str, float]:
         breakdown: Dict[str, float] = {
             "stock": 0.0,
@@ -2800,11 +3201,12 @@ class PortfolioService:
             "crypto": 0.0,
             "bank": 0.0,
             "advisory": 0.0,
+            "insurance": 0.0,
             "cash": 0.0,
         }
         for account in accounts:
             market = str(account.get("market") or "").lower()
-            key = market if market in {"fund", "crypto", "bank", "advisory"} else "stock"
+            key = market if market in {"fund", "crypto", "bank", "advisory", "insurance"} else "stock"
             breakdown[key] += float(account.get("total_market_value") or 0.0)
             breakdown["cash"] += float(account.get("total_cash") or 0.0)
         return {key: round(value, 6) for key, value in breakdown.items()}
@@ -2821,7 +3223,7 @@ class PortfolioService:
     def _normalize_market(value: str) -> str:
         market = (value or "").strip().lower()
         if market not in VALID_MARKETS:
-            raise ValueError("market must be one of: cn, hk, us, fund, crypto, bank, advisory")
+            raise ValueError("market must be one of: cn, hk, us, fund, crypto, bank, advisory, insurance")
         return market
 
     @staticmethod
@@ -2852,6 +3254,152 @@ class PortfolioService:
         if direction not in VALID_ADVISORY_DIRECTIONS:
             raise ValueError("direction must be subscribe or redeem")
         return direction
+
+    def _normalize_insurance_policy_fields(
+        self,
+        *,
+        account: Any,
+        policy_name: Optional[str],
+        insurer: Optional[str],
+        policy_no: Optional[str],
+        insurance_kind: Optional[str],
+        design_type: Optional[str],
+        currency: Optional[str],
+        status: Optional[str],
+        payment_mode: Optional[str],
+        premium_per_period: Optional[float],
+        first_payment_date: Optional[date],
+        total_periods: Optional[int],
+        note: Optional[str],
+        partial: bool,
+    ) -> Dict[str, Any]:
+        fields: Dict[str, Any] = {}
+        if policy_name is not None or not partial:
+            policy_name_norm = (policy_name or "").strip()
+            if not policy_name_norm:
+                raise ValueError("policy_name is required")
+            fields["policy_name"] = policy_name_norm
+        for key, raw in (("insurer", insurer), ("policy_no", policy_no), ("note", note)):
+            if raw is not None or not partial:
+                fields[key] = (raw or "").strip() or None
+        if insurance_kind is not None or not partial:
+            kind = (insurance_kind or "").strip().lower() or "other"
+            if kind not in VALID_INSURANCE_KINDS:
+                raise ValueError("insurance_kind is invalid")
+            fields["insurance_kind"] = kind
+        if design_type is not None or not partial:
+            design = (design_type or "").strip().lower() or "ordinary"
+            if design not in VALID_INSURANCE_DESIGN_TYPES:
+                raise ValueError("design_type is invalid")
+            fields["design_type"] = design
+        if currency is not None or not partial:
+            fields["currency"] = self._normalize_currency(currency or account.base_currency)
+        if status is not None or not partial:
+            status_norm = (status or "").strip().lower() or "active"
+            if status_norm not in VALID_INSURANCE_STATUSES:
+                raise ValueError("status is invalid")
+            fields["status"] = status_norm
+        if payment_mode is not None or not partial:
+            payment_mode_norm = (payment_mode or "").strip().lower() or "single"
+            if payment_mode_norm not in VALID_INSURANCE_PAYMENT_MODES:
+                raise ValueError("payment_mode is invalid")
+            fields["payment_mode"] = payment_mode_norm
+        if premium_per_period is not None:
+            if premium_per_period <= 0:
+                raise ValueError("premium_per_period must be > 0")
+            fields["premium_per_period"] = float(premium_per_period)
+        elif not partial:
+            fields["premium_per_period"] = None
+        if first_payment_date is not None or not partial:
+            fields["first_payment_date"] = first_payment_date
+        if total_periods is not None:
+            if total_periods <= 0:
+                raise ValueError("total_periods must be > 0")
+            fields["total_periods"] = int(total_periods)
+        elif not partial:
+            fields["total_periods"] = None
+        return fields
+
+    @staticmethod
+    def _normalize_insurance_event_type(value: str) -> str:
+        event_type = (value or "").strip().lower()
+        if event_type not in VALID_INSURANCE_EVENT_TYPES:
+            raise ValueError("event_type is invalid")
+        return event_type
+
+    @staticmethod
+    def _allowed_insurance_event_types_for_policy(policy: Any) -> Set[str]:
+        kind = str(getattr(policy, "insurance_kind", None) or "other").strip().lower()
+        design_type = str(getattr(policy, "design_type", None) or "ordinary").strip().lower()
+        status = str(getattr(policy, "status", None) or "active").strip().lower()
+
+        if status in TERMINAL_INSURANCE_STATUSES:
+            return set()
+
+        allowed = {"value_update", "surrender", "refund", "other_inflow", "other_outflow"}
+        if status != "paid_up":
+            allowed.add("premium")
+        if kind in {"annuity", "endowment"}:
+            allowed.add("survival_benefit")
+        if kind == "annuity":
+            allowed.add("annuity_payment")
+        if kind == "endowment":
+            allowed.add("maturity_benefit")
+        if design_type == "participating":
+            allowed.add("dividend")
+        if kind in {"whole_life", "universal", "unit_linked"} or design_type in {"universal", "unit_linked"}:
+            allowed.add("partial_withdrawal")
+        return allowed
+
+    def _validate_insurance_event_for_policy(self, policy: Any, event_type: str, event_date: date) -> None:
+        allowed = self._allowed_insurance_event_types_for_policy(policy)
+        if event_type not in allowed:
+            raise ValueError("event_type is not available for this insurance policy")
+        terminal_event = self.repo.get_latest_insurance_terminal_event(
+            policy_id=int(policy.id),
+            event_types=INSURANCE_TERMINAL_EVENTS,
+        )
+        if terminal_event is not None and event_date > terminal_event.event_date:
+            raise ValueError("policy already has a terminal insurance event")
+
+    @staticmethod
+    def _calculate_next_insurance_payment_date(
+        *,
+        first_payment_date: Optional[str],
+        payment_mode: str,
+        paid_periods: int,
+        total_periods: Optional[int],
+    ) -> Optional[date]:
+        if not first_payment_date or payment_mode in {"single", "irregular"}:
+            return None
+        if total_periods is not None and paid_periods >= int(total_periods):
+            return None
+        try:
+            first_date = datetime.strptime(first_payment_date, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+        months_by_mode = {
+            "monthly": 1,
+            "quarterly": 3,
+            "semiannual": 6,
+            "annual": 12,
+        }
+        months = months_by_mode.get(payment_mode)
+        if not months:
+            return None
+        return PortfolioService._add_months(first_date, months * paid_periods)
+
+    @staticmethod
+    def _add_months(value: date, months: int) -> date:
+        month_index = value.month - 1 + months
+        year = value.year + month_index // 12
+        month = month_index % 12 + 1
+        last_day = 31
+        while True:
+            try:
+                return date(year, month, min(value.day, last_day))
+            except ValueError:
+                last_day -= 1
 
     @staticmethod
     def _make_advisory_symbol(product_name: str) -> str:

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 from datetime import date, datetime
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from sqlalchemy import and_, delete, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -23,6 +23,8 @@ from src.storage import (
     PortfolioCorporateAction,
     PortfolioDailySnapshot,
     PortfolioFxRate,
+    PortfolioInsuranceLedger,
+    PortfolioInsurancePolicy,
     PortfolioManualPrice,
     PortfolioPosition,
     PortfolioPositionLot,
@@ -627,6 +629,273 @@ class PortfolioRepository:
             session.refresh(row)
             session.expunge(row)
             return row
+
+    def add_insurance_policy(
+        self,
+        *,
+        account_id: int,
+        policy_name: str,
+        insurer: Optional[str],
+        policy_no: Optional[str],
+        insurance_kind: Optional[str],
+        design_type: Optional[str],
+        currency: str,
+        status: str,
+        payment_mode: str,
+        premium_per_period: Optional[float],
+        first_payment_date: Optional[date],
+        total_periods: Optional[int],
+        note: Optional[str],
+    ) -> PortfolioInsurancePolicy:
+        with self.portfolio_write_session() as session:
+            row = PortfolioInsurancePolicy(
+                account_id=account_id,
+                policy_name=policy_name,
+                insurer=insurer,
+                policy_no=policy_no,
+                insurance_kind=insurance_kind,
+                design_type=design_type,
+                currency=currency,
+                status=status,
+                payment_mode=payment_mode,
+                premium_per_period=premium_per_period,
+                first_payment_date=first_payment_date,
+                total_periods=total_periods,
+                note=note,
+            )
+            session.add(row)
+            self._invalidate_account_cache_in_session(
+                session=session,
+                account_id=account_id,
+                from_date=date.min,
+            )
+            session.flush()
+            session.refresh(row)
+            session.expunge(row)
+            return row
+
+    def update_insurance_policy(self, policy_id: int, fields: Dict[str, Any]) -> Optional[PortfolioInsurancePolicy]:
+        with self.portfolio_write_session() as session:
+            row = session.execute(
+                select(PortfolioInsurancePolicy).where(PortfolioInsurancePolicy.id == policy_id).limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            for key, value in fields.items():
+                setattr(row, key, value)
+            row.updated_at = datetime.now()
+            self._invalidate_account_cache_in_session(
+                session=session,
+                account_id=int(row.account_id),
+                from_date=date.min,
+            )
+            session.flush()
+            session.refresh(row)
+            session.expunge(row)
+            return row
+
+    def get_insurance_policy(self, policy_id: int) -> Optional[PortfolioInsurancePolicy]:
+        with self.db.get_session() as session:
+            row = session.get(PortfolioInsurancePolicy, policy_id)
+            if row is not None:
+                session.expunge(row)
+            return row
+
+    def query_insurance_policies(
+        self,
+        *,
+        account_id: Optional[int],
+        include_inactive: bool,
+    ) -> List[PortfolioInsurancePolicy]:
+        with self.db.get_session() as session:
+            conditions = []
+            if account_id is not None:
+                conditions.append(PortfolioInsurancePolicy.account_id == account_id)
+            if not include_inactive:
+                conditions.append(PortfolioInsurancePolicy.status.notin_(["surrendered", "matured", "expired", "cancelled"]))
+            query = select(PortfolioInsurancePolicy)
+            if conditions:
+                query = query.where(and_(*conditions))
+            rows = session.execute(query.order_by(PortfolioInsurancePolicy.id.asc())).scalars().all()
+            return list(rows)
+
+    def list_insurance_policies(self, account_id: int, as_of: date) -> List[PortfolioInsurancePolicy]:
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(PortfolioInsurancePolicy)
+                .where(
+                    and_(
+                        PortfolioInsurancePolicy.account_id == account_id,
+                        PortfolioInsurancePolicy.created_at <= datetime.combine(as_of, datetime.max.time()),
+                    )
+                )
+                .order_by(PortfolioInsurancePolicy.id.asc())
+            ).scalars().all()
+            return list(rows)
+
+    def add_insurance_ledger(
+        self,
+        *,
+        account_id: int,
+        policy_id: int,
+        event_date: date,
+        event_type: str,
+        amount: float,
+        currency: str,
+        period_no: Optional[int],
+        note: Optional[str],
+    ) -> PortfolioInsuranceLedger:
+        with self.portfolio_write_session() as session:
+            row = PortfolioInsuranceLedger(
+                account_id=account_id,
+                policy_id=policy_id,
+                event_date=event_date,
+                event_type=event_type,
+                amount=amount,
+                currency=currency,
+                period_no=period_no,
+                note=note,
+            )
+            session.add(row)
+            if event_type in {"surrender", "maturity_benefit"}:
+                policy = session.get(PortfolioInsurancePolicy, policy_id)
+                if policy is not None:
+                    policy.status = "surrendered" if event_type == "surrender" else "matured"
+                    policy.updated_at = datetime.now()
+            self._invalidate_account_cache_in_session(
+                session=session,
+                account_id=account_id,
+                from_date=event_date,
+            )
+            session.flush()
+            session.refresh(row)
+            session.expunge(row)
+            return row
+
+    def query_insurance_ledger(
+        self,
+        *,
+        account_id: Optional[int],
+        policy_id: Optional[int],
+        date_from: Optional[date],
+        date_to: Optional[date],
+        event_type: Optional[str],
+        page: int,
+        page_size: int,
+    ) -> Tuple[List[PortfolioInsuranceLedger], int]:
+        with self.db.get_session() as session:
+            conditions = []
+            if account_id is not None:
+                conditions.append(PortfolioInsuranceLedger.account_id == account_id)
+            if policy_id is not None:
+                conditions.append(PortfolioInsuranceLedger.policy_id == policy_id)
+            if date_from is not None:
+                conditions.append(PortfolioInsuranceLedger.event_date >= date_from)
+            if date_to is not None:
+                conditions.append(PortfolioInsuranceLedger.event_date <= date_to)
+            if event_type:
+                conditions.append(PortfolioInsuranceLedger.event_type == event_type)
+
+            data_query = select(PortfolioInsuranceLedger)
+            count_query = select(func.count()).select_from(PortfolioInsuranceLedger)
+            if conditions:
+                where_clause = and_(*conditions)
+                data_query = data_query.where(where_clause)
+                count_query = count_query.where(where_clause)
+
+            total = int(session.execute(count_query).scalar_one() or 0)
+            rows = session.execute(
+                data_query
+                .order_by(PortfolioInsuranceLedger.event_date.desc(), PortfolioInsuranceLedger.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            ).scalars().all()
+            return list(rows), total
+
+    def count_insurance_ledger(self, policy_id: int) -> int:
+        with self.db.get_session() as session:
+            return int(
+                session.execute(
+                    select(func.count())
+                    .select_from(PortfolioInsuranceLedger)
+                    .where(PortfolioInsuranceLedger.policy_id == policy_id)
+                ).scalar_one() or 0
+            )
+
+    def list_insurance_ledger(self, account_id: int, as_of: date) -> List[PortfolioInsuranceLedger]:
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(PortfolioInsuranceLedger)
+                .where(
+                    and_(
+                        PortfolioInsuranceLedger.account_id == account_id,
+                        PortfolioInsuranceLedger.event_date <= as_of,
+                    )
+                )
+                .order_by(PortfolioInsuranceLedger.event_date.asc(), PortfolioInsuranceLedger.id.asc())
+            ).scalars().all()
+            return list(rows)
+
+    def get_latest_insurance_terminal_event(
+        self,
+        *,
+        policy_id: int,
+        event_types: Set[str],
+    ) -> Optional[PortfolioInsuranceLedger]:
+        with self.db.get_session() as session:
+            row = session.execute(
+                select(PortfolioInsuranceLedger)
+                .where(
+                    and_(
+                        PortfolioInsuranceLedger.policy_id == policy_id,
+                        PortfolioInsuranceLedger.event_type.in_(event_types),
+                    )
+                )
+                .order_by(PortfolioInsuranceLedger.event_date.desc(), PortfolioInsuranceLedger.id.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if row is not None:
+                session.expunge(row)
+            return row
+
+    def delete_insurance_ledger(self, entry_id: int) -> bool:
+        with self.portfolio_write_session() as session:
+            row = session.execute(
+                select(PortfolioInsuranceLedger).where(PortfolioInsuranceLedger.id == entry_id).limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return False
+            account_id = int(row.account_id)
+            event_date = row.event_date
+            policy_id = int(row.policy_id)
+            deleted_event_type = str(row.event_type or "")
+            session.delete(row)
+            if deleted_event_type in {"surrender", "maturity_benefit"}:
+                latest_terminal = session.execute(
+                    select(PortfolioInsuranceLedger)
+                    .where(
+                        and_(
+                            PortfolioInsuranceLedger.policy_id == policy_id,
+                            PortfolioInsuranceLedger.id != row.id,
+                            PortfolioInsuranceLedger.event_type.in_(["surrender", "maturity_benefit"]),
+                        )
+                    )
+                    .order_by(PortfolioInsuranceLedger.event_date.desc(), PortfolioInsuranceLedger.id.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
+                policy = session.get(PortfolioInsurancePolicy, policy_id)
+                if policy is not None:
+                    if latest_terminal is None:
+                        policy.status = "active"
+                    else:
+                        policy.status = "surrendered" if latest_terminal.event_type == "surrender" else "matured"
+                    policy.updated_at = datetime.now()
+            self._invalidate_account_cache_in_session(
+                session=session,
+                account_id=account_id,
+                from_date=event_date,
+            )
+            return True
 
     def query_advisory_ledger(
         self,

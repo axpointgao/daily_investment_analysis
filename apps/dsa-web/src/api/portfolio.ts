@@ -21,6 +21,11 @@ import type {
   PortfolioImportBrokerListResponse,
   PortfolioImportCommitResponse,
   PortfolioImportParseResponse,
+  PortfolioInsuranceLedgerCreateRequest,
+  PortfolioInsuranceLedgerListResponse,
+  PortfolioInsurancePolicyCreateRequest,
+  PortfolioInsurancePolicyItem,
+  PortfolioInsurancePolicyListResponse,
   PortfolioManualPriceItem,
   PortfolioManualPriceUpsertRequest,
   PortfolioRiskResponse,
@@ -65,6 +70,16 @@ type BankLedgerListQuery = EventQuery & {
 type AdvisoryLedgerListQuery = EventQuery & {
   product?: string;
   direction?: 'subscribe' | 'redeem';
+};
+
+type InsurancePolicyListQuery = {
+  accountId?: number;
+  includeInactive?: boolean;
+};
+
+type InsuranceLedgerListQuery = EventQuery & {
+  policyId?: number;
+  eventType?: string;
 };
 
 type CorporateListQuery = EventQuery & {
@@ -265,6 +280,68 @@ export const portfolioApi = {
       investment_style: payload.investmentStyle,
     });
     return toCamelCase<PortfolioEventCreatedResponse>(response.data);
+  },
+
+  async listInsurancePolicies(query: InsurancePolicyListQuery = {}): Promise<PortfolioInsurancePolicyListResponse> {
+    const params: Record<string, string | number | boolean> = {};
+    if (query.accountId != null) {
+      params.account_id = query.accountId;
+    }
+    if (query.includeInactive != null) {
+      params.include_inactive = query.includeInactive;
+    }
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/insurance-policies', { params });
+    return toCamelCase<PortfolioInsurancePolicyListResponse>(response.data);
+  },
+
+  async createInsurancePolicy(payload: PortfolioInsurancePolicyCreateRequest): Promise<PortfolioInsurancePolicyItem> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/insurance-policies', {
+      account_id: payload.accountId,
+      policy_name: payload.policyName,
+      insurer: payload.insurer,
+      policy_no: payload.policyNo,
+      insurance_kind: payload.insuranceKind,
+      design_type: payload.designType,
+      currency: payload.currency,
+      status: payload.status,
+      payment_mode: payload.paymentMode,
+      premium_per_period: payload.premiumPerPeriod,
+      first_payment_date: payload.firstPaymentDate,
+      total_periods: payload.totalPeriods,
+      note: payload.note,
+    });
+    return toCamelCase<PortfolioInsurancePolicyItem>(response.data);
+  },
+
+  async createInsuranceLedger(payload: PortfolioInsuranceLedgerCreateRequest): Promise<PortfolioEventCreatedResponse> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/insurance-ledger', {
+      account_id: payload.accountId,
+      policy_id: payload.policyId,
+      event_date: payload.eventDate,
+      event_type: payload.eventType,
+      amount: payload.amount,
+      currency: payload.currency,
+      period_no: payload.periodNo,
+      note: payload.note,
+    });
+    return toCamelCase<PortfolioEventCreatedResponse>(response.data);
+  },
+
+  async listInsuranceLedger(query: InsuranceLedgerListQuery = {}): Promise<PortfolioInsuranceLedgerListResponse> {
+    const params = buildEventParams(query);
+    if (query.policyId != null) {
+      params.policy_id = query.policyId;
+    }
+    if (query.eventType) {
+      params.event_type = query.eventType;
+    }
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/insurance-ledger', { params });
+    return toCamelCase<PortfolioInsuranceLedgerListResponse>(response.data);
+  },
+
+  async deleteInsuranceLedger(entryId: number): Promise<PortfolioDeleteResponse> {
+    const response = await apiClient.delete<Record<string, unknown>>(`/api/v1/portfolio/insurance-ledger/${entryId}`);
+    return toCamelCase<PortfolioDeleteResponse>(response.data);
   },
 
   async deleteAdvisoryLedger(entryId: number): Promise<PortfolioDeleteResponse> {
