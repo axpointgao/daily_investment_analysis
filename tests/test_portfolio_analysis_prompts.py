@@ -77,6 +77,55 @@ class PortfolioAnalysisPromptTestCase(unittest.TestCase):
 
         self.assertIn(get_portfolio_analysis_default_prompt("insurance_basic"), prompt)
 
+    def test_analyze_records_portfolio_analysis_call_type(self) -> None:
+        snapshot = {
+            "as_of": "2026-05-05",
+            "cost_method": "fifo",
+            "currency": "CNY",
+            "account_count": 1,
+            "total_equity": 10000.0,
+            "total_market_value": 8000.0,
+            "total_cash": 2000.0,
+            "asset_breakdown": {"stock": 8000.0, "cash": 2000.0},
+            "accounts": [
+                {
+                    "account_id": 1,
+                    "account_name": "测试账户",
+                    "market": "cn",
+                    "total_equity": 10000.0,
+                    "positions": [
+                        {
+                            "symbol": "510050",
+                            "display_name": "上证50ETF",
+                            "market": "cn",
+                            "currency": "CNY",
+                            "quantity": 1000,
+                            "market_value_base": 8000.0,
+                            "price_available": True,
+                        }
+                    ],
+                }
+            ],
+        }
+        risk = {"concentration": {}, "sector_concentration": {}, "drawdown": {}, "stop_loss": {}}
+        calls = []
+        analyzer = SimpleNamespace(
+            is_available=lambda: True,
+            generate_text=lambda prompt, **kwargs: calls.append(kwargs)
+            or '{"summary_points":["现金充足","权益为主","集中度可控"],"full_markdown":"## 资产配置结构\\n权益为主。"}',
+        )
+        service = PortfolioAnalysisService(
+            portfolio_service=SimpleNamespace(get_portfolio_snapshot=lambda **kwargs: snapshot),
+            risk_service=SimpleNamespace(get_risk_report=lambda **kwargs: risk),
+            analyzer=analyzer,
+            config=SimpleNamespace(),
+        )
+
+        result = service.analyze(snapshot_signature="sig")
+
+        self.assertEqual(result["analysis_mode"], "quick")
+        self.assertEqual(calls[0]["call_type"], "portfolio_analysis")
+
 
 if __name__ == "__main__":
     unittest.main()

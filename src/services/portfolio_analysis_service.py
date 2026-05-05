@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
@@ -29,6 +31,8 @@ PORTFOLIO_ANALYSIS_PROMPT_KEYS = {
     "bank": "PORTFOLIO_ANALYSIS_PROMPT_BANK",
     "insurance_basic": "PORTFOLIO_ANALYSIS_PROMPT_INSURANCE_BASIC",
 }
+
+logger = logging.getLogger(__name__)
 
 PORTFOLIO_ANALYSIS_DEFAULT_PROMPTS: Dict[str, str] = {
     "all_quick": (
@@ -104,8 +108,17 @@ class PortfolioAnalysisService:
         if not self.analyzer.is_available():
             raise PortfolioAnalysisError("LLM API Key 未配置，无法生成资产分析。")
 
+        started_at = time.perf_counter()
         analysis_mode = mode if mode in {"quick", "deep", "wealth_report"} else "quick"
         as_of_date = as_of or date.today()
+        logger.info(
+            "持仓资产分析开始: scope=%s mode=%s as_of=%s cost_method=%s signature=%s",
+            "all" if account_id is None else account_id,
+            analysis_mode,
+            as_of_date.isoformat(),
+            cost_method,
+            snapshot_signature[:12],
+        )
         snapshot = self.portfolio_service.get_portfolio_snapshot(
             account_id=account_id,
             as_of=as_of_date,
@@ -143,7 +156,12 @@ class PortfolioAnalysisService:
             provider_status = professional.get("providerStatus") or []
         compact_payload["analysisMode"] = analysis_mode
         prompt = self._build_prompt(compact_payload, mode=analysis_mode, account_id=account_id)
-        raw_text = self.analyzer.generate_text(prompt, max_tokens=2400, temperature=0.25)
+        raw_text = self.analyzer.generate_text(
+            prompt,
+            max_tokens=2400,
+            temperature=0.25,
+            call_type="portfolio_analysis",
+        )
         if not raw_text:
             raise PortfolioAnalysisError("LLM 未返回资产分析结果。")
 
@@ -153,6 +171,21 @@ class PortfolioAnalysisService:
         if not summary_points or not full_markdown:
             raise PortfolioAnalysisError("LLM 返回的资产分析结构不完整。")
 
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        yingmi_ok = sum(1 for item in provider_status if item.get("available") is True)
+        yingmi_failed = sum(1 for item in provider_status if item.get("available") is False)
+        logger.info(
+            "持仓资产分析完成: scope=%s mode=%s positions=%s prompt_chars=%s response_chars=%s "
+            "yingmi_ok=%s yingmi_failed=%s elapsed_ms=%s",
+            "all" if account_id is None else account_id,
+            analysis_mode,
+            compact_payload.get("持仓数量"),
+            len(prompt),
+            len(raw_text),
+            yingmi_ok,
+            yingmi_failed,
+            elapsed_ms,
+        )
         return {
             "as_of": str(snapshot.get("as_of") or as_of_date.isoformat()),
             "snapshot_signature": snapshot_signature,
@@ -228,6 +261,8 @@ class PortfolioAnalysisService:
                         "market": pos.get("market"),
                         "currency": pos.get("currency"),
                         "quantity": pos.get("quantity"),
+                        "avgCost": pos.get("avg_cost"),
+                        "totalCost": pos.get("total_cost"),
                         "marketValueBase": pos.get("market_value_base"),
                         "unrealizedPnlBase": pos.get("unrealized_pnl_base"),
                         "unrealizedPnlPct": pos.get("unrealized_pnl_pct"),
@@ -391,6 +426,8 @@ class PortfolioAnalysisService:
             if item.get("market") != "fund" or not re.fullmatch(r"\d{6}", symbol):
                 continue
             amount = float(item.get("marketValueBase") or 0.0)
+            if amount <= 0:
+                amount = max(float(item.get("totalCost") or 0.0), 0.0)
             if amount <= 0:
                 continue
             result.append(

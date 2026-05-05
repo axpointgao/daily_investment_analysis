@@ -1525,6 +1525,7 @@ class GeminiAnalyzer:
         prompt: str,
         max_tokens: int = 2048,
         temperature: float = 0.7,
+        call_type: str = "market_review",
     ) -> Optional[str]:
         """Public entry point for free-form text generation.
 
@@ -1547,7 +1548,7 @@ class GeminiAnalyzer:
             )
             if isinstance(result, tuple):
                 text, model_used, usage = result
-                persist_llm_usage(usage, model_used, call_type="market_review")
+                persist_llm_usage(usage, model_used, call_type=call_type)
                 return text
             return result
         except Exception as exc:

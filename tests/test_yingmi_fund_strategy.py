@@ -243,6 +243,34 @@ class YingmiFundStrategyTestCase(unittest.TestCase):
         self.assertIn("portfolio_risk", result["data"])
         self.assertIn("funds_backtest", result["data"])
 
+    def test_portfolio_uses_total_cost_when_fund_market_value_missing(self) -> None:
+        positions = [
+            {
+                "symbol": "000290",
+                "displayName": "测试基金",
+                "market": "fund",
+                "marketValueBase": 0.0,
+                "totalCost": 12199.6454,
+            }
+        ]
+        captured = {}
+        client = SimpleNamespace(
+            get_asset_allocation=lambda fund_list: captured.setdefault("fund_list", fund_list) or {"asset": fund_list},
+            analyze_portfolio_risk=lambda holdings: captured.setdefault("holdings", holdings) or {"risk": holdings},
+        )
+
+        self._write_env("YINGMI_API_KEY=dummy", "YINGMI_FUND_ANALYSIS_DEPTH=professional")
+        with patch("src.services.yingmi_stargate_client.YingmiStargateClient", return_value=client):
+            result = PortfolioAnalysisService(
+                analyzer=SimpleNamespace(is_available=lambda: True),
+                config=get_config(),
+            )._build_professional_analysis(positions)
+
+        self.assertIn("asset_allocation", result["data"])
+        self.assertEqual(captured["fund_list"][0]["fundCode"], "000290")
+        self.assertAlmostEqual(captured["fund_list"][0]["amount"], 12199.6454)
+        self.assertAlmostEqual(captured["holdings"][0]["weight"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()
