@@ -451,6 +451,43 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
         self.assertIn("风格稳定", report)
 
     @mock.patch("src.notification.get_config")
+    def test_generate_fund_full_report_formats_grade_rows_as_table(self, mock_get_config: mock.MagicMock):
+        cfg = _make_config(report_summary_only=False)
+        mock_get_config.return_value = cfg
+        service = NotificationService()
+        payload = [{
+            "fund_code": "000001",
+            "fund_name": "华夏成长混合",
+            "report": {
+                "summary": {"allocationRating": "谨慎观察", "suitabilityScore": 70},
+                "metrics": {
+                    "grade": [
+                        {
+                            "date": "2026-03-31",
+                            "zhaoshangRating": "1",
+                            "shanghaiRating3y": "--",
+                            "jianRating": "--",
+                        },
+                        {
+                            "date": "2025-12-31",
+                            "zhaoshangRating": "2",
+                            "shanghaiRating3y": "",
+                            "jianRating": "",
+                        },
+                    ],
+                },
+            },
+        }]
+
+        report = service.generate_fund_report(payload, report_type="full")
+
+        self.assertIn("### 评级", report)
+        self.assertIn("| 日期 | 招商评级 | 上海证券3年评级 | 济安金信评级 |", report)
+        self.assertIn("| 2026-03-31 | 1星 | N/A | N/A |", report)
+        self.assertIn("| 2025-12-31 | 2星 | N/A | N/A |", report)
+        self.assertNotIn("{'date':", report)
+
+    @mock.patch("src.notification.get_config")
     @mock.patch("requests.post")
     def test_send_to_feishu_via_notification_service(self, mock_post: mock.MagicMock, mock_get_config: mock.MagicMock):
         cfg = _make_config(feishu_webhook_url="https://feishu.example")

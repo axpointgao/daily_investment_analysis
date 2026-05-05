@@ -94,6 +94,13 @@ def _format_fund_percent(value: Any) -> str:
     return f"{number:.2f}%"
 
 
+def _format_fund_rating(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text or text == "--":
+        return "N/A"
+    return f"{text}星" if text.isdigit() else _escape_md_text(text)
+
+
 class ChannelDetector:
     """
     渠道检测器 - 简化版
@@ -420,10 +427,21 @@ class NotificationService(
                 "",
             ])
             if grade:
-                lines.extend(["### 评级", ""])
+                lines.extend([
+                    "### 评级",
+                    "",
+                    "| 日期 | 招商评级 | 上海证券3年评级 | 济安金信评级 |",
+                    "|------|------|------|------|",
+                ])
                 for row in grade[:5]:
-                    if isinstance(row, dict):
-                        lines.append(f"- {_escape_md_text(row)}")
+                    if not isinstance(row, dict):
+                        continue
+                    lines.append(
+                        f"| {_escape_md_text(row.get('date') or 'N/A')} | "
+                        f"{_format_fund_rating(row.get('zhaoshangRating'))} | "
+                        f"{_format_fund_rating(row.get('shanghaiRating3y'))} | "
+                        f"{_format_fund_rating(row.get('jianRating'))} |"
+                    )
                 lines.append("")
 
         return lines
