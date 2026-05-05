@@ -459,6 +459,24 @@ class PortfolioRepository:
             ).scalar_one_or_none()
             return row
 
+    def list_manual_prices(self, *, account_id: int, market: str, as_of: date) -> List[PortfolioManualPrice]:
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(PortfolioManualPrice)
+                .where(
+                    and_(
+                        PortfolioManualPrice.account_id == account_id,
+                        PortfolioManualPrice.market == market,
+                        PortfolioManualPrice.price_date <= as_of,
+                    )
+                )
+                .order_by(
+                    PortfolioManualPrice.price_date.asc(),
+                    PortfolioManualPrice.id.asc(),
+                )
+            ).scalars().all()
+            return list(rows)
+
     def add_bank_ledger(
         self,
         *,
@@ -596,6 +614,7 @@ class PortfolioRepository:
         platform: str,
         product_name: str,
         product_code: Optional[str],
+        product_type: str,
         direction: str,
         amount: float,
         quantity: float,
@@ -611,6 +630,7 @@ class PortfolioRepository:
                 platform=platform,
                 product_name=product_name,
                 product_code=product_code,
+                product_type=product_type,
                 direction=direction,
                 amount=amount,
                 quantity=quantity,

@@ -546,36 +546,36 @@ class PortfolioApiTestCase(unittest.TestCase):
             json={
                 "account_id": account_id,
                 "event_date": "2026-01-01",
-                "platform": "陆基金/陆金所",
-                "product_name": "稳健投顾组合",
-                "product_code": "LJTG001",
-                "direction": "subscribe",
+                "platform": "且慢",
+                "product_name": "长赢指数投资计划",
+                "product_type": "dca_plan",
+                "event_type": "initial_buy",
                 "amount": 100000,
-                "quantity": 100000,
                 "currency": "CNY",
                 "risk_level": "R3",
-                "investment_style": "稳健",
+                "investment_style": "指数定投",
             },
         )
         self.assertEqual(ledger_resp.status_code, 200)
 
         list_resp = self.client.get(
             "/api/v1/portfolio/advisory-ledger",
-            params={"account_id": account_id, "direction": "subscribe"},
+            params={"account_id": account_id, "direction": "initial_buy"},
         )
         self.assertEqual(list_resp.status_code, 200)
         self.assertEqual(list_resp.json()["total"], 1)
-        self.assertEqual(list_resp.json()["items"][0]["product_code"], "LJTG001")
-        self.assertAlmostEqual(list_resp.json()["items"][0]["nav"], 1.0, places=6)
+        self.assertIsNone(list_resp.json()["items"][0]["product_code"])
+        self.assertEqual(list_resp.json()["items"][0]["product_type"], "dca_plan")
+        self.assertEqual(list_resp.json()["items"][0]["event_type"], "initial_buy")
 
         price_resp = self.client.post(
             "/api/v1/portfolio/manual-prices",
             json={
                 "account_id": account_id,
-                "symbol": "LJTG001",
+                "symbol": "ADV:262b6c520053",
                 "market": "advisory",
                 "price_date": "2026-01-02",
-                "price": 1.02,
+                "price": 102000,
                 "currency": "CNY",
             },
         )
@@ -588,7 +588,7 @@ class PortfolioApiTestCase(unittest.TestCase):
         self.assertEqual(snapshot_resp.status_code, 200)
         position = snapshot_resp.json()["accounts"][0]["positions"][0]
         self.assertEqual(position["market"], "advisory")
-        self.assertEqual(position["price_source"], "manual_price")
+        self.assertEqual(position["price_source"], "advisory_value_update")
         self.assertAlmostEqual(position["market_value_base"], 102000.0, places=6)
 
         delete_resp = self.client.delete(f"/api/v1/portfolio/advisory-ledger/{ledger_resp.json()['id']}")

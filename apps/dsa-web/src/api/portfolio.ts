@@ -69,7 +69,7 @@ type BankLedgerListQuery = EventQuery & {
 
 type AdvisoryLedgerListQuery = EventQuery & {
   product?: string;
-  direction?: 'subscribe' | 'redeem';
+  direction?: string;
 };
 
 type InsurancePolicyListQuery = {
@@ -273,9 +273,9 @@ export const portfolioApi = {
       platform: payload.platform,
       product_name: payload.productName,
       product_code: payload.productCode,
-      direction: payload.direction,
+      product_type: payload.productType,
+      event_type: payload.eventType,
       amount: payload.amount,
-      quantity: payload.quantity,
       currency: payload.currency,
       risk_level: payload.riskLevel,
       investment_style: payload.investmentStyle,

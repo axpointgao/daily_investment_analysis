@@ -695,7 +695,7 @@ class PortfolioBankLedger(Base):
 
 
 class PortfolioAdvisoryLedger(Base):
-    """Advisory product subscription and redemption ledger."""
+    """Advisory product amount-based ledger."""
 
     __tablename__ = 'portfolio_advisory_ledger'
 
@@ -705,7 +705,8 @@ class PortfolioAdvisoryLedger(Base):
     platform = Column(String(64), nullable=False)
     product_name = Column(String(128), nullable=False)
     product_code = Column(String(64), index=True)
-    direction = Column(String(16), nullable=False)  # subscribe/redeem
+    product_type = Column(String(24), nullable=False, default='advisory_combo')  # advisory_combo/dca_plan
+    direction = Column(String(16), nullable=False)  # buy/initial_buy/dca_buy/follow_buy/redeem
     amount = Column(Float, nullable=False)
     quantity = Column(Float, nullable=False)
     nav = Column(Float, nullable=False)
@@ -1018,6 +1019,17 @@ class DatabaseManager:
                         continue
                     connection.execute(
                         text(f"ALTER TABLE portfolio_bank_ledger ADD COLUMN {column_name} {column_type}")
+                    )
+            if "portfolio_advisory_ledger" in table_names:
+                existing_columns = {column["name"] for column in inspector.get_columns("portfolio_advisory_ledger")}
+                additions = {
+                    "product_type": "VARCHAR(24) DEFAULT 'advisory_combo'",
+                }
+                for column_name, column_type in additions.items():
+                    if column_name in existing_columns:
+                        continue
+                    connection.execute(
+                        text(f"ALTER TABLE portfolio_advisory_ledger ADD COLUMN {column_name} {column_type}")
                     )
 
     @staticmethod

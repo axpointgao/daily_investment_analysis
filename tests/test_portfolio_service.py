@@ -1357,19 +1357,19 @@ class PortfolioServiceTestCase(unittest.TestCase):
         self.assertAlmostEqual(remaining_by_entry[second["id"]], 50000.0, places=6)
         self.assertAlmostEqual(redeemed["accounts"][0]["total_cash"], -70000.0, places=6)
 
-    def test_advisory_account_supports_product_nav_and_redemption(self) -> None:
-        account = self.service.create_account(name="Advisory", broker="陆基金", market="advisory", base_currency="CNY")
+    def test_advisory_account_tracks_amount_value_and_redemption(self) -> None:
+        account = self.service.create_account(name="Advisory", broker="且慢", market="advisory", base_currency="CNY")
         aid = account["id"]
 
         self.service.record_advisory_ledger(
             account_id=aid,
             event_date=date(2026, 1, 1),
-            platform="陆基金/陆金所",
-            product_name="稳健投顾组合",
-            product_code="LJTG001",
-            direction="subscribe",
+            platform="且慢",
+            product_name="我要稳稳的幸福",
+            product_code=None,
+            product_type="advisory_combo",
+            event_type="buy",
             amount=100000,
-            quantity=100000,
             currency="CNY",
             risk_level="R3",
             investment_style="稳健",
@@ -1384,64 +1384,133 @@ class PortfolioServiceTestCase(unittest.TestCase):
         self.assertAlmostEqual(account_snapshot["total_market_value"], 100000.0, places=6)
         position = account_snapshot["positions"][0]
         self.assertEqual(position["market"], "advisory")
-        self.assertEqual(position["platform"], "陆基金/陆金所")
-        self.assertEqual(position["product_name"], "稳健投顾组合")
-        self.assertEqual(position["product_code"], "LJTG001")
-        self.assertEqual(position["price_source"], "advisory_confirmed_nav")
+        self.assertEqual(position["symbol"], position["symbol"].upper())
+        self.assertEqual(position["platform"], "且慢")
+        self.assertEqual(position["product_name"], "我要稳稳的幸福")
+        self.assertIsNone(position["product_code"])
+        self.assertEqual(position["product_type"], "advisory_combo")
+        self.assertEqual(position["price_source"], "advisory_net_invested_estimate")
+        self.assertAlmostEqual(position["invested_amount"], 100000.0, places=6)
 
-        self.service.upsert_manual_price(
+        self.service.repo.upsert_manual_price(
             account_id=aid,
-            symbol="LJTG001",
+            symbol=position["symbol"].lower(),
             market="advisory",
             price_date=date(2026, 1, 2),
-            price=1.05,
+            price=105000,
+            currency="CNY",
+        )
+        self.service.record_advisory_ledger(
+            account_id=aid,
+            event_date=date(2026, 1, 3),
+            platform="且慢",
+            product_name="我要稳稳的幸福",
+            product_code=None,
+            product_type="advisory_combo",
+            event_type="buy",
+            amount=10000,
             currency="CNY",
         )
         updated = self.service.get_portfolio_snapshot(
             account_id=aid,
-            as_of=date(2026, 1, 2),
+            as_of=date(2026, 1, 3),
             refresh_prices=False,
         )
         updated_position = updated["accounts"][0]["positions"][0]
-        self.assertEqual(updated_position["price_source"], "manual_price")
-        self.assertAlmostEqual(updated_position["market_value_base"], 105000.0, places=6)
+        self.assertEqual(updated_position["price_source"], "advisory_value_update")
+        self.assertAlmostEqual(updated_position["market_value_base"], 115000.0, places=6)
         self.assertAlmostEqual(updated_position["unrealized_pnl_base"], 5000.0, places=6)
-        self.assertAlmostEqual(updated["asset_breakdown"]["advisory"], 105000.0, places=6)
+        self.assertAlmostEqual(updated["asset_breakdown"]["advisory"], 115000.0, places=6)
 
         self.service.record_advisory_ledger(
             account_id=aid,
-            event_date=date(2026, 1, 3),
-            platform="陆基金/陆金所",
-            product_name="稳健投顾组合",
-            product_code="LJTG001",
-            direction="redeem",
-            amount=52500,
-            quantity=50000,
+            event_date=date(2026, 1, 4),
+            platform="且慢",
+            product_name="我要稳稳的幸福",
+            product_code=None,
+            product_type="advisory_combo",
+            event_type="redeem",
+            amount=60000,
             currency="CNY",
         )
         redeemed = self.service.get_portfolio_snapshot(
             account_id=aid,
-            as_of=date(2026, 1, 3),
+            as_of=date(2026, 1, 4),
             refresh_prices=True,
         )
         redeemed_position = redeemed["accounts"][0]["positions"][0]
-        self.assertAlmostEqual(redeemed_position["quantity"], 50000.0, places=6)
-        self.assertAlmostEqual(redeemed_position["total_cost"], 50000.0, places=6)
-        self.assertAlmostEqual(redeemed["accounts"][0]["realized_pnl"], 2500.0, places=6)
-        self.assertAlmostEqual(redeemed["accounts"][0]["total_cash"], -47500.0, places=6)
+        self.assertAlmostEqual(redeemed_position["market_value_base"], 55000.0, places=6)
+        self.assertAlmostEqual(redeemed_position["redeemed_amount"], 60000.0, places=6)
+        self.assertAlmostEqual(redeemed["accounts"][0]["unrealized_pnl"], 5000.0, places=6)
+        self.assertAlmostEqual(redeemed["accounts"][0]["total_cash"], -50000.0, places=6)
 
-        with self.assertRaises(PortfolioOversellError):
+    def test_advisory_account_tracks_dca_plan_events(self) -> None:
+        account = self.service.create_account(name="Advisory", broker="且慢", market="advisory", base_currency="CNY")
+        aid = account["id"]
+
+        self.service.record_advisory_ledger(
+            account_id=aid,
+            event_date=date(2026, 1, 1),
+            platform="且慢",
+            product_name="长赢指数投资计划",
+            product_code=None,
+            product_type="dca_plan",
+            event_type="initial_buy",
+            amount=200000,
+            currency="CNY",
+        )
+        self.service.record_advisory_ledger(
+            account_id=aid,
+            event_date=date(2026, 2, 1),
+            platform="且慢",
+            product_name="长赢指数投资计划",
+            product_code=None,
+            product_type="dca_plan",
+            event_type="dca_buy",
+            amount=1000,
+            currency="CNY",
+        )
+        snapshot = self.service.get_portfolio_snapshot(account_id=aid, as_of=date(2026, 2, 1))
+        position = snapshot["accounts"][0]["positions"][0]
+        self.assertEqual(position["product_type"], "dca_plan")
+        self.assertAlmostEqual(position["invested_amount"], 201000.0, places=6)
+        self.assertAlmostEqual(position["market_value_base"], 201000.0, places=6)
+
+        with self.assertRaisesRegex(ValueError, "product_type cannot change"):
             self.service.record_advisory_ledger(
                 account_id=aid,
-                event_date=date(2026, 1, 4),
-                platform="陆基金/陆金所",
-                product_name="稳健投顾组合",
-                product_code="LJTG001",
-                direction="redeem",
-                amount=60000,
-                quantity=60000,
+                event_date=date(2026, 2, 2),
+                platform="且慢",
+                product_name="长赢指数投资计划",
+                product_code=None,
+                product_type="advisory_combo",
+                event_type="buy",
+                amount=1000,
                 currency="CNY",
             )
+
+    def test_advisory_orphan_value_update_does_not_create_position(self) -> None:
+        account = self.service.create_account(name="Advisory", broker="且慢", market="advisory", base_currency="CNY")
+        aid = account["id"]
+
+        self.service.upsert_manual_price(
+            account_id=aid,
+            symbol="ADV:ORPHAN",
+            market="advisory",
+            price_date=date(2026, 1, 1),
+            price=335328.59,
+            currency="CNY",
+        )
+
+        snapshot = self.service.get_portfolio_snapshot(
+            account_id=aid,
+            as_of=date(2026, 1, 1),
+            refresh_prices=True,
+        )
+
+        self.assertEqual(snapshot["accounts"][0]["positions"], [])
+        self.assertAlmostEqual(snapshot["accounts"][0]["total_market_value"], 0.0, places=6)
+        self.assertAlmostEqual(snapshot["asset_breakdown"]["advisory"], 0.0, places=6)
 
     def test_insurance_account_tracks_premium_returns_and_value(self) -> None:
         account = self.service.create_account(name="Insurance", broker="保险公司", market="insurance", base_currency="CNY")

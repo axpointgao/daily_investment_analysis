@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 PortfolioMarket = Literal["cn", "hk", "us", "fund", "crypto", "bank", "advisory", "insurance"]
+PortfolioAdvisoryProductType = Literal["advisory_combo", "dca_plan"]
+PortfolioAdvisoryEventType = Literal["buy", "initial_buy", "dca_buy", "follow_buy", "redeem"]
 
 
 class PortfolioAccountCreateRequest(BaseModel):
@@ -167,9 +169,9 @@ class PortfolioAdvisoryLedgerCreateRequest(BaseModel):
     platform: str = Field(..., min_length=1, max_length=64)
     product_name: str = Field(..., min_length=1, max_length=128)
     product_code: Optional[str] = Field(None, max_length=64)
-    direction: Literal["subscribe", "redeem"]
+    product_type: PortfolioAdvisoryProductType = "advisory_combo"
+    event_type: PortfolioAdvisoryEventType
     amount: float = Field(..., gt=0)
-    quantity: float = Field(..., gt=0)
     currency: Optional[str] = Field(None, min_length=3, max_length=8)
     risk_level: Optional[str] = Field(None, max_length=16)
     investment_style: Optional[str] = Field(None, max_length=32)
@@ -182,10 +184,12 @@ class PortfolioAdvisoryLedgerListItem(BaseModel):
     platform: str
     product_name: str
     product_code: Optional[str] = None
+    product_type: str
+    event_type: str
     direction: str
     amount: float
-    quantity: float
-    nav: float
+    quantity: Optional[float] = None
+    nav: Optional[float] = None
     currency: str
     risk_level: Optional[str] = None
     investment_style: Optional[str] = None
@@ -393,7 +397,12 @@ class PortfolioPositionItem(BaseModel):
     income_mode: Optional[str] = None
     platform: Optional[str] = None
     product_code: Optional[str] = None
+    product_type: Optional[str] = None
+    product_type_label: Optional[str] = None
     investment_style: Optional[str] = None
+    invested_amount: Optional[float] = None
+    redeemed_amount: Optional[float] = None
+    value_amount: Optional[float] = None
     policy_id: Optional[int] = None
     policy_name: Optional[str] = None
     insurer: Optional[str] = None

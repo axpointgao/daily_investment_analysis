@@ -11,8 +11,9 @@ import { useStockIndex } from '../hooks/useStockIndex';
 import { toDateInputValue } from '../utils/format';
 import type {
   PortfolioAccountItem,
-  PortfolioAdvisoryDirection,
+  PortfolioAdvisoryEventType,
   PortfolioAdvisoryLedgerListItem,
+  PortfolioAdvisoryProductType,
   PortfolioAnalysisResponse,
   PortfolioBankAssetKind,
   PortfolioBankIncomeMode,
@@ -62,9 +63,11 @@ type BankPositionOption = FlatPosition & {
   optionValue: string;
 };
 
+type AdvisoryFormEventType = PortfolioAdvisoryEventType | 'append_buy';
+
 type AdvisoryLedgerPayloadDraft =
   | { error: string }
-  | { amount: number; quantity: number; product?: BankPositionOption };
+  | { amount: number; product?: BankPositionOption };
 
 type PendingDelete =
   | { eventType: 'trade'; id: number; message: string }
@@ -113,7 +116,6 @@ const PORTFOLIO_SELECT_CLASS = `${PORTFOLIO_INPUT_CLASS} appearance-none pr-10`;
 const PORTFOLIO_FILE_PICKER_CLASS =
   'input-surface input-focus-glow flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
 const PORTFOLIO_FIELD_LABEL_CLASS = 'mb-1 block text-[11px] font-medium text-secondary';
-const PORTFOLIO_FORM_EPS = 1e-8;
 const PORTFOLIO_ASSET_COLORS = [
   'hsl(var(--primary))',
   'hsl(var(--color-purple))',
@@ -165,6 +167,7 @@ function hasPositionPrice(row: PortfolioPositionItem): boolean {
 
 function formatPositionPrice(row: PortfolioPositionItem): string {
   if (!hasPositionPrice(row)) return '--';
+  if (row.market === 'advisory') return '-';
   return row.lastPrice.toFixed(4);
 }
 
@@ -183,6 +186,7 @@ function parsePositiveFormNumber(value: string): number | null {
 }
 
 function formatPositionQuantity(row: PortfolioPositionItem): string {
+  if (row.market === 'advisory') return '-';
   if (row.market === 'bank' && !row.registrationCode) return '-';
   return formatAssetQuantity(row.quantity, row.market);
 }
@@ -204,10 +208,11 @@ function getChinaPnlColorClass(value: number | undefined | null, hasValue: boole
 function getPositionPriceLabel(row: PortfolioPositionItem): string {
   if (row.priceSource === 'manual_price') {
     if (row.market === 'bank') return row.priceDate ? `手工净值 · ${row.priceDate}` : '手工净值';
-    if (row.market === 'advisory') return row.priceDate ? `手工净值 · ${row.priceDate}` : '手工净值';
+    if (row.market === 'advisory') return row.priceDate ? `价值更新 · ${row.priceDate}` : '价值更新';
     return row.market === 'fund' ? '手工净值' : '手工价格';
   }
-  if (row.priceSource === 'advisory_confirmed_nav') return row.priceDate ? `确认净值 · ${row.priceDate}` : '确认净值';
+  if (row.priceSource === 'advisory_value_update') return row.priceDate ? `价值更新 · ${row.priceDate}` : '价值更新';
+  if (row.priceSource === 'advisory_net_invested_estimate') return '流水金额';
   if (row.priceSource === 'bank_cost_nav') return row.priceDate ? `成本净值 · ${row.priceDate}` : '成本净值';
   if (row.priceSource === 'insurance_value_update') return row.priceDate ? `保单价值 · ${row.priceDate}` : '保单价值';
   if (row.priceSource === 'insurance_no_value') return '待录入价值';
@@ -300,8 +305,21 @@ function getPositionDisplayName(row: PortfolioPositionItem): string {
   return row.symbol;
 }
 
-function formatAdvisoryDirectionLabel(value: PortfolioAdvisoryDirection | string): string {
-  return value === 'redeem' ? '赎回' : '申购';
+function formatAdvisoryProductTypeLabel(value?: string | null): string {
+  if (value === 'dca_plan') return '定投计划';
+  return '投顾组合';
+}
+
+function formatAdvisoryEventLabel(value?: string | null): string {
+  const labels: Record<string, string> = {
+    buy: '买入',
+    append_buy: '追加买入',
+    initial_buy: '首次买入',
+    dca_buy: '定投投入',
+    follow_buy: '手动跟投',
+    redeem: '赎回/止盈',
+  };
+  return value ? labels[value] || value : '';
 }
 
 function formatInsuranceKind(value?: string | null): string {
@@ -405,11 +423,12 @@ function getDefaultInsuranceEventType(policy?: PortfolioInsurancePolicyItem | nu
 function formatAdvisoryPositionOption(row: PortfolioPositionItem): string {
   const title = getPositionDisplayName(row);
   const details = [
+    formatAdvisoryProductTypeLabel(row.productType),
     row.platform,
     row.productCode,
     row.riskLevel,
     row.investmentStyle,
-    `份额 ${formatAssetQuantity(row.quantity, row.market)}`,
+    `价值 ${formatMoney(row.marketValueBase, row.valuationCurrency)}`,
   ].filter(Boolean);
   return `${title}${details.length ? ` · ${details.join(' · ')}` : ''}`;
 }
@@ -492,7 +511,15 @@ function getCodeCandidates(symbol: string): string[] {
 
 function getPositionSecondaryName(row: PortfolioPositionItem, assetNameMaps: AssetNameMaps): string {
   if (row.market === 'advisory') {
-    return [row.platform, row.productCode, row.riskLevel, row.investmentStyle].filter(Boolean).join(' · ');
+    return [
+      formatAdvisoryProductTypeLabel(row.productType),
+      row.platform,
+      row.productCode,
+      row.riskLevel,
+      row.investmentStyle,
+      row.investedAmount != null ? `投入 ${formatMoney(row.investedAmount, row.currency)}` : '',
+      row.redeemedAmount != null && row.redeemedAmount > 0 ? `赎回 ${formatMoney(row.redeemedAmount, row.currency)}` : '',
+    ].filter(Boolean).join(' · ');
   }
   if (row.market === 'insurance') {
     return [
@@ -551,7 +578,7 @@ function isExchangeTradedFundName(name: string | undefined): boolean {
 }
 
 function getPositionAssetType(row: PortfolioPositionItem, assetNameMaps: AssetNameMaps): string {
-  if (row.market === 'advisory') return '投顾组合';
+  if (row.market === 'advisory') return formatAdvisoryProductTypeLabel(row.productType);
   if (row.market === 'insurance') return '保险';
   if (row.market === 'bank') {
     if (row.registrationCode) return '银行理财';
@@ -734,7 +761,7 @@ const PortfolioPage: React.FC = () => {
   const [eventDirection, setEventDirection] = useState<'' | PortfolioCashDirection>('');
   const [eventActionType, setEventActionType] = useState<'' | PortfolioCorporateActionType>('');
   const [eventBankAssetKind, setEventBankAssetKind] = useState<'' | PortfolioBankAssetKind>('');
-  const [eventAdvisoryDirection, setEventAdvisoryDirection] = useState<'' | PortfolioAdvisoryDirection>('');
+  const [eventAdvisoryDirection, setEventAdvisoryDirection] = useState<'' | PortfolioAdvisoryEventType>('');
   const [eventInsuranceEventType, setEventInsuranceEventType] = useState<'' | PortfolioInsuranceEventType>('');
   const [eventPage, setEventPage] = useState(1);
   const [eventTotal, setEventTotal] = useState(0);
@@ -812,9 +839,9 @@ const PortfolioPage: React.FC = () => {
     selectedProduct: '',
     productName: '',
     productCode: '',
-    direction: 'subscribe' as PortfolioAdvisoryDirection,
+    productType: 'advisory_combo' as PortfolioAdvisoryProductType,
+    eventType: 'buy' as AdvisoryFormEventType,
     amount: '',
-    quantity: '',
     riskLevel: '',
     investmentStyle: '',
   });
@@ -859,12 +886,6 @@ const PortfolioPage: React.FC = () => {
   const isAdvisoryAccount = selectedMarket === 'advisory';
   const isInsuranceAccount = selectedMarket === 'insurance';
   const supportsCashLedger = isStockAccount || isFundAccount || isCryptoAccount || isAdvisoryAccount;
-  const advisoryDerivedNav = useMemo(() => {
-    const amount = parsePositiveFormNumber(advisoryForm.amount);
-    const quantity = parsePositiveFormNumber(advisoryForm.quantity);
-    if (amount == null || quantity == null) return null;
-    return amount / quantity;
-  }, [advisoryForm.amount, advisoryForm.quantity]);
   const quantityStep = isCryptoAccount ? '0.00000001' : '0.0001';
   const missingFxPairsText = formatMissingFxPairs(snapshot);
   const snapshotSignature = useMemo(
@@ -922,7 +943,7 @@ const PortfolioPage: React.FC = () => {
     ...(isBankAccount ? [{ value: 'bank' as const, label: '银行' }] : []),
     ...(isBankAccount ? [{ value: 'bankNav' as const, label: '净值更新' }] : []),
     ...(isAdvisoryAccount ? [{ value: 'advisory' as const, label: '投顾流水' }] : []),
-    ...(isAdvisoryAccount ? [{ value: 'advisoryNav' as const, label: '净值更新' }] : []),
+    ...(isAdvisoryAccount ? [{ value: 'advisoryNav' as const, label: '价值更新' }] : []),
     ...(isInsuranceAccount ? [{ value: 'insurancePolicy' as const, label: '保单' }] : []),
     ...(isInsuranceAccount ? [{ value: 'insuranceLedger' as const, label: '缴费/返还' }] : []),
   ];
@@ -936,7 +957,7 @@ const PortfolioPage: React.FC = () => {
     eventType === 'cash' && eventDirection ? formatCashDirectionLabel(eventDirection) : null,
     eventType === 'corporate' && eventActionType ? formatCorporateActionLabel(eventActionType) : null,
     eventType === 'bank' && eventBankAssetKind ? formatBankAssetKind(eventBankAssetKind) : null,
-    eventType === 'advisory' && eventAdvisoryDirection ? formatAdvisoryDirectionLabel(eventAdvisoryDirection) : null,
+    eventType === 'advisory' && eventAdvisoryDirection ? formatAdvisoryEventLabel(eventAdvisoryDirection) : null,
     eventType === 'insurance' && eventInsuranceEventType ? formatInsuranceEventType(eventInsuranceEventType) : null,
   ].filter(Boolean) as string[];
   const hasEventFilters = eventFilterChips.length > 0;
@@ -1268,13 +1289,26 @@ const PortfolioPage: React.FC = () => {
   const selectedNavWealthOption = bankWealthOptions.find((item) => item.optionValue === bankNavForm.selectedProduct);
   const advisoryOptions: BankPositionOption[] = useMemo(
     () => positionRows
-      .filter((item) => item.accountId === writableAccountId && item.market === 'advisory' && item.quantity > 0)
+      .filter((item) => item.accountId === writableAccountId && item.market === 'advisory')
       .map((item) => ({ ...item, optionValue: item.symbol }))
       .filter((item) => item.optionValue),
     [positionRows, writableAccountId],
   );
-  const selectedAdvisoryOption = advisoryOptions.find((item) => item.optionValue === advisoryForm.selectedProduct);
+  const advisoryComboOptions = useMemo(
+    () => advisoryOptions.filter((item) => item.productType !== 'dca_plan'),
+    [advisoryOptions],
+  );
+  const advisoryDcaPlanOptions = useMemo(
+    () => advisoryOptions.filter((item) => item.productType === 'dca_plan'),
+    [advisoryOptions],
+  );
+  const advisoryFormProductOptions = advisoryForm.productType === 'dca_plan' ? advisoryDcaPlanOptions : advisoryComboOptions;
+  const selectedAdvisoryOption = advisoryFormProductOptions.find((item) => item.optionValue === advisoryForm.selectedProduct);
   const selectedNavAdvisoryOption = advisoryOptions.find((item) => item.optionValue === advisoryNavForm.selectedProduct);
+  const advisoryEventRequiresExistingProduct = ['append_buy', 'dca_buy', 'follow_buy', 'redeem'].includes(advisoryForm.eventType);
+  const advisoryProductSelectPlaceholder = advisoryForm.productType === 'dca_plan'
+    ? '选择定投计划'
+    : '选择投顾组合';
   const selectedInsurancePolicy = insurancePolicies.find((item) => String(item.id) === insuranceLedgerForm.policyId);
   const insuranceLedgerEventOptions = useMemo(
     () => getInsuranceEventOptions(selectedInsurancePolicy),
@@ -1286,39 +1320,23 @@ const PortfolioPage: React.FC = () => {
       setInsuranceLedgerForm((prev) => ({ ...prev, eventType: insuranceLedgerEventOptions[0].value }));
     }
   }, [insuranceLedgerEventOptions, insuranceLedgerForm.eventType, selectedInsurancePolicy]);
-  const advisoryRedeemEstimate = useMemo(() => {
-    if (advisoryForm.direction !== 'redeem' || !selectedAdvisoryOption) return null;
-    const quantity = parsePositiveFormNumber(advisoryForm.quantity);
-    if (quantity == null || selectedAdvisoryOption.lastPrice <= 0) return null;
-    return quantity * selectedAdvisoryOption.lastPrice;
-  }, [advisoryForm.direction, advisoryForm.quantity, selectedAdvisoryOption]);
   const buildAdvisoryLedgerPayload = (): AdvisoryLedgerPayloadDraft => {
-    const quantity = parsePositiveFormNumber(advisoryForm.quantity);
-    if (quantity == null) {
-      return { error: advisoryForm.direction === 'redeem' ? '请填写赎回份额。' : '请填写确认份额。' };
-    }
-    if (advisoryForm.direction === 'redeem') {
+    if (advisoryEventRequiresExistingProduct) {
       if (!selectedAdvisoryOption) {
-        return { error: '请先选择要赎回的投顾产品。' };
+        return { error: `请先${advisoryProductSelectPlaceholder}。` };
       }
-      if (quantity - selectedAdvisoryOption.quantity > PORTFOLIO_FORM_EPS) {
-        return { error: `赎回份额不能超过可赎回份额 ${formatAssetQuantity(selectedAdvisoryOption.quantity, 'advisory')}。` };
+      const amount = parsePositiveFormNumber(advisoryForm.amount);
+      if (amount == null) {
+        return { error: advisoryForm.eventType === 'redeem' ? '请填写赎回/止盈到账金额。' : '请填写投入金额。' };
       }
-      if (advisoryRedeemEstimate == null) {
-        return { error: '当前产品缺少可用净值，无法估算赎回到账金额。' };
-      }
-      return {
-        amount: advisoryRedeemEstimate,
-        quantity,
-        product: selectedAdvisoryOption,
-      };
+      return { amount, product: selectedAdvisoryOption };
     }
 
     const amount = parsePositiveFormNumber(advisoryForm.amount);
     if (amount == null) {
-      return { error: '请填写申购金额。' };
+      return { error: '请填写投入金额。' };
     }
-    return { amount, quantity, product: undefined };
+    return { amount, product: undefined };
   };
 
   const assetBreakdownRows = Object.entries(snapshot?.assetBreakdown || {})
@@ -1561,15 +1579,16 @@ const PortfolioPage: React.FC = () => {
         return;
       }
       const selectedProduct = payload.product;
+      const ledgerEventType: PortfolioAdvisoryEventType = advisoryForm.eventType === 'append_buy' ? 'buy' : advisoryForm.eventType;
       await portfolioApi.createAdvisoryLedger({
         accountId: writableAccountId,
         eventDate: advisoryForm.eventDate,
         platform: selectedProduct?.platform || advisoryForm.platform,
         productName: selectedProduct?.productName || advisoryForm.productName,
         productCode: selectedProduct?.productCode || advisoryForm.productCode || undefined,
-        direction: advisoryForm.direction,
+        productType: selectedProduct?.productType === 'dca_plan' ? 'dca_plan' : advisoryForm.productType,
+        eventType: ledgerEventType,
         amount: payload.amount,
-        quantity: payload.quantity,
         currency: writableAccount.baseCurrency || 'CNY',
         riskLevel: selectedProduct?.riskLevel || advisoryForm.riskLevel || undefined,
         investmentStyle: selectedProduct?.investmentStyle || advisoryForm.investmentStyle || undefined,
@@ -1578,14 +1597,13 @@ const PortfolioPage: React.FC = () => {
       setAdvisoryForm((prev) => ({
         ...prev,
         amount: '',
-        quantity: '',
-        productName: prev.direction === 'subscribe' ? '' : prev.productName,
-        productCode: prev.direction === 'subscribe' ? '' : prev.productCode,
-        selectedProduct: prev.direction === 'subscribe' ? '' : prev.selectedProduct,
+        productName: advisoryEventRequiresExistingProduct ? prev.productName : '',
+        productCode: advisoryEventRequiresExistingProduct ? prev.productCode : '',
+        selectedProduct: advisoryEventRequiresExistingProduct ? prev.selectedProduct : '',
       }));
       showPortfolioToast(
-        advisoryForm.direction === 'redeem' ? '投顾赎回已记录' : '投顾申购已记录',
-        `${selectedProduct?.productName || advisoryForm.productName} ${formatAdvisoryDirectionLabel(advisoryForm.direction)} ${formatAssetQuantity(payload.quantity, 'advisory')}。`,
+        advisoryForm.eventType === 'redeem' ? '投顾赎回已记录' : '投顾投入已记录',
+        `${selectedProduct?.productName || advisoryForm.productName} ${formatAdvisoryEventLabel(advisoryForm.eventType)} ${formatMoney(payload.amount, writableAccount.baseCurrency || 'CNY')}。`,
       );
     } catch (err) {
       setError(getParsedApiError(err));
@@ -1599,7 +1617,7 @@ const PortfolioPage: React.FC = () => {
       return;
     }
     if (!selectedNavAdvisoryOption) {
-      setWriteWarning('请先选择需要更新净值的投顾产品。');
+      setWriteWarning('请先选择需要更新价值的投顾产品。');
       return;
     }
     try {
@@ -1615,8 +1633,8 @@ const PortfolioPage: React.FC = () => {
       await refreshPortfolioData(eventPage, { refreshPrices: true });
       setAdvisoryNavForm((prev) => ({ ...prev, selectedProduct: '', price: '' }));
       showPortfolioToast(
-        '投顾净值已保存',
-        `${selectedNavAdvisoryOption.productName || selectedNavAdvisoryOption.symbol} ${advisoryNavForm.priceDate} 的单位净值已更新。`,
+        '投顾价值已保存',
+        `${selectedNavAdvisoryOption.productName || selectedNavAdvisoryOption.symbol} ${advisoryNavForm.priceDate} 的当前总价值已更新。`,
       );
     } catch (err) {
       setError(getParsedApiError(err));
@@ -2104,7 +2122,7 @@ const PortfolioPage: React.FC = () => {
               <option value="fund">场外基金</option>
               <option value="crypto">数字货币</option>
               <option value="bank">银行</option>
-              <option value="advisory">投顾组合</option>
+              <option value="advisory">投顾</option>
               <option value="insurance">保险</option>
             </select>
             <button type="submit" className="btn-secondary text-sm" disabled={accountCreating}>
@@ -2220,7 +2238,7 @@ const PortfolioPage: React.FC = () => {
                         ) : null}
                       </td>
                       <td className="portfolio-position-cell portfolio-position-number-cell text-right">{formatPositionQuantity(row)}</td>
-                      <td className="portfolio-position-cell portfolio-position-number-cell text-right">{row.market === 'bank' && !row.registrationCode ? '-' : row.avgCost.toFixed(4)}</td>
+                      <td className="portfolio-position-cell portfolio-position-number-cell text-right">{(row.market === 'bank' && !row.registrationCode) || row.market === 'advisory' ? '-' : row.avgCost.toFixed(4)}</td>
                       <td className="portfolio-position-cell portfolio-position-number-cell text-right">
                         <div>{formatPositionPrice(row)}</div>
                         <div className={`portfolio-position-price-source text-[11px] ${hasPositionPrice(row) ? 'text-secondary' : 'text-warning'}`} title={getPositionPriceLabel(row)}>
@@ -2647,42 +2665,65 @@ const PortfolioPage: React.FC = () => {
                 <div className="grid grid-cols-2 gap-2">
                   <input className={PORTFOLIO_INPUT_CLASS} type="date" value={advisoryForm.eventDate}
                     onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
-                  <select className={PORTFOLIO_SELECT_CLASS} value={advisoryForm.direction}
+                  <select className={PORTFOLIO_SELECT_CLASS} value={advisoryForm.productType}
                     onChange={(e) => setAdvisoryForm((prev) => ({
                       ...prev,
                       selectedProduct: '',
-                      direction: e.target.value as PortfolioAdvisoryDirection,
+                      productType: e.target.value as PortfolioAdvisoryProductType,
+                      eventType: e.target.value === 'dca_plan' ? 'initial_buy' : 'buy',
                       productCode: '',
                       productName: '',
                       amount: '',
-                      quantity: '',
                     }))}>
-                    <option value="subscribe">申购</option>
-                    <option value="redeem">赎回</option>
+                    <option value="advisory_combo">投顾组合</option>
+                    <option value="dca_plan">定投计划</option>
                   </select>
                 </div>
-                {advisoryForm.direction === 'redeem' ? (
+                <select className={PORTFOLIO_SELECT_CLASS} value={advisoryForm.eventType}
+                  onChange={(e) => setAdvisoryForm((prev) => ({
+                    ...prev,
+                    selectedProduct: '',
+                    eventType: e.target.value as AdvisoryFormEventType,
+                    amount: '',
+                  }))}>
+                  {advisoryForm.productType === 'advisory_combo' ? (
+                    <>
+                      <option value="buy">买入新组合</option>
+                      <option value="append_buy">追加买入</option>
+                      <option value="redeem">赎回</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="initial_buy">首次买入</option>
+                      <option value="dca_buy">定投投入</option>
+                      <option value="follow_buy">手动跟投</option>
+                      <option value="redeem">赎回/止盈</option>
+                    </>
+                  )}
+                </select>
+                {advisoryEventRequiresExistingProduct ? (
                   <>
                   <select className={PORTFOLIO_SELECT_CLASS} value={advisoryForm.selectedProduct}
                     onChange={(e) => {
-                      const option = advisoryOptions.find((item) => item.optionValue === e.target.value);
+                      const option = advisoryFormProductOptions.find((item) => item.optionValue === e.target.value);
                       setAdvisoryForm((prev) => ({
                         ...prev,
                         selectedProduct: option?.optionValue || '',
                         productCode: option?.productCode || '',
                         productName: option?.productName || option?.displayName || '',
+                        productType: option?.productType === 'dca_plan' ? 'dca_plan' : 'advisory_combo',
                         platform: option?.platform || prev.platform,
                         riskLevel: option?.riskLevel || prev.riskLevel,
                         investmentStyle: option?.investmentStyle || prev.investmentStyle,
                       }));
                     }} required>
-                    <option value="">选择要赎回的投顾产品</option>
-                    {advisoryOptions.map((item) => (
+                    <option value="">{advisoryProductSelectPlaceholder}</option>
+                    {advisoryFormProductOptions.map((item) => (
                       <option key={item.optionValue} value={item.optionValue}>{formatAdvisoryPositionOption(item)}</option>
                     ))}
                   </select>
                   <div className="text-xs text-secondary">
-                    可赎回份额：{selectedAdvisoryOption ? formatAssetQuantity(selectedAdvisoryOption.quantity, 'advisory') : '--'}
+                    当前价值：{selectedAdvisoryOption ? formatMoney(selectedAdvisoryOption.marketValueBase, selectedAdvisoryOption.valuationCurrency) : '--'}
                   </div>
                   </>
                 ) : (
@@ -2697,20 +2738,11 @@ const PortfolioPage: React.FC = () => {
                     onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, productName: e.target.value }))} required />
                   </>
                 )}
-                <div className={advisoryForm.direction === 'redeem' ? '' : 'grid grid-cols-2 gap-2'}>
-                  {advisoryForm.direction === 'subscribe' ? (
-                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder="申购金额" value={advisoryForm.amount}
-                    onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, amount: e.target.value }))} required />
-                  ) : null}
-                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder={advisoryForm.direction === 'redeem' ? '赎回份额' : '确认份额'} value={advisoryForm.quantity}
-                    onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, quantity: e.target.value }))} required />
-                </div>
-                <div className="text-xs text-secondary">
-                  {advisoryForm.direction === 'redeem'
-                    ? `预计到账金额：${advisoryRedeemEstimate == null ? '--' : formatMoney(advisoryRedeemEstimate, writableAccount?.baseCurrency || 'CNY')}`
-                    : `确认净值：${advisoryDerivedNav == null ? '--' : advisoryDerivedNav.toFixed(6)}`}
-                </div>
-                {advisoryForm.direction === 'subscribe' ? (
+                <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01"
+                  placeholder={advisoryForm.eventType === 'redeem' ? '赎回/止盈到账金额' : '投入金额'}
+                  value={advisoryForm.amount}
+                  onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, amount: e.target.value }))} required />
+                {!advisoryEventRequiresExistingProduct ? (
                   <div className="grid grid-cols-2 gap-2">
                     <input className={PORTFOLIO_INPUT_CLASS} placeholder="风险等级（可选）" value={advisoryForm.riskLevel}
                       onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, riskLevel: e.target.value }))} />
@@ -2719,7 +2751,7 @@ const PortfolioPage: React.FC = () => {
                   </div>
                 ) : null}
                 <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>
-                  {advisoryForm.direction === 'redeem' ? '提交投顾赎回' : '提交投顾申购'}
+                  {advisoryForm.eventType === 'redeem' ? '提交投顾赎回' : '提交投顾投入'}
                 </button>
               </form>
               ) : null}
@@ -2728,7 +2760,7 @@ const PortfolioPage: React.FC = () => {
               <form className="space-y-2" onSubmit={handleAdvisoryNavSubmit}>
                 <select className={PORTFOLIO_SELECT_CLASS} value={advisoryNavForm.selectedProduct}
                   onChange={(e) => setAdvisoryNavForm((prev) => ({ ...prev, selectedProduct: e.target.value }))} required>
-                  <option value="">选择要更新净值的投顾产品</option>
+                  <option value="">选择要更新价值的投顾产品</option>
                   {advisoryOptions.map((item) => (
                     <option key={item.optionValue} value={item.optionValue}>{formatAdvisoryPositionOption(item)}</option>
                   ))}
@@ -2736,10 +2768,10 @@ const PortfolioPage: React.FC = () => {
                 <div className="grid grid-cols-2 gap-2">
                   <input className={PORTFOLIO_INPUT_CLASS} type="date" value={advisoryNavForm.priceDate}
                     onChange={(e) => setAdvisoryNavForm((prev) => ({ ...prev, priceDate: e.target.value }))} required />
-                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.000001" placeholder="最新单位净值" value={advisoryNavForm.price}
+                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder="当前总价值" value={advisoryNavForm.price}
                     onChange={(e) => setAdvisoryNavForm((prev) => ({ ...prev, price: e.target.value }))} required />
                 </div>
-                <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>保存投顾净值</button>
+                <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>保存投顾价值</button>
               </form>
               ) : null}
 
@@ -2990,10 +3022,13 @@ const PortfolioPage: React.FC = () => {
                 ) : null}
                 {eventType === 'advisory' ? (
                   <select className={PORTFOLIO_SELECT_CLASS} value={eventAdvisoryDirection}
-                    onChange={(e) => setEventAdvisoryDirection(e.target.value as '' | PortfolioAdvisoryDirection)}>
-                    <option value="">全部投顾方向</option>
-                    <option value="subscribe">申购</option>
-                    <option value="redeem">赎回</option>
+                    onChange={(e) => setEventAdvisoryDirection(e.target.value as '' | PortfolioAdvisoryEventType)}>
+                    <option value="">全部投顾事件</option>
+                    <option value="buy">买入/追加</option>
+                    <option value="initial_buy">首次买入</option>
+                    <option value="dca_buy">定投投入</option>
+                    <option value="follow_buy">手动跟投</option>
+                    <option value="redeem">赎回/止盈</option>
                   </select>
                 ) : null}
                 {eventType === 'insurance' ? (
@@ -3099,8 +3134,8 @@ const PortfolioPage: React.FC = () => {
               {eventType === 'advisory' && advisoryEvents.map((item) => (
                 <div key={`a-${item.id}`} className="flex items-start justify-between gap-3 border-b border-white/5 py-2 text-xs text-secondary">
                   <div className="min-w-0">
-                    {item.eventDate} {formatAdvisoryDirectionLabel(item.direction)} {item.productName}
-                    {item.productCode ? ` · ${item.productCode}` : ''} · {item.platform} · 金额 {item.amount} {item.currency} · 份额 {formatAssetQuantity(item.quantity, 'advisory')} · 净值 {item.nav}
+                    {item.eventDate} {formatAdvisoryProductTypeLabel(item.productType)} · {formatAdvisoryEventLabel(item.eventType || item.direction)} {item.productName}
+                    {item.productCode ? ` · ${item.productCode}` : ''} · {item.platform} · 金额 {item.amount} {item.currency}
                   </div>
                   {!writeBlocked ? (
                     <button
@@ -3109,7 +3144,7 @@ const PortfolioPage: React.FC = () => {
                       onClick={() => openDeleteDialog({
                         eventType: 'advisory',
                         id: item.id,
-                        message: `确认删除 ${item.eventDate} 的投顾流水（${formatAdvisoryDirectionLabel(item.direction)} ${item.productName}）吗？`,
+                        message: `确认删除 ${item.eventDate} 的投顾流水（${formatAdvisoryEventLabel(item.eventType || item.direction)} ${item.productName}）吗？`,
                       })}
                     >
                       删除

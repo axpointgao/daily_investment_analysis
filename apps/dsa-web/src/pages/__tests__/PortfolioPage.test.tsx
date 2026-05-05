@@ -12,12 +12,19 @@ const {
   listTrades,
   listCashLedger,
   listCorporateActions,
+  listBankLedger,
+  listAdvisoryLedger,
+  listInsuranceLedger,
+  listInsurancePolicies,
   createTrade,
   deleteTrade,
   createCashLedger,
   deleteCashLedger,
   createCorporateAction,
   deleteCorporateAction,
+  createAdvisoryLedger,
+  deleteAdvisoryLedger,
+  upsertManualPrice,
   parseCsvImport,
   commitCsvImport,
   createAccount,
@@ -30,12 +37,19 @@ const {
   listTrades: vi.fn(),
   listCashLedger: vi.fn(),
   listCorporateActions: vi.fn(),
+  listBankLedger: vi.fn(),
+  listAdvisoryLedger: vi.fn(),
+  listInsuranceLedger: vi.fn(),
+  listInsurancePolicies: vi.fn(),
   createTrade: vi.fn(),
   deleteTrade: vi.fn(),
   createCashLedger: vi.fn(),
   deleteCashLedger: vi.fn(),
   createCorporateAction: vi.fn(),
   deleteCorporateAction: vi.fn(),
+  createAdvisoryLedger: vi.fn(),
+  deleteAdvisoryLedger: vi.fn(),
+  upsertManualPrice: vi.fn(),
   parseCsvImport: vi.fn(),
   commitCsvImport: vi.fn(),
   createAccount: vi.fn(),
@@ -51,12 +65,19 @@ vi.mock('../../api/portfolio', () => ({
     listTrades,
     listCashLedger,
     listCorporateActions,
+    listBankLedger,
+    listAdvisoryLedger,
+    listInsuranceLedger,
+    listInsurancePolicies,
     createTrade,
     deleteTrade,
     createCashLedger,
     deleteCashLedger,
     createCorporateAction,
     deleteCorporateAction,
+    createAdvisoryLedger,
+    deleteAdvisoryLedger,
+    upsertManualPrice,
     parseCsvImport,
     commitCsvImport,
     createAccount,
@@ -66,7 +87,7 @@ vi.mock('../../api/portfolio', () => ({
 type AccountItem = {
   id: number;
   name: string;
-  market?: 'cn' | 'hk' | 'us' | 'crypto';
+  market?: 'cn' | 'hk' | 'us' | 'crypto' | 'advisory';
   baseCurrency?: string;
 };
 
@@ -88,6 +109,7 @@ function makeAccounts(items: AccountItem[] = [{ id: 1, name: 'Main' }]) {
 
 function makeSnapshot(options: {
   accountId?: number;
+  accountMarket?: string;
   fxStale?: boolean;
   accountCount?: number;
   positions?: Array<Record<string, unknown>>;
@@ -117,7 +139,7 @@ function makeSnapshot(options: {
         accountName: `Account ${accountId}`,
         ownerId: null,
         broker: 'Demo',
-        market: 'us',
+        market: options.accountMarket ?? 'us',
         baseCurrency: 'CNY',
         asOf: '2026-03-19',
         costMethod: 'fifo' as const,
@@ -197,15 +219,22 @@ describe('PortfolioPage FX refresh', () => {
     listImportBrokers.mockResolvedValue({
       brokers: [{ broker: 'huatai', aliases: [], displayName: '华泰' }],
     });
-    listTrades.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
-    listCashLedger.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
-    listCorporateActions.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
-    createTrade.mockResolvedValue({ id: 1 });
-    deleteTrade.mockResolvedValue({ deleted: 1 });
-    createCashLedger.mockResolvedValue({ id: 1 });
-    deleteCashLedger.mockResolvedValue({ deleted: 1 });
-    createCorporateAction.mockResolvedValue({ id: 1 });
-    deleteCorporateAction.mockResolvedValue({ deleted: 1 });
+  listTrades.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
+  listCashLedger.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
+  listCorporateActions.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
+  listBankLedger.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
+  listAdvisoryLedger.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
+  listInsuranceLedger.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
+  listInsurancePolicies.mockResolvedValue({ policies: [], total: 0, page: 1, pageSize: 20 });
+  createTrade.mockResolvedValue({ id: 1 });
+  deleteTrade.mockResolvedValue({ deleted: 1 });
+  createCashLedger.mockResolvedValue({ id: 1 });
+  deleteCashLedger.mockResolvedValue({ deleted: 1 });
+  createCorporateAction.mockResolvedValue({ id: 1 });
+  deleteCorporateAction.mockResolvedValue({ deleted: 1 });
+  createAdvisoryLedger.mockResolvedValue({ id: 1 });
+  deleteAdvisoryLedger.mockResolvedValue({ deleted: 1 });
+  upsertManualPrice.mockResolvedValue({ id: 1 });
     parseCsvImport.mockResolvedValue({ broker: 'huatai', recordCount: 0, skippedCount: 0, errorCount: 0, records: [], errors: [] });
     commitCsvImport.mockResolvedValue({
       accountId: 1,
@@ -403,6 +432,97 @@ describe('PortfolioPage FX refresh', () => {
     expect(await screen.findByText('0.12345678')).toBeInTheDocument();
     expect(screen.getByText(/数量=0.12345678/)).toBeInTheDocument();
     expect(screen.getByPlaceholderText('成交数量（币）')).toHaveAttribute('step', '0.00000001');
+  });
+
+  it('requires existing same-type advisory products for follow-up entries and keeps zero-value products selectable', async () => {
+    getAccounts.mockResolvedValueOnce(makeAccounts([
+      { id: 1, name: 'Advisory', market: 'advisory', baseCurrency: 'CNY' },
+    ]));
+    getSnapshot.mockResolvedValue(makeSnapshot({
+      accountId: 1,
+      accountMarket: 'advisory',
+      positions: [
+        {
+          symbol: 'ADV:COMBO000001',
+          displayName: '稳稳幸福',
+          market: 'advisory',
+          currency: 'CNY',
+          quantity: 1,
+          avgCost: 100000,
+          totalCost: 100000,
+          lastPrice: 0,
+          marketValueBase: 0,
+          unrealizedPnlBase: -100000,
+          unrealizedPnlPct: -100,
+          valuationCurrency: 'CNY',
+          priceSource: 'advisory_value_update',
+          priceDate: '2026-03-19',
+          priceStale: false,
+          priceAvailable: true,
+          platform: '且慢',
+          productName: '稳稳幸福',
+          productType: 'advisory_combo',
+          investedAmount: 100000,
+          redeemedAmount: 0,
+          valueAmount: 0,
+        },
+        {
+          symbol: 'ADV:DCA00000001',
+          displayName: '长赢计划',
+          market: 'advisory',
+          currency: 'CNY',
+          quantity: 1,
+          avgCost: 200000,
+          totalCost: 200000,
+          lastPrice: 180000,
+          marketValueBase: 180000,
+          unrealizedPnlBase: -20000,
+          unrealizedPnlPct: -10,
+          valuationCurrency: 'CNY',
+          priceSource: 'advisory_net_invested_estimate',
+          priceDate: '2026-03-19',
+          priceStale: false,
+          priceAvailable: true,
+          platform: '且慢',
+          productName: '长赢计划',
+          productType: 'dca_plan',
+          investedAmount: 200000,
+          redeemedAmount: 0,
+          valueAmount: 180000,
+        },
+      ],
+      assetBreakdown: { advisory: 180000 },
+    }));
+
+    render(<PortfolioPage />);
+
+    await waitForInitialLoad();
+    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: '1' } });
+    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', refreshPrices: false }));
+
+    expect(screen.getByText('稳稳幸福')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByDisplayValue('买入新组合'), { target: { value: 'append_buy' } });
+    const comboSelect = screen.getByDisplayValue('选择投顾组合');
+    expect(within(comboSelect).getByText(/稳稳幸福/)).toBeInTheDocument();
+    expect(within(comboSelect).queryByText(/长赢计划/)).not.toBeInTheDocument();
+
+    fireEvent.change(comboSelect, { target: { value: 'ADV:COMBO000001' } });
+    fireEvent.change(screen.getByPlaceholderText('投入金额'), { target: { value: '1000' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交投顾投入' }));
+
+    await waitFor(() => expect(createAdvisoryLedger).toHaveBeenCalledWith(expect.objectContaining({
+      productName: '稳稳幸福',
+      productType: 'advisory_combo',
+      eventType: 'buy',
+      amount: 1000,
+    })));
+
+    fireEvent.change(screen.getByDisplayValue('投顾组合'), { target: { value: 'dca_plan' } });
+    fireEvent.change(screen.getByDisplayValue('首次买入'), { target: { value: 'follow_buy' } });
+    const dcaSelect = screen.getByDisplayValue('选择定投计划');
+    expect(within(dcaSelect).getByText(/长赢计划/)).toBeInTheDocument();
+    expect(within(dcaSelect).queryByText(/稳稳幸福/)).not.toBeInTheDocument();
   });
 
   it('generates portfolio analysis only from the explicit analysis button and shows report drawer', async () => {
