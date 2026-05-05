@@ -2026,6 +2026,220 @@ textarea {
     0 18px 34px rgba(0, 212, 255, 0.22);
 }
 
+.portfolio-position-table-wrapper {
+  overflow: hidden;
+}
+
+.portfolio-position-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.portfolio-position-col-account {
+  width: 9%;
+}
+
+.portfolio-position-col-type {
+  width: 7%;
+}
+
+.portfolio-position-col-asset {
+  width: 20%;
+}
+
+.portfolio-position-col-quantity {
+  width: 10%;
+}
+
+.portfolio-position-col-price {
+  width: 9.5%;
+}
+
+.portfolio-position-col-money,
+.portfolio-position-col-pnl {
+  width: 12%;
+}
+
+.portfolio-position-col-rate {
+  width: 9%;
+}
+
+.portfolio-position-head-cell {
+  padding: 0.55rem 0.75rem;
+  white-space: nowrap;
+}
+
+.portfolio-position-cell {
+  padding: 0.65rem 0.75rem;
+  vertical-align: middle;
+}
+
+.portfolio-position-head-cell:first-child,
+.portfolio-position-cell:first-child {
+  padding-left: 0.25rem;
+}
+
+.portfolio-position-head-cell:last-child,
+.portfolio-position-cell:last-child {
+  padding-right: 0.25rem;
+}
+
+.portfolio-position-row {
+  box-shadow: inset 0 -1px 0 hsl(var(--border) / 0.42);
+}
+
+.portfolio-position-row:last-child {
+  box-shadow: none;
+}
+
+.portfolio-position-account-text,
+.portfolio-position-type-chip,
+.portfolio-position-asset-primary,
+.portfolio-position-asset-secondary,
+.portfolio-position-price-source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portfolio-position-account-text,
+.portfolio-position-asset-primary,
+.portfolio-position-asset-secondary,
+.portfolio-position-price-source {
+  display: block;
+  min-width: 0;
+}
+
+.portfolio-position-type-chip {
+  max-width: 100%;
+}
+
+.portfolio-position-asset-cell,
+.portfolio-position-number-cell {
+  min-width: 0;
+}
+
+.portfolio-position-number-cell {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.portfolio-asset-breakdown-row {
+  display: grid;
+  grid-template-columns: minmax(5rem, 0.8fr) minmax(8rem, 1fr) 3.75rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.portfolio-asset-breakdown-name,
+.portfolio-asset-breakdown-value,
+.portfolio-asset-breakdown-pct {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portfolio-asset-breakdown-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.portfolio-asset-breakdown-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  flex: 0 0 auto;
+  border-radius: 9999px;
+}
+
+.portfolio-asset-breakdown-value,
+.portfolio-asset-breakdown-pct {
+  text-align: right;
+  color: hsl(var(--foreground));
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1024px) {
+  .portfolio-position-col-account {
+    width: 8%;
+  }
+
+  .portfolio-position-col-type {
+    width: 7%;
+  }
+
+  .portfolio-position-col-asset {
+    width: 18%;
+  }
+
+  .portfolio-position-col-quantity {
+    width: 9%;
+  }
+
+  .portfolio-position-col-price {
+    width: 10%;
+  }
+
+  .portfolio-position-col-money,
+  .portfolio-position-col-pnl {
+    width: 12.5%;
+  }
+
+  .portfolio-position-col-rate {
+    width: 10.5%;
+  }
+
+  .portfolio-position-head-cell,
+  .portfolio-position-cell {
+    padding-inline: 0.5rem;
+  }
+}
+
+@media (max-width: 760px) {
+  .portfolio-position-table {
+    font-size: 0.75rem;
+  }
+
+  .portfolio-position-head-cell,
+  .portfolio-position-cell {
+    padding-inline: 0.35rem;
+  }
+
+  .portfolio-position-col-account,
+  .portfolio-position-col-type,
+  .portfolio-position-col-quantity,
+  .portfolio-position-col-price {
+    width: 0;
+  }
+
+  .portfolio-position-table th:nth-child(1),
+  .portfolio-position-table td:nth-child(1),
+  .portfolio-position-table th:nth-child(2),
+  .portfolio-position-table td:nth-child(2),
+  .portfolio-position-table th:nth-child(4),
+  .portfolio-position-table td:nth-child(4),
+  .portfolio-position-table th:nth-child(5),
+  .portfolio-position-table td:nth-child(5),
+  .portfolio-position-table th:nth-child(6),
+  .portfolio-position-table td:nth-child(6) {
+    display: none;
+  }
+
+  .portfolio-position-col-asset {
+    width: 34%;
+  }
+
+  .portfolio-position-col-money,
+  .portfolio-position-col-pnl {
+    width: 24%;
+  }
+
+  .portfolio-position-col-rate {
+    width: 18%;
+  }
+}
+
 .bg-hover {
   background: var(--bg-hover);
 }

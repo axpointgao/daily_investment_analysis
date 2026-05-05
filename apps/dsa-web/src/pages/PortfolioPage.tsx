@@ -118,6 +118,16 @@ const PORTFOLIO_SELECT_CLASS = `${PORTFOLIO_INPUT_CLASS} appearance-none pr-10`;
 const PORTFOLIO_FILE_PICKER_CLASS =
   'input-surface input-focus-glow flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
 const PORTFOLIO_FORM_EPS = 1e-8;
+const PORTFOLIO_ASSET_COLORS = [
+  'hsl(var(--primary))',
+  'hsl(var(--color-purple))',
+  'hsl(var(--success))',
+  'hsl(var(--warning))',
+  'hsl(212 78% 54%)',
+  'hsl(169 68% 42%)',
+  'hsl(326 62% 58%)',
+  'hsl(24 84% 56%)',
+];
 
 function getTodayIso(): string {
   return toDateInputValue(new Date());
@@ -526,6 +536,16 @@ function getPositionSecondaryName(row: PortfolioPositionItem, assetNameMaps: Ass
     }
   }
   return '';
+}
+
+function getPositionSecondaryLine(row: PortfolioPositionItem, assetNameMaps: AssetNameMaps): string {
+  const secondaryName = getPositionSecondaryName(row, assetNameMaps);
+  return [
+    secondaryName,
+    row.startDate ? `起息 ${row.startDate}` : '',
+    row.maturityDate ? `到期 ${row.maturityDate}` : '',
+    row.annualRate != null ? `年化 ${row.annualRate}%` : '',
+  ].filter(Boolean).join(' · ');
 }
 
 function isExchangeTradedFundName(name: string | undefined): boolean {
@@ -1308,6 +1328,7 @@ const PortfolioPage: React.FC = () => {
   const assetBreakdownRows = Object.entries(snapshot?.assetBreakdown || {})
     .filter(([, value]) => Math.abs(Number(value || 0)) > 0.000001)
     .map(([key, value]) => ({ key, value: Number(value || 0) }));
+  const assetBreakdownTotal = assetBreakdownRows.reduce((total, item) => total + Math.abs(item.value), 0);
 
   const handleTradeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2130,7 +2151,7 @@ const PortfolioPage: React.FC = () => {
         </Card>
       </section>
 
-      <section className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_340px] gap-3">
+      <section>
         <Card padding="md">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-foreground">持仓明细</h2>
@@ -2143,56 +2164,64 @@ const PortfolioPage: React.FC = () => {
               className="border-none bg-transparent px-4 py-8 shadow-none"
             />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="portfolio-position-table-wrapper">
+              <table className="portfolio-position-table w-full text-sm">
+                <colgroup>
+                  <col className="portfolio-position-col-account" />
+                  <col className="portfolio-position-col-type" />
+                  <col className="portfolio-position-col-asset" />
+                  <col className="portfolio-position-col-quantity" />
+                  <col className="portfolio-position-col-price" />
+                  <col className="portfolio-position-col-price" />
+                  <col className="portfolio-position-col-money" />
+                  <col className="portfolio-position-col-pnl" />
+                  <col className="portfolio-position-col-rate" />
+                </colgroup>
                 <thead className="text-xs text-secondary border-b border-white/10">
                   <tr>
-                    <th className="text-left py-2 pr-2">账户</th>
-                    <th className="text-left py-2 pr-2">类型</th>
-                    <th className="text-left py-2 pr-2">资产</th>
-                    <th className="text-right py-2 pr-2">数量</th>
-                    <th className="text-right py-2 pr-2">均价</th>
-                    <th className="text-right py-2 pr-2">现价</th>
-                    <th className="text-right py-2 pr-2">市值</th>
-                    <th className="text-right py-2">未实现盈亏</th>
-                    <th className="text-right py-2">收益率</th>
+                    <th className="portfolio-position-head-cell text-left">账户</th>
+                    <th className="portfolio-position-head-cell text-left">类型</th>
+                    <th className="portfolio-position-head-cell text-left">资产</th>
+                    <th className="portfolio-position-head-cell text-right">数量</th>
+                    <th className="portfolio-position-head-cell text-right">均价</th>
+                    <th className="portfolio-position-head-cell text-right">现价</th>
+                    <th className="portfolio-position-head-cell text-right">市值</th>
+                    <th className="portfolio-position-head-cell text-right">未实现盈亏</th>
+                    <th className="portfolio-position-head-cell text-right">收益率</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {positionRows.map((row) => (
-                    <tr key={`${row.accountId}-${row.symbol}-${row.market}-${row.productName || ''}`} className="border-b border-white/5">
-                      <td className="py-2 pr-2 text-secondary">{row.accountName}</td>
-                      <td className="py-2 pr-2">
-                        <span className="inline-flex rounded-md border border-white/10 bg-white/[0.03] px-2 py-1 text-xs font-medium text-foreground">
+                  {positionRows.map((row) => {
+                    const assetName = getPositionDisplayName(row);
+                    const secondaryLine = getPositionSecondaryLine(row, assetNameMaps);
+                    const assetTitle = [assetName, secondaryLine].filter(Boolean).join('\n');
+                    return (
+                    <tr key={`${row.accountId}-${row.symbol}-${row.market}-${row.productName || ''}`} className="portfolio-position-row">
+                      <td className="portfolio-position-cell text-secondary">
+                        <span className="portfolio-position-account-text" title={row.accountName}>{row.accountName}</span>
+                      </td>
+                      <td className="portfolio-position-cell">
+                        <span className="portfolio-position-type-chip inline-flex rounded-md border border-white/10 bg-white/[0.03] px-2 py-1 text-xs font-medium text-foreground" title={getPositionAssetType(row, assetNameMaps)}>
                           {getPositionAssetType(row, assetNameMaps)}
                         </span>
                       </td>
-                      <td className="py-2 pr-2 text-foreground">
-                        <div className={row.market === 'bank' || row.market === 'advisory' ? '' : 'font-mono'}>{getPositionDisplayName(row)}</div>
-                        {(() => {
-                          const secondaryName = getPositionSecondaryName(row, assetNameMaps);
-                          if (!secondaryName && !row.maturityDate && !row.startDate && row.annualRate == null) return null;
-                          return (
-                          <div className="text-[11px] text-secondary">
-                            {secondaryName}
-                            {row.startDate ? `${secondaryName ? ' · ' : ''}起息 ${row.startDate}` : ''}
-                            {row.maturityDate ? `${secondaryName || row.startDate ? ' · ' : ''}到期 ${row.maturityDate}` : ''}
-                            {row.annualRate != null ? `${secondaryName || row.startDate || row.maturityDate ? ' · ' : ''}年化 ${row.annualRate}%` : ''}
-                          </div>
-                          );
-                        })()}
+                      <td className="portfolio-position-cell portfolio-position-asset-cell text-foreground" title={assetTitle}>
+                        <div className={`portfolio-position-asset-primary ${row.market === 'bank' || row.market === 'advisory' ? '' : 'font-mono'}`}>{assetName}</div>
+                        {secondaryLine ? (
+                          <div className="portfolio-position-asset-secondary text-[11px] text-secondary">{secondaryLine}</div>
+                        ) : null}
                       </td>
-                      <td className="py-2 pr-2 text-right">{formatPositionQuantity(row)}</td>
-                      <td className="py-2 pr-2 text-right">{row.market === 'bank' && !row.registrationCode ? '-' : row.avgCost.toFixed(4)}</td>
-                      <td className="py-2 pr-2 text-right">
+                      <td className="portfolio-position-cell portfolio-position-number-cell text-right">{formatPositionQuantity(row)}</td>
+                      <td className="portfolio-position-cell portfolio-position-number-cell text-right">{row.market === 'bank' && !row.registrationCode ? '-' : row.avgCost.toFixed(4)}</td>
+                      <td className="portfolio-position-cell portfolio-position-number-cell text-right">
                         <div>{formatPositionPrice(row)}</div>
-                        <div className={`text-[11px] ${hasPositionPrice(row) ? 'text-secondary' : 'text-warning'}`}>
+                        <div className={`portfolio-position-price-source text-[11px] ${hasPositionPrice(row) ? 'text-secondary' : 'text-warning'}`} title={getPositionPriceLabel(row)}>
                           {getPositionPriceLabel(row)}
                         </div>
                       </td>
-                      <td className="py-2 pr-2 text-right">{formatPositionMoney(row.marketValueBase, row)}</td>
+                      <td className="portfolio-position-cell portfolio-position-number-cell text-right">{formatPositionMoney(row.marketValueBase, row)}</td>
                       <td
-                        className={`py-2 text-right ${getChinaPnlColorClass(
+                        className={`portfolio-position-cell portfolio-position-number-cell text-right ${getChinaPnlColorClass(
                           row.unrealizedPnlBase,
                           (row.market !== 'bank' || Boolean(row.registrationCode)) && hasPositionPrice(row),
                         )}`}
@@ -2200,7 +2229,7 @@ const PortfolioPage: React.FC = () => {
                         {row.market === 'bank' && !row.registrationCode ? '-' : formatPositionMoney(row.unrealizedPnlBase, row)}
                       </td>
                       <td
-                        className={`py-2 text-right ${getChinaPnlColorClass(
+                        className={`portfolio-position-cell portfolio-position-number-cell text-right ${getChinaPnlColorClass(
                           row.unrealizedPnlPct,
                           (row.market !== 'bank' || Boolean(row.registrationCode))
                             && hasPositionPrice(row)
@@ -2211,11 +2240,40 @@ const PortfolioPage: React.FC = () => {
                         {row.market === 'bank' && !row.registrationCode ? '-' : formatSignedPct(row.unrealizedPnlPct)}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
+        </Card>
+      </section>
+
+      <section className="grid grid-cols-1 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] gap-3">
+        <Card padding="md" className="flex flex-col">
+          <h3 className="text-sm font-semibold text-foreground">资产分布</h3>
+          <div className="mt-3 space-y-2 text-xs text-secondary">
+            {assetBreakdownRows.length > 0 ? assetBreakdownRows.map((item, index) => {
+              const pct = assetBreakdownTotal > 0 ? Math.abs(item.value) / assetBreakdownTotal * 100 : null;
+              return (
+                <div key={item.key} className="portfolio-asset-breakdown-row">
+                  <span className="portfolio-asset-breakdown-name">
+                    <span
+                      className="portfolio-asset-breakdown-dot"
+                      style={{ background: PORTFOLIO_ASSET_COLORS[index % PORTFOLIO_ASSET_COLORS.length] }}
+                    />
+                    {formatMarketLabel(item.key)}
+                  </span>
+                  <span className="portfolio-asset-breakdown-value">
+                    {snapshot?.fxMissing ? '不可计算' : formatMoney(item.value, snapshot?.currency || 'CNY')}
+                  </span>
+                  <span className="portfolio-asset-breakdown-pct">
+                    {snapshot?.fxMissing ? '--' : formatPct(pct)}
+                  </span>
+                </div>
+              );
+            }) : <div>暂无资产分布数据</div>}
+          </div>
         </Card>
 
         <Card padding="md" className="flex flex-col">
@@ -2290,36 +2348,6 @@ const PortfolioPage: React.FC = () => {
             >
               {portfolioAnalysisLoading ? '分析中...' : portfolioAnalysisButtonLabel}
             </button>
-          </div>
-        </Card>
-      </section>
-
-      <section className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <Card padding="md">
-          <h3 className="text-sm font-semibold text-foreground mb-2">资产分布</h3>
-          <div className="text-xs text-secondary space-y-1">
-            {assetBreakdownRows.length > 0 ? assetBreakdownRows.map((item) => (
-              <div key={item.key} className="flex items-center justify-between gap-3">
-                <span>{formatMarketLabel(item.key)}</span>
-                <span className="text-foreground">{snapshot?.fxMissing ? '不可计算' : formatMoney(item.value, snapshot?.currency || 'CNY')}</span>
-              </div>
-            )) : <div>暂无资产分布数据</div>}
-          </div>
-        </Card>
-        <Card padding="md">
-          <h3 className="text-sm font-semibold text-foreground mb-2">现金状态</h3>
-          <div className="text-xs text-secondary space-y-1">
-            <div>现金余额: {formatAggregateMoney(snapshot, snapshot?.totalCash)}</div>
-            <div>现金占比: {snapshot && !snapshot.fxMissing && snapshot.totalCash != null && snapshot.totalEquity != null && Math.abs(snapshot.totalEquity) > 0 ? formatPct(snapshot.totalCash / snapshot.totalEquity * 100) : '--'}</div>
-            {!snapshot?.fxMissing && (snapshot?.totalCash ?? 0) < 0 ? <div className="text-warning">现金为负，说明买入或申购已超过账户现金流水。</div> : null}
-          </div>
-        </Card>
-        <Card padding="md">
-          <h3 className="text-sm font-semibold text-foreground mb-2">口径</h3>
-          <div className="text-xs text-secondary space-y-1">
-            <div>账户数: {snapshot?.accountCount ?? 0}</div>
-            <div>计价币种: {snapshot?.currency || 'CNY'}</div>
-            <div>成本法: {(snapshot?.costMethod || costMethod).toUpperCase()}</div>
           </div>
         </Card>
       </section>

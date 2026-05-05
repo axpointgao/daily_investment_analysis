@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 <!-- 新条目格式：- [类型] 描述（类型取值：新功能/改进/修复/文档/测试/chore）-->
 <!-- 每条独立一行追加到本段末尾，无需分类标题，合并时冲突最小 -->
+- [改进] Web 持仓页将持仓明细调整为全宽无横向滚动布局，下移资产分析，并为资产分布新增颜色标识、金额和占比列表。
 - [新功能] 持仓管理扩展场外基金、数字货币和银行账户，支持分类录入交易/资金/银行流水、手工价格兜底和全账户资产分布汇总。
 - [新功能] 设置页数据源新增三方 Tushare、TiantianFundApi 与数字货币行情连通性测试，Tushare 行情优先三方代理并保留官方 Token 兜底，数字货币行情使用 Binance 优先、OKX 兜底。
 - [新功能] 自定义 Webhook 支持 `CUSTOM_WEBHOOK_BODY_TEMPLATE` JSON body 模板，便于适配 AstrBot、NapCat 和自建推送服务。
