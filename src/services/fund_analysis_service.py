@@ -7,10 +7,12 @@ import json
 import logging
 import math
 import re
+import time
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 from urllib.parse import urlencode
 
 import requests
@@ -134,10 +136,11 @@ class FundAnalysisService:
         notify: bool = True,
         progress_callback: Optional[Callable[[int, str], None]] = None,
         ) -> Optional[Dict[str, Any]]:
-        void = force_refresh
-        del void
         code = normalize_fund_code(fund_code)
+        normalized_report_type = str(report_type or "detailed").strip() or "detailed"
         query_id = query_id or datetime.now().strftime("%Y%m%d%H%M%S%f")
+        stage_timings: Dict[str, int] = {}
+        total_started_at = time.perf_counter()
 
         def emit(progress: int, message: str) -> None:
             if progress_callback:
@@ -146,17 +149,48 @@ class FundAnalysisService:
                 except Exception:
                     logger.debug("基金分析进度回调失败", exc_info=True)
 
+        @contextmanager
+        def measure(stage: str) -> Iterator[None]:
+            started_at = time.perf_counter()
+            try:
+                yield
+            finally:
+                stage_timings[stage] = int((time.perf_counter() - started_at) * 1000)
+
         try:
             self.last_error = None
             self.last_notification_error = None
+
+            if not force_refresh:
+                cached = self._load_cached_fund_analysis(
+                    fund_code=code,
+                    report_type=normalized_report_type,
+                    stage_timings=stage_timings,
+                )
+                if cached:
+                    cached["cache"] = {"hit": True, "source": "fund_analysis_history"}
+                    stage_timings["total"] = int((time.perf_counter() - total_started_at) * 1000)
+                    self._attach_report_details(cached.get("report"), stage_timings=stage_timings, cache_hit=True)
+                    logger.info(
+                        "基金 %s 命中当天诊断缓存: query_id=%s report_type=%s timings_ms=%s",
+                        code,
+                        cached.get("query_id"),
+                        normalized_report_type,
+                        stage_timings,
+                    )
+                    return cached
+
             emit(15, f"{code}：正在连接天天基金数据源")
-            client = TiantianFundClient()
+            with measure("connect"):
+                client = TiantianFundClient()
 
             emit(25, f"{code}：正在获取基金资料")
-            profile = self._fetch_profile(client, code, fund_name)
+            with measure("profile"):
+                profile = self._fetch_profile(client, code, fund_name)
 
             emit(40, f"{code}：正在获取历史净值")
-            nav_series = self._fetch_nav_series(client, code, page_size=500)
+            with measure("nav"):
+                nav_series = self._fetch_nav_series(client, code, page_size=500)
             if len(nav_series) < 2:
                 raise FundAnalysisError("基金历史净值不足，无法生成分析。")
 
@@ -165,14 +199,16 @@ class FundAnalysisService:
             use_basic_enrichment = data_strategy != "yingmi_only"
 
             emit(52, f"{code}：正在获取收益、排名与经理数据")
-            performance, ranking, managers, grade = self._fetch_basic_enrichment(
-                client,
-                code,
-                use_basic_enrichment=use_basic_enrichment,
-            )
+            with measure("basic_enrichment"):
+                performance, ranking, managers, grade = self._fetch_basic_enrichment(
+                    client,
+                    code,
+                    use_basic_enrichment=use_basic_enrichment,
+                )
 
             emit(65, f"{code}：正在计算风险收益指标")
-            risk = self._calculate_risk(nav_series)
+            with measure("risk"):
+                risk = self._calculate_risk(nav_series)
             data_snapshot = {
                 "fundProfile": profile,
                 "performance": performance,
@@ -185,45 +221,60 @@ class FundAnalysisService:
             }
 
             emit(68, f"{profile['fundName']}：正在调用盈米专业诊断")
-            yingmi_data = self._fetch_yingmi_professional_data(code, profile["fundName"])
+            with measure("yingmi"):
+                yingmi_data = self._fetch_yingmi_professional_data(code, profile["fundName"])
             data_snapshot["yingmi"] = yingmi_data.get("data") or {}
             data_snapshot["providerStatus"] = yingmi_data.get("providerStatus") or []
             data_snapshot["dataCoverage"]["yingmi"] = bool(data_snapshot["yingmi"])
 
             emit(75, f"{profile['fundName']}：正在生成基金诊断")
-            report = self._build_report_with_llm(
-                query_id=query_id,
-                fund_code=code,
-                fund_name=profile["fundName"],
-                report_type=report_type,
-                data_snapshot=data_snapshot,
-            )
+            with measure("llm"):
+                report = self._build_report_with_llm(
+                    query_id=query_id,
+                    fund_code=code,
+                    fund_name=profile["fundName"],
+                    report_type=normalized_report_type,
+                    data_snapshot=data_snapshot,
+                )
 
             emit(94, f"{profile['fundName']}：正在保存基金分析")
-            self.db.save_fund_analysis_history(
-                query_id=query_id,
-                fund_code=code,
-                fund_name=profile["fundName"],
-                report_type=report_type,
-                allocation_rating=report["summary"].get("allocationRating"),
-                suitability_score=report["summary"].get("suitabilityScore"),
-                analysis_summary=report["summary"].get("analysisSummary"),
-                risk_summary=report["summary"].get("riskSummary"),
-                raw_result=report,
-                data_snapshot=data_snapshot,
-            )
+            stage_timings["total"] = int((time.perf_counter() - total_started_at) * 1000)
+            self._attach_report_details(report, stage_timings=stage_timings, cache_hit=False)
+            with measure("save"):
+                self.db.save_fund_analysis_history(
+                    query_id=query_id,
+                    fund_code=code,
+                    fund_name=profile["fundName"],
+                    report_type=normalized_report_type,
+                    allocation_rating=report["summary"].get("allocationRating"),
+                    suitability_score=report["summary"].get("suitabilityScore"),
+                    analysis_summary=report["summary"].get("analysisSummary"),
+                    risk_summary=report["summary"].get("riskSummary"),
+                    raw_result=report,
+                    data_snapshot=data_snapshot,
+                )
 
             notification_status = {"requested": bool(notify), "sent": False, "error": None}
             if notify:
                 emit(97, f"{profile['fundName']}：正在发送基金诊断通知")
-                notification_status = self._send_notification(
-                    fund_code=code,
-                    fund_name=profile["fundName"],
-                    report=report,
-                    report_type=report_type,
-                )
+                with measure("notify"):
+                    notification_status = self._send_notification(
+                        fund_code=code,
+                        fund_name=profile["fundName"],
+                        report=report,
+                        report_type=normalized_report_type,
+                    )
 
             emit(100, f"{profile['fundName']}：基金分析完成")
+            stage_timings["total"] = int((time.perf_counter() - total_started_at) * 1000)
+            self._attach_report_details(report, stage_timings=stage_timings, cache_hit=False)
+            logger.info(
+                "基金 %s 诊断完成: query_id=%s report_type=%s timings_ms=%s",
+                code,
+                query_id,
+                normalized_report_type,
+                stage_timings,
+            )
             return {
                 "query_id": query_id,
                 "fund_code": code,
@@ -236,6 +287,52 @@ class FundAnalysisService:
             self.last_error = str(exc)
             logger.error("基金分析失败: %s", exc, exc_info=True)
             return None
+
+    def _load_cached_fund_analysis(
+        self,
+        *,
+        fund_code: str,
+        report_type: str,
+        stage_timings: Dict[str, int],
+    ) -> Optional[Dict[str, Any]]:
+        started_at = time.perf_counter()
+        try:
+            cached = self.db.get_latest_fund_analysis_history_today(
+                fund_code=fund_code,
+                report_type=report_type,
+            )
+        except Exception as exc:
+            logger.info("基金 %s 当天诊断缓存读取失败: %s", fund_code, exc)
+            return None
+        finally:
+            stage_timings["cache_lookup"] = int((time.perf_counter() - started_at) * 1000)
+
+        if not cached:
+            return None
+        return {
+            "query_id": cached.get("query_id") or "",
+            "fund_code": cached.get("fund_code") or fund_code,
+            "fund_name": cached.get("fund_name"),
+            "report": cached.get("report") or {},
+            "notification": {"requested": False, "sent": False, "error": None},
+            "created_at": cached.get("created_at") or datetime.now().isoformat(),
+        }
+
+    @staticmethod
+    def _attach_report_details(
+        report: Any,
+        *,
+        stage_timings: Dict[str, int],
+        cache_hit: bool,
+    ) -> None:
+        if not isinstance(report, dict):
+            return
+        details = report.get("details")
+        if not isinstance(details, dict):
+            details = {}
+            report["details"] = details
+        details["stageTimingsMs"] = dict(stage_timings)
+        details["cacheHit"] = bool(cache_hit)
 
     def _send_notification(
         self,
@@ -643,8 +740,7 @@ class FundAnalysisService:
         }
 
     def _build_llm_prompt(self, fund_code: str, fund_name: str, data_snapshot: Dict[str, Any]) -> str:
-        compact = dict(data_snapshot)
-        compact["navSeries"] = data_snapshot.get("navSeries", [])[-180:]
+        compact = self._build_compact_llm_snapshot(data_snapshot)
         return (
             "你是中国公募场外基金分析师。请只基于给定结构化数据分析，不要编造新闻、持仓或未提供的信息。\n"
             "如果数据里包含 yingmi 字段，盈米专业诊断和风险分析应作为专业判断的优先依据；天天基金、自建净值和本地指标用于补充、校验和解释。\n"
@@ -659,6 +755,104 @@ class FundAnalysisService:
             f"基金：{fund_name}({fund_code})\n"
             f"数据：{json.dumps(compact, ensure_ascii=False)}"
         )
+
+    def _build_compact_llm_snapshot(self, data_snapshot: Dict[str, Any]) -> Dict[str, Any]:
+        nav_series = data_snapshot.get("navSeries", [])
+        nav_points = nav_series if isinstance(nav_series, list) else []
+        compact: Dict[str, Any] = {
+            "fundProfile": data_snapshot.get("fundProfile", {}),
+            "performance": data_snapshot.get("performance", []),
+            "risk": data_snapshot.get("risk", {}),
+            "ranking": data_snapshot.get("ranking", [])[-20:] if isinstance(data_snapshot.get("ranking"), list) else [],
+            "manager": data_snapshot.get("manager", []),
+            "grade": data_snapshot.get("grade", []),
+            "navSummary": self._build_nav_summary(nav_points),
+            "yingmi": self._compact_yingmi_data(data_snapshot.get("yingmi", {})),
+            "providerStatus": data_snapshot.get("providerStatus", []),
+            "dataCoverage": data_snapshot.get("dataCoverage", {}),
+        }
+        return compact
+
+    @staticmethod
+    def _build_nav_summary(nav_series: List[Dict[str, Any]]) -> Dict[str, Any]:
+        if not nav_series:
+            return {"sampleCount": 0, "latestPoints": []}
+        latest_points = [
+            {
+                "date": item.get("date"),
+                "unitNav": item.get("unitNav"),
+                "dailyReturnPct": item.get("dailyReturnPct"),
+            }
+            for item in nav_series[-20:]
+            if isinstance(item, dict)
+        ]
+        first = nav_series[0] if isinstance(nav_series[0], dict) else {}
+        latest = nav_series[-1] if isinstance(nav_series[-1], dict) else {}
+        return {
+            "sampleCount": len(nav_series),
+            "start": {
+                "date": first.get("date"),
+                "unitNav": first.get("unitNav"),
+            },
+            "latest": {
+                "date": latest.get("date"),
+                "unitNav": latest.get("unitNav"),
+                "dailyReturnPct": latest.get("dailyReturnPct"),
+            },
+            "latestPoints": latest_points,
+        }
+
+    def _compact_yingmi_data(self, yingmi: Any) -> Dict[str, Any]:
+        if not isinstance(yingmi, dict):
+            return {}
+        compact: Dict[str, Any] = {}
+        for key in ("fund_diagnosis", "fund_risk"):
+            if key not in yingmi:
+                continue
+            compact[key] = self._compact_json_value(yingmi.get(key), depth=3, max_list_items=8, max_text_length=600)
+        return compact
+
+    def _compact_json_value(
+        self,
+        value: Any,
+        *,
+        depth: int,
+        max_list_items: int,
+        max_text_length: int,
+    ) -> Any:
+        if depth <= 0:
+            return self._compact_scalar(value, max_text_length=max_text_length)
+        if isinstance(value, dict):
+            return {
+                str(key): self._compact_json_value(
+                    item,
+                    depth=depth - 1,
+                    max_list_items=max_list_items,
+                    max_text_length=max_text_length,
+                )
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [
+                self._compact_json_value(
+                    item,
+                    depth=depth - 1,
+                    max_list_items=max_list_items,
+                    max_text_length=max_text_length,
+                )
+                for item in value[:max_list_items]
+            ]
+        return self._compact_scalar(value, max_text_length=max_text_length)
+
+    @staticmethod
+    def _compact_scalar(value: Any, *, max_text_length: int) -> Any:
+        if isinstance(value, dict):
+            return {"truncated": True, "keys": list(value.keys())[:12]}
+        if isinstance(value, list):
+            return {"truncated": True, "count": len(value)}
+        if isinstance(value, str) and len(value) > max_text_length:
+            return f"{value[:max_text_length]}..."
+        return value
 
     def _parse_llm_json(self, text: str) -> Dict[str, Any]:
         match = re.search(r"\{.*\}", text, flags=re.S)

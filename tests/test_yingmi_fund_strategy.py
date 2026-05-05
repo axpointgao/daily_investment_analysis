@@ -94,6 +94,43 @@ class YingmiFundStrategyTestCase(unittest.TestCase):
         self.assertEqual(managers, [])
         self.assertEqual(grade, [])
 
+    def test_home_fund_prompt_uses_compact_nav_summary(self) -> None:
+        service = FundAnalysisService()
+        nav_series = [
+            {"date": f"2026-01-{(idx % 28) + 1:02d}", "unitNav": 1 + idx / 1000, "dailyReturnPct": 0.1}
+            for idx in range(120)
+        ]
+
+        prompt = service._build_llm_prompt(
+            "000001",
+            "测试基金",
+            {
+                "fundProfile": {"fundName": "测试基金"},
+                "performance": [{"period": "近1年", "returnPct": 5.2}],
+                "risk": {"maxDrawdownPct": -8.3},
+                "ranking": [{"rank": idx} for idx in range(30)],
+                "manager": [{"managerNames": "张三"}],
+                "grade": [],
+                "navSeries": nav_series,
+                "yingmi": {
+                    "fund_diagnosis": {
+                        "items": [{"text": "x" * 700} for _ in range(20)],
+                        "deep": {"nested": [{"payload": "y" * 700} for _ in range(20)]},
+                    }
+                },
+                "providerStatus": [],
+                "dataCoverage": {"navSeries": True},
+            },
+        )
+
+        self.assertIn('"navSummary"', prompt)
+        self.assertIn('"sampleCount": 120', prompt)
+        self.assertIn('"latestPoints"', prompt)
+        self.assertNotIn('"navSeries": [', prompt)
+        self.assertNotIn("x" * 700, prompt)
+        self.assertNotIn("y" * 700, prompt)
+        self.assertLess(len(prompt), 12000)
+
     def test_home_fund_fast_depth_skips_extra_fund_risk(self) -> None:
         self._write_env("YINGMI_API_KEY=dummy", "YINGMI_FUND_ANALYSIS_DEPTH=fast")
         client = SimpleNamespace(

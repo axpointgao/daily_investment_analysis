@@ -14,6 +14,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -33,8 +34,9 @@ except ModuleNotFoundError:
     get_history_detail = None
 
 from src.config import Config
-from src.storage import DatabaseManager, AnalysisHistory, BacktestResult
+from src.storage import DatabaseManager, AnalysisHistory, BacktestResult, FundAnalysisHistory
 from src.analyzer import AnalysisResult
+from src.services.fund_analysis_service import FundAnalysisService
 from src.services.history_service import HistoryService
 import src.auth as auth
 
@@ -804,6 +806,127 @@ class AnalysisHistoryTestCase(unittest.TestCase):
         self.assertIn("| 近1年 | +12.30% | +8.10% | +6.20% | 30/300 |", markdown)
         self.assertIn("| 基金经理 | 张三 |", markdown)
         self.assertIn("本报告基于历史基金诊断时保存的数据生成", markdown)
+
+    def test_fund_analysis_reuses_today_history_when_not_force_refresh(self) -> None:
+        """Fund analysis should reuse today's saved report unless force refreshed."""
+        saved = self.db.save_fund_analysis_history(
+            query_id="fund_cache_001",
+            fund_code="110011",
+            fund_name="易方达中小盘",
+            report_type="detailed",
+            allocation_rating="谨慎持有",
+            suitability_score=72,
+            analysis_summary="长期风格稳定",
+            risk_summary="回撤需要关注",
+            raw_result={
+                "meta": {"assetType": "fund", "fundCode": "110011", "fundName": "易方达中小盘"},
+                "summary": {"allocationRating": "谨慎持有", "analysisSummary": "长期风格稳定"},
+                "metrics": {},
+                "details": {},
+            },
+            data_snapshot={},
+        )
+        self.assertEqual(saved, 1)
+
+        service = FundAnalysisService(db_manager=self.db)
+        service._fetch_profile = MagicMock(side_effect=AssertionError("cache hit must not fetch profile"))  # type: ignore[method-assign]
+
+        result = service.analyze_fund(fund_code="110011", report_type="detailed", force_refresh=False, notify=False)
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result["query_id"], "fund_cache_001")
+        self.assertTrue(result["cache"]["hit"])
+        self.assertTrue(result["report"]["details"]["cacheHit"])
+        self.assertIn("stageTimingsMs", result["report"]["details"])
+
+    def test_fund_analysis_force_refresh_bypasses_today_history(self) -> None:
+        """force_refresh=True should bypass same-day fund history cache."""
+        self.db.save_fund_analysis_history(
+            query_id="fund_cache_002",
+            fund_code="110011",
+            fund_name="易方达中小盘",
+            report_type="detailed",
+            allocation_rating="谨慎持有",
+            suitability_score=72,
+            analysis_summary="历史报告",
+            risk_summary="历史风险",
+            raw_result={
+                "meta": {"assetType": "fund", "fundCode": "110011", "fundName": "易方达中小盘"},
+                "summary": {"analysisSummary": "历史报告"},
+                "metrics": {},
+                "details": {},
+            },
+            data_snapshot={},
+        )
+
+        service = FundAnalysisService(db_manager=self.db)
+        service._fetch_profile = MagicMock(return_value={"fundName": "刷新基金", "fundType": "混合型"})  # type: ignore[method-assign]
+        service._fetch_nav_series = MagicMock(return_value=[  # type: ignore[method-assign]
+            {"date": "2026-05-01", "unitNav": 1.0, "dailyReturnPct": 0.1},
+            {"date": "2026-05-02", "unitNav": 1.1, "dailyReturnPct": 10.0},
+        ])
+        service._fetch_basic_enrichment = MagicMock(return_value=([], [], [], []))  # type: ignore[method-assign]
+        service._fetch_yingmi_professional_data = MagicMock(return_value={"data": {}, "providerStatus": []})  # type: ignore[method-assign]
+        service._build_report_with_llm = MagicMock(return_value={  # type: ignore[method-assign]
+            "meta": {"assetType": "fund", "fundCode": "110011", "fundName": "刷新基金"},
+            "summary": {"allocationRating": "适合配置", "suitabilityScore": 80, "analysisSummary": "刷新报告"},
+            "metrics": {},
+            "details": {},
+        })
+
+        with patch("src.services.fund_analysis_service.TiantianFundClient", return_value=MagicMock()):
+            result = service.analyze_fund(fund_code="110011", report_type="detailed", force_refresh=True, notify=False)
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result["report"]["summary"]["analysisSummary"], "刷新报告")
+        self.assertTrue(service._fetch_profile.called)
+        self.assertFalse(result["report"]["details"]["cacheHit"])
+
+    def test_latest_fund_analysis_today_cache_is_isolated_by_report_type(self) -> None:
+        """Fund cache lookup should not reuse a different report_type."""
+        self.db.save_fund_analysis_history(
+            query_id="fund_cache_simple",
+            fund_code="110011",
+            fund_name="易方达中小盘",
+            report_type="simple",
+            allocation_rating="谨慎持有",
+            suitability_score=72,
+            analysis_summary="简单报告",
+            risk_summary="风险",
+            raw_result={"summary": {"analysisSummary": "简单报告"}, "details": {}},
+            data_snapshot={},
+        )
+
+        cached = self.db.get_latest_fund_analysis_history_today(fund_code="110011", report_type="detailed")
+
+        self.assertIsNone(cached)
+
+    def test_latest_fund_analysis_today_cache_skips_previous_day(self) -> None:
+        """Fund cache lookup should not reuse records from previous days."""
+        self.db.save_fund_analysis_history(
+            query_id="fund_cache_yesterday",
+            fund_code="110011",
+            fund_name="易方达中小盘",
+            report_type="detailed",
+            allocation_rating="谨慎持有",
+            suitability_score=72,
+            analysis_summary="昨日报告",
+            risk_summary="风险",
+            raw_result={"summary": {"analysisSummary": "昨日报告"}, "details": {}},
+            data_snapshot={},
+        )
+        with self.db.get_session() as session:
+            record = session.query(FundAnalysisHistory).filter(FundAnalysisHistory.query_id == "fund_cache_yesterday").first()
+            if record is None:
+                self.fail("未找到基金历史记录")
+            record.created_at = datetime.now() - timedelta(days=1)
+            session.commit()
+
+        cached = self.db.get_latest_fund_analysis_history_today(fund_code="110011", report_type="detailed")
+
+        self.assertIsNone(cached)
 
     def test_mixed_history_markdown_api_returns_fund_markdown(self) -> None:
         """Mixed markdown endpoint should support negative fund history IDs."""

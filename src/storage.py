@@ -1648,6 +1648,54 @@ class DatabaseManager:
             ).scalars().all()
             return list(results)
 
+    def get_latest_fund_analysis_history_today(
+        self,
+        *,
+        fund_code: str,
+        report_type: str,
+        now: Optional[datetime] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return today's latest usable fund analysis record as plain data."""
+        code = str(fund_code or "").strip()
+        normalized_report_type = str(report_type or "").strip()
+        if not code or not normalized_report_type:
+            return None
+
+        current = now or datetime.now()
+        start_at = datetime.combine(current.date(), datetime.min.time())
+        end_at = start_at + timedelta(days=1)
+        with self.get_session() as session:
+            record = session.execute(
+                select(FundAnalysisHistory)
+                .where(
+                    and_(
+                        FundAnalysisHistory.fund_code == code,
+                        FundAnalysisHistory.report_type == normalized_report_type,
+                        FundAnalysisHistory.created_at >= start_at,
+                        FundAnalysisHistory.created_at < end_at,
+                    )
+                )
+                .order_by(desc(FundAnalysisHistory.created_at))
+                .limit(1)
+            ).scalars().first()
+            if record is None:
+                return None
+
+            try:
+                report = json.loads(record.raw_result or "{}") if isinstance(record.raw_result, str) else {}
+            except Exception:
+                return None
+            if not isinstance(report, dict) or not report:
+                return None
+            return {
+                "query_id": record.query_id,
+                "fund_code": record.fund_code,
+                "fund_name": record.fund_name,
+                "report_type": record.report_type,
+                "created_at": record.created_at.isoformat() if record.created_at else None,
+                "report": report,
+            }
+
     def get_fund_analysis_history_paginated(
         self,
         *,

@@ -91,6 +91,7 @@ function makeSnapshot(options: {
   fxStale?: boolean;
   accountCount?: number;
   positions?: Array<Record<string, unknown>>;
+  assetBreakdown?: Record<string, number>;
 } = {}) {
   const accountId = options.accountId ?? 1;
   return {
@@ -106,6 +107,10 @@ function makeSnapshot(options: {
     feeTotal: 0,
     taxTotal: 0,
     fxStale: options.fxStale ?? true,
+    assetBreakdown: options.assetBreakdown ?? {
+      stock: 2000,
+      cash: 1000,
+    },
     accounts: [
       {
         accountId,
@@ -227,6 +232,26 @@ describe('PortfolioPage FX refresh', () => {
     expect(screen.queryByText(/风险分析/)).not.toBeInTheDocument();
     expect(await screen.findByText('过期')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '刷新汇率' })).toBeInTheDocument();
+  });
+
+  it('localizes stock and cash labels in asset distribution', async () => {
+    getSnapshot.mockResolvedValueOnce(makeSnapshot({
+      assetBreakdown: {
+        stock: 2000,
+        cash: 1000,
+      },
+    }));
+
+    render(<PortfolioPage />);
+
+    await waitForInitialLoad();
+
+    const assetDistribution = screen.getByText('资产分布').closest('.terminal-card');
+    expect(assetDistribution).not.toBeNull();
+    expect(within(assetDistribution as HTMLElement).getByText('股票')).toBeInTheDocument();
+    expect(within(assetDistribution as HTMLElement).getByText('现金')).toBeInTheDocument();
+    expect(within(assetDistribution as HTMLElement).queryByText('stock')).not.toBeInTheDocument();
+    expect(within(assetDistribution as HTMLElement).queryByText('cash')).not.toBeInTheDocument();
   });
 
   it('refreshes FX for a single selected account and only reloads snapshot', async () => {

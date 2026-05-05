@@ -251,6 +251,8 @@ function formatMarketLabel(value: string): string {
     bank: '银行',
     advisory: '投顾组合',
     insurance: '保险',
+    stock: '股票',
+    cash: '现金',
   };
   return labels[value] || value;
 }
