@@ -945,7 +945,10 @@ class PortfolioRepository:
                     )
                 )
             if direction:
-                conditions.append(PortfolioAdvisoryLedger.direction == direction)
+                if direction == "follow_buy":
+                    conditions.append(PortfolioAdvisoryLedger.direction.in_(["follow_buy", "dca_buy"]))
+                else:
+                    conditions.append(PortfolioAdvisoryLedger.direction == direction)
 
             data_query = select(PortfolioAdvisoryLedger)
             count_query = select(func.count()).select_from(PortfolioAdvisoryLedger)

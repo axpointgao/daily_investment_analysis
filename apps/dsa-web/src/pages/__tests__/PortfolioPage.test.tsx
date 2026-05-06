@@ -502,7 +502,7 @@ describe('PortfolioPage FX refresh', () => {
 
     expect(screen.getByText('稳稳幸福')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByDisplayValue('买入新组合'), { target: { value: 'append_buy' } });
+    fireEvent.change(screen.getByDisplayValue('买入'), { target: { value: 'append_buy' } });
     const comboSelect = screen.getByDisplayValue('选择投顾组合');
     expect(within(comboSelect).getByText(/稳稳幸福/)).toBeInTheDocument();
     expect(within(comboSelect).queryByText(/长赢计划/)).not.toBeInTheDocument();

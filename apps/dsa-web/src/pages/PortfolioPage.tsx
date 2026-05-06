@@ -315,8 +315,8 @@ function formatAdvisoryEventLabel(value?: string | null): string {
     buy: '买入',
     append_buy: '追加买入',
     initial_buy: '首次买入',
-    dca_buy: '定投投入',
-    follow_buy: '手动跟投',
+    dca_buy: '跟投',
+    follow_buy: '跟投',
     redeem: '赎回/止盈',
   };
   return value ? labels[value] || value : '';
@@ -1305,7 +1305,7 @@ const PortfolioPage: React.FC = () => {
   const advisoryFormProductOptions = advisoryForm.productType === 'dca_plan' ? advisoryDcaPlanOptions : advisoryComboOptions;
   const selectedAdvisoryOption = advisoryFormProductOptions.find((item) => item.optionValue === advisoryForm.selectedProduct);
   const selectedNavAdvisoryOption = advisoryOptions.find((item) => item.optionValue === advisoryNavForm.selectedProduct);
-  const advisoryEventRequiresExistingProduct = ['append_buy', 'dca_buy', 'follow_buy', 'redeem'].includes(advisoryForm.eventType);
+  const advisoryEventRequiresExistingProduct = ['append_buy', 'follow_buy', 'redeem'].includes(advisoryForm.eventType);
   const advisoryProductSelectPlaceholder = advisoryForm.productType === 'dca_plan'
     ? '选择定投计划'
     : '选择投顾组合';
@@ -1579,7 +1579,9 @@ const PortfolioPage: React.FC = () => {
         return;
       }
       const selectedProduct = payload.product;
-      const ledgerEventType: PortfolioAdvisoryEventType = advisoryForm.eventType === 'append_buy' ? 'buy' : advisoryForm.eventType;
+      const ledgerEventType: PortfolioAdvisoryEventType = advisoryForm.eventType === 'append_buy'
+        ? 'buy'
+        : advisoryForm.eventType;
       await portfolioApi.createAdvisoryLedger({
         accountId: writableAccountId,
         eventDate: advisoryForm.eventDate,
@@ -2688,15 +2690,14 @@ const PortfolioPage: React.FC = () => {
                   }))}>
                   {advisoryForm.productType === 'advisory_combo' ? (
                     <>
-                      <option value="buy">买入新组合</option>
+                      <option value="buy">买入</option>
                       <option value="append_buy">追加买入</option>
                       <option value="redeem">赎回</option>
                     </>
                   ) : (
                     <>
                       <option value="initial_buy">首次买入</option>
-                      <option value="dca_buy">定投投入</option>
-                      <option value="follow_buy">手动跟投</option>
+                      <option value="follow_buy">跟投</option>
                       <option value="redeem">赎回/止盈</option>
                     </>
                   )}
@@ -3026,8 +3027,7 @@ const PortfolioPage: React.FC = () => {
                     <option value="">全部投顾事件</option>
                     <option value="buy">买入/追加</option>
                     <option value="initial_buy">首次买入</option>
-                    <option value="dca_buy">定投投入</option>
-                    <option value="follow_buy">手动跟投</option>
+                    <option value="follow_buy">跟投</option>
                     <option value="redeem">赎回/止盈</option>
                   </select>
                 ) : null}

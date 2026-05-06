@@ -1470,6 +1470,13 @@ class PortfolioServiceTestCase(unittest.TestCase):
             amount=1000,
             currency="CNY",
         )
+        events = self.service.list_advisory_ledger_events(
+            account_id=aid,
+            direction="follow_buy",
+        )
+        self.assertEqual(events["total"], 1)
+        self.assertEqual(events["items"][0]["event_type"], "dca_buy")
+
         snapshot = self.service.get_portfolio_snapshot(account_id=aid, as_of=date(2026, 2, 1))
         position = snapshot["accounts"][0]["positions"][0]
         self.assertEqual(position["product_type"], "dca_plan")
