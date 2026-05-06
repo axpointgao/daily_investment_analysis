@@ -88,6 +88,7 @@ VALID_BANK_INVESTMENT_NATURES = {
 }
 VALID_BANK_RISK_LEVELS = {"R1", "R2", "R3", "R4", "R5"}
 VALID_BANK_INCOME_MODES = {"dividend", "reinvest"}
+BANK_WEALTH_SYMBOL_PREFIX = "BANK:W:"
 VALID_CORPORATE_ACTIONS = {"cash_dividend", "split_adjustment"}
 PORTFOLIO_FX_REFRESH_DISABLED_REASON = "portfolio_fx_update_disabled"
 
@@ -400,6 +401,8 @@ class PortfolioService:
             investment_nature_norm = investment_nature_norm or linked_entry.investment_nature
             risk_level_norm = risk_level_norm or linked_entry.risk_level
             income_mode_norm = income_mode_norm or linked_entry.income_mode
+            if asset_kind_norm == "wealth":
+                linked_entry_id = int(linked_entry.linked_entry_id or linked_entry.id)
 
         if asset_kind_norm == "deposit":
             if not product_name_norm:
@@ -415,13 +418,7 @@ class PortfolioService:
         elif asset_kind_norm == "wealth":
             if not product_name_norm:
                 raise ValueError("product_name is required for wealth assets")
-            if not registration_code_norm:
-                raise ValueError("registration_code is required for wealth assets")
-            if quantity is None or quantity <= 0:
-                raise ValueError("quantity must be > 0 for wealth assets")
-            if not income_mode_norm:
-                raise ValueError("income_mode is required for wealth assets")
-            if income_mode_norm not in VALID_BANK_INCOME_MODES:
+            if income_mode_norm and income_mode_norm not in VALID_BANK_INCOME_MODES:
                 raise ValueError("income_mode must be dividend or reinvest")
             if investment_nature_norm and investment_nature_norm not in VALID_BANK_INVESTMENT_NATURES:
                 raise ValueError("investment_nature is invalid")
@@ -1522,6 +1519,11 @@ class PortfolioService:
             if account.market == "advisory"
             else []
         )
+        bank_value_updates = (
+            self.repo.list_manual_prices(account_id=account.id, market="bank", as_of=as_of_date)
+            if account.market == "bank"
+            else []
+        )
         insurance_policies = (
             self.repo.list_insurance_policies(account.id, as_of=as_of_date) if account.market == "insurance" else []
         )
@@ -1538,6 +1540,8 @@ class PortfolioService:
             events.append(("corp", row.effective_date, row.id, row))
         for row in bank_ledger:
             events.append(("bank", row.event_date, row.id, row))
+        for row in bank_value_updates:
+            events.append(("bank_value", row.price_date, row.id, row))
         for row in advisory_ledger:
             events.append(("advisory", row.event_date, row.id, row))
         for row in advisory_value_updates:
@@ -1549,6 +1553,7 @@ class PortfolioService:
         event_priority = {
             "cash": 0,
             "bank": 0,
+            "bank_value": 0.5,
             "advisory": 0,
             "advisory_value": 0.5,
             "insurance": 0,
@@ -1797,29 +1802,32 @@ class PortfolioService:
                             requested_quantity=amount,
                             available_quantity=amount + float(item["last_price"] or 0.0),
                         )
-                    continue
+                continue
                 if asset_kind == "wealth":
+                    lot_id = int(event.linked_entry_id or event.id)
+                    symbol = self._make_bank_wealth_symbol(lot_id)
                     registration_code = str(event.registration_code or "").strip().upper()
-                    quantity = float(event.quantity or 0.0)
-                    signed_quantity = quantity if event.direction == "in" else -quantity
-                    key = ("wealth", registration_code, currency)
+                    key = ("wealth", lot_id, currency)
                     item = bank_assets.setdefault(
                         key,
                         {
-                            "symbol": registration_code,
-                            "display_name": str(event.product_name or "").strip() or registration_code,
+                            "symbol": symbol,
+                            "display_name": str(event.product_name or "").strip() or registration_code or symbol,
                             "market": "bank",
                             "currency": currency,
                             "bank_name": str(event.bank_name or "").strip(),
                             "product_name": str(event.product_name or "").strip() or None,
-                            "registration_code": registration_code,
-                            "linked_entry_id": int(event.linked_entry_id or event.id),
+                            "registration_code": registration_code or None,
+                            "linked_entry_id": lot_id,
                             "start_date": event.start_date.isoformat() if event.start_date else None,
                             "maturity_date": event.maturity_date.isoformat() if event.maturity_date else None,
                             "investment_nature": event.investment_nature,
                             "risk_level": event.risk_level,
                             "income_mode": event.income_mode,
-                            "quantity": 0.0,
+                            "invested_amount": 0.0,
+                            "redeemed_amount": 0.0,
+                            "value_amount": 0.0,
+                            "quantity": 1.0,
                             "avg_cost": 0.0,
                             "total_cost": 0.0,
                             "last_price": 0.0,
@@ -1827,33 +1835,59 @@ class PortfolioService:
                             "unrealized_pnl_base": 0.0,
                             "unrealized_pnl_pct": None,
                             "valuation_currency": account.base_currency,
-                            "price_source": "missing",
-                            "price_provider": None,
-                            "price_date": None,
-                            "price_stale": True,
-                            "price_available": False,
+                            "price_source": "bank_net_invested_estimate",
+                            "price_provider": "bank_ledger",
+                            "price_date": event_date.isoformat(),
+                            "price_stale": event_date < as_of_date,
+                            "price_available": True,
+                            "value_estimated": True,
                         },
                     )
-                    current_qty = float(item["quantity"] or 0.0)
-                    current_cost = float(item["total_cost"] or 0.0)
-                    if event.direction == "out" and quantity - current_qty > EPS:
+                    current_value = float(item["value_amount"] or 0.0)
+                    if event.direction == "out" and amount - current_value > EPS:
                         raise PortfolioOversellError(
-                            symbol=registration_code,
+                            symbol=symbol,
                             trade_date=event_date,
-                            requested_quantity=quantity,
-                            available_quantity=current_qty,
+                            requested_quantity=amount,
+                            available_quantity=current_value,
                         )
-                    avg_cost = current_cost / current_qty if current_qty > EPS else 0.0
-                    item["quantity"] = current_qty + signed_quantity
-                    item["total_cost"] = current_cost + amount if event.direction == "in" else current_cost - avg_cost * quantity
-                    if event.direction == "in" and quantity > EPS:
-                        item["last_price"] = amount / quantity
-                        item["price_source"] = "bank_cost_nav"
-                        item["price_provider"] = "bank_ledger"
-                        item["price_date"] = event_date.isoformat()
-                        item["price_stale"] = event_date < as_of_date
-                        item["price_available"] = True
+                    if event.direction == "in":
+                        item["invested_amount"] = float(item["invested_amount"] or 0.0) + amount
+                        item["value_amount"] = current_value + amount
+                        if registration_code:
+                            item["registration_code"] = registration_code
+                        if event.investment_nature:
+                            item["investment_nature"] = event.investment_nature
+                        if event.risk_level:
+                            item["risk_level"] = event.risk_level
+                        if event.income_mode:
+                            item["income_mode"] = event.income_mode
+                    else:
+                        item["redeemed_amount"] = float(item["redeemed_amount"] or 0.0) + amount
+                        item["value_amount"] = max(0.0, current_value - amount)
+                    item["price_date"] = event_date.isoformat()
+                    item["price_stale"] = event_date < as_of_date
                     continue
+                continue
+
+            if event_type == "bank_value":
+                symbol = self._normalize_symbol_for_position(str(event.symbol or "").strip())
+                currency = self._normalize_currency(event.currency)
+                lot_id = self._parse_bank_wealth_symbol(symbol)
+                if lot_id is None:
+                    continue
+                item = bank_assets.get(("wealth", lot_id, currency))
+                if item is None:
+                    continue
+                value_amount = max(0.0, float(event.price or 0.0))
+                item["value_amount"] = value_amount
+                item["last_price"] = value_amount
+                item["price_source"] = "bank_value_update"
+                item["price_provider"] = "manual_price"
+                item["price_date"] = event_date.isoformat()
+                item["price_stale"] = event_date < as_of_date
+                item["price_available"] = True
+                item["value_estimated"] = False
                 continue
 
             if event_type == "cash":
@@ -1997,49 +2031,51 @@ class PortfolioService:
 
         bank_position_rows: List[Dict[str, Any]] = []
         for item in bank_assets.values():
-            if str(item.get("registration_code") or "").strip():
-                quantity = float(item.get("quantity") or 0.0)
-                if abs(quantity) <= EPS:
+            if self._parse_bank_wealth_symbol(str(item.get("symbol") or "")) is not None:
+                invested_amount = float(item.get("invested_amount") or 0.0)
+                redeemed_amount = float(item.get("redeemed_amount") or 0.0)
+                value_amount = max(0.0, float(item.get("value_amount") or 0.0))
+                if value_amount <= EPS and invested_amount <= EPS and redeemed_amount <= EPS:
                     continue
-                total_cost_local = max(0.0, float(item.get("total_cost") or 0.0))
-                price_info = self._get_manual_position_price(
-                    account_id=account.id,
-                    symbol=str(item["registration_code"]),
-                    market="bank",
-                    as_of_date=as_of_date,
-                )
-                if price_info is not None:
-                    item["last_price"] = price_info.price
-                    item["price_source"] = price_info.source
-                    item["price_provider"] = price_info.provider
-                    item["price_date"] = price_info.price_date.isoformat() if price_info.price_date else None
-                    item["price_stale"] = price_info.is_stale
-                    item["price_available"] = price_info.is_available
-                price_available = bool(item.get("price_available"))
-                market_local = quantity * float(item.get("last_price") or 0.0) if price_available else 0.0
                 market_conversion = self._convert_amount(
-                    amount=market_local,
+                    amount=value_amount,
                     from_currency=item["currency"],
                     to_currency=account.base_currency,
                     as_of_date=as_of_date,
-                ) if price_available else _ConvertedAmount(amount=None, is_stale=False)
+                )
                 cost_conversion = self._convert_amount(
-                    amount=total_cost_local,
+                    amount=invested_amount,
+                    from_currency=item["currency"],
+                    to_currency=account.base_currency,
+                    as_of_date=as_of_date,
+                )
+                redeemed_conversion = self._convert_amount(
+                    amount=redeemed_amount,
                     from_currency=item["currency"],
                     to_currency=account.base_currency,
                     as_of_date=as_of_date,
                 )
                 market_base = market_conversion.amount
                 cost_base = cost_conversion.amount
-                fx_stale = fx_stale or market_conversion.is_stale or cost_conversion.is_stale
-                unrealized_base = (market_base - cost_base) if market_base is not None and cost_base is not None else 0.0
-                item["quantity"] = round(quantity, 8)
-                item["total_cost"] = round(total_cost_local, 8)
-                item["avg_cost"] = round(total_cost_local / quantity, 8) if quantity > EPS else 0.0
+                redeemed_base = redeemed_conversion.amount
+                fx_stale = fx_stale or market_conversion.is_stale or cost_conversion.is_stale or redeemed_conversion.is_stale
+                unrealized_base = (
+                    (market_base or 0.0) + (redeemed_base or 0.0) - (cost_base or 0.0)
+                    if market_base is not None and cost_base is not None and redeemed_base is not None
+                    else 0.0
+                )
+                item["quantity"] = 1.0
+                item["total_cost"] = round(invested_amount, 8)
+                item["avg_cost"] = round(invested_amount, 8)
                 item["market_value_base"] = round(market_base or 0.0, 8)
                 item["unrealized_pnl_base"] = round(unrealized_base, 8)
-                item["unrealized_pnl_pct"] = round((unrealized_base / cost_base) * 100, 8) if cost_base and market_base is not None else None
-                item["last_price"] = round(float(item.get("last_price") or 0.0), 8)
+                item["unrealized_pnl_pct"] = (
+                    round((unrealized_base / cost_base) * 100, 8) if cost_base and market_base is not None else None
+                )
+                item["last_price"] = round(value_amount, 8)
+                item["invested_amount"] = round(invested_amount, 8)
+                item["redeemed_amount"] = round(redeemed_amount, 8)
+                item["value_amount"] = round(value_amount, 8)
                 bank_position_rows.append(item)
                 if market_base is not None:
                     market_value_base += market_base
@@ -3444,6 +3480,20 @@ class PortfolioService:
         text = str(product_name or "").strip()
         digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:12].upper()
         return f"ADV:{digest or 'PRODUCT'}"
+
+    @staticmethod
+    def _make_bank_wealth_symbol(entry_id: int) -> str:
+        return f"{BANK_WEALTH_SYMBOL_PREFIX}{int(entry_id)}"
+
+    @staticmethod
+    def _parse_bank_wealth_symbol(symbol: str) -> Optional[int]:
+        symbol_norm = (symbol or "").strip().upper()
+        if not symbol_norm.startswith(BANK_WEALTH_SYMBOL_PREFIX):
+            return None
+        try:
+            return int(symbol_norm[len(BANK_WEALTH_SYMBOL_PREFIX):])
+        except ValueError:
+            return None
 
     @staticmethod
     def _default_currency_for_market(market: str) -> str:

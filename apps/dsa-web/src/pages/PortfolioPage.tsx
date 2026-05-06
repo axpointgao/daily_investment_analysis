@@ -63,6 +63,7 @@ type BankPositionOption = FlatPosition & {
   optionValue: string;
 };
 
+type BankWealthAction = 'buy' | 'append' | 'redeem';
 type AdvisoryFormEventType = PortfolioAdvisoryEventType | 'append_buy';
 
 type AdvisoryLedgerPayloadDraft =
@@ -165,9 +166,14 @@ function hasPositionPrice(row: PortfolioPositionItem): boolean {
   return row.priceAvailable !== false && row.priceSource !== 'missing';
 }
 
+function isBankWealthPosition(row: PortfolioPositionItem): boolean {
+  return row.market === 'bank' && Boolean(row.symbol?.startsWith('BANK:W:'));
+}
+
 function formatPositionPrice(row: PortfolioPositionItem): string {
   if (!hasPositionPrice(row)) return '--';
   if (row.market === 'advisory') return '-';
+  if (isBankWealthPosition(row)) return '-';
   return row.lastPrice.toFixed(4);
 }
 
@@ -187,7 +193,7 @@ function parsePositiveFormNumber(value: string): number | null {
 
 function formatPositionQuantity(row: PortfolioPositionItem): string {
   if (row.market === 'advisory') return '-';
-  if (row.market === 'bank' && !row.registrationCode) return '-';
+  if (row.market === 'bank') return '-';
   return formatAssetQuantity(row.quantity, row.market);
 }
 
@@ -207,12 +213,14 @@ function getChinaPnlColorClass(value: number | undefined | null, hasValue: boole
 
 function getPositionPriceLabel(row: PortfolioPositionItem): string {
   if (row.priceSource === 'manual_price') {
-    if (row.market === 'bank') return row.priceDate ? `手工净值 · ${row.priceDate}` : '手工净值';
+    if (row.market === 'bank') return row.priceDate ? `价值更新 · ${row.priceDate}` : '价值更新';
     if (row.market === 'advisory') return row.priceDate ? `价值更新 · ${row.priceDate}` : '价值更新';
     return row.market === 'fund' ? '手工净值' : '手工价格';
   }
   if (row.priceSource === 'advisory_value_update') return row.priceDate ? `价值更新 · ${row.priceDate}` : '价值更新';
   if (row.priceSource === 'advisory_net_invested_estimate') return '流水金额';
+  if (row.priceSource === 'bank_value_update') return row.priceDate ? `价值更新 · ${row.priceDate}` : '价值更新';
+  if (row.priceSource === 'bank_net_invested_estimate') return '流水金额';
   if (row.priceSource === 'bank_cost_nav') return row.priceDate ? `成本净值 · ${row.priceDate}` : '成本净值';
   if (row.priceSource === 'insurance_value_update') return row.priceDate ? `保单价值 · ${row.priceDate}` : '保单价值';
   if (row.priceSource === 'insurance_no_value') return '待录入价值';
@@ -440,7 +448,7 @@ function formatBankPositionOption(row: PortfolioPositionItem): string {
     row.registrationCode,
     row.startDate && row.maturityDate ? `${row.startDate} 至 ${row.maturityDate}` : row.startDate || row.maturityDate,
     row.annualRate != null ? `年化 ${row.annualRate}%` : '',
-    row.registrationCode ? `份额 ${formatAssetQuantity(row.quantity, row.market)}` : `余额 ${formatMoney(row.marketValueBase, row.valuationCurrency)}`,
+    `价值 ${formatMoney(row.marketValueBase, row.valuationCurrency)}`,
   ].filter(Boolean);
   return `${title}${details.length ? ` · ${details.join(' · ')}` : ''}`;
 }
@@ -463,8 +471,12 @@ function getTradePricePlaceholder(market: PortfolioMarket | undefined): string {
 function getBankAmountPlaceholder(
   assetKind: PortfolioBankAssetKind,
   direction: PortfolioCashDirection,
+  wealthAction?: BankWealthAction,
 ): string {
-  if (assetKind === 'wealth') return direction === 'out' ? '赎回到账金额' : '买入支付金额';
+  if (assetKind === 'wealth') {
+    if (wealthAction === 'append') return '追加投入金额';
+    return direction === 'out' ? '赎回到账金额' : '买入支付金额';
+  }
   if (assetKind === 'deposit') return direction === 'out' ? '取出本金金额' : '存入本金金额';
   return direction === 'out' ? '取出金额' : '存入金额';
 }
@@ -472,8 +484,12 @@ function getBankAmountPlaceholder(
 function getBankSubmitLabel(
   assetKind: PortfolioBankAssetKind,
   direction: PortfolioCashDirection,
+  wealthAction?: BankWealthAction,
 ): string {
-  if (assetKind === 'wealth') return direction === 'out' ? '提交理财赎回' : '提交理财买入';
+  if (assetKind === 'wealth') {
+    if (wealthAction === 'append') return '提交理财追加';
+    return direction === 'out' ? '提交理财赎回' : '提交理财买入';
+  }
   if (assetKind === 'deposit') return direction === 'out' ? '提交定期取出' : '提交定期存入';
   return direction === 'out' ? '提交活期取出' : '提交活期存入';
 }
@@ -481,10 +497,23 @@ function getBankSubmitLabel(
 function getBankSuccessTitle(
   assetKind: PortfolioBankAssetKind,
   direction: PortfolioCashDirection,
+  wealthAction?: BankWealthAction,
 ): string {
-  if (assetKind === 'wealth') return direction === 'out' ? '理财赎回已记录' : '理财买入已记录';
+  if (assetKind === 'wealth') {
+    if (wealthAction === 'append') return '理财追加已记录';
+    return direction === 'out' ? '理财赎回已记录' : '理财买入已记录';
+  }
   if (assetKind === 'deposit') return direction === 'out' ? '定期取出已记录' : '定期存入已记录';
   return direction === 'out' ? '活期取出已记录' : '活期存入已记录';
+}
+
+function getBankProductRequiredMessage(
+  assetKind: PortfolioBankAssetKind,
+  wealthAction: BankWealthAction,
+): string {
+  if (assetKind === 'deposit') return '请先选择要取出的定期产品。';
+  if (wealthAction === 'append') return '请先选择要追加的理财产品。';
+  return '请先选择要赎回的理财产品。';
 }
 
 function getCodeCandidates(symbol: string): string[] {
@@ -814,6 +843,7 @@ const PortfolioPage: React.FC = () => {
     eventDate: getTodayIso(),
     assetKind: 'demand' as PortfolioBankAssetKind,
     direction: 'in' as PortfolioCashDirection,
+    wealthAction: 'buy' as BankWealthAction,
     amount: '',
     bankName: '',
     productName: '',
@@ -941,7 +971,7 @@ const PortfolioPage: React.FC = () => {
     ...(isStockAccount ? [{ value: 'corporate' as const, label: '公司行为' }] : []),
     ...((isFundAccount || isCryptoAccount) ? [{ value: 'manualPrice' as const, label: '手工价格' }] : []),
     ...(isBankAccount ? [{ value: 'bank' as const, label: '银行' }] : []),
-    ...(isBankAccount ? [{ value: 'bankNav' as const, label: '净值更新' }] : []),
+    ...(isBankAccount ? [{ value: 'bankNav' as const, label: '价值更新' }] : []),
     ...(isAdvisoryAccount ? [{ value: 'advisory' as const, label: '投顾流水' }] : []),
     ...(isAdvisoryAccount ? [{ value: 'advisoryNav' as const, label: '价值更新' }] : []),
     ...(isInsuranceAccount ? [{ value: 'insurancePolicy' as const, label: '保单' }] : []),
@@ -1279,13 +1309,13 @@ const PortfolioPage: React.FC = () => {
   );
   const bankWealthOptions: BankPositionOption[] = useMemo(
     () => positionRows
-      .filter((item) => item.accountId === writableAccountId && item.market === 'bank' && Boolean(item.registrationCode) && item.quantity > 0)
-      .map((item) => ({ ...item, optionValue: item.registrationCode || '' }))
+      .filter((item) => item.accountId === writableAccountId && item.market === 'bank' && item.symbol?.startsWith('BANK:W:') && item.marketValueBase > 0)
+      .map((item) => ({ ...item, optionValue: item.symbol || '' }))
       .filter((item) => item.optionValue),
     [positionRows, writableAccountId],
   );
   const selectedDepositOption = bankDepositOptions.find((item) => item.optionValue === bankForm.linkedEntryId);
-  const selectedWealthOption = bankWealthOptions.find((item) => item.optionValue === bankForm.registrationCode);
+  const selectedWealthOption = bankWealthOptions.find((item) => item.optionValue === bankForm.linkedEntryId);
   const selectedNavWealthOption = bankWealthOptions.find((item) => item.optionValue === bankNavForm.selectedProduct);
   const advisoryOptions: BankPositionOption[] = useMemo(
     () => positionRows
@@ -1468,15 +1498,15 @@ const PortfolioPage: React.FC = () => {
       setWriteWarning('请先选择具体银行账户。');
       return;
     }
-    if (!selectedNavWealthOption?.registrationCode) {
-      setWriteWarning('请先选择需要更新净值的理财产品。');
+    if (!selectedNavWealthOption?.symbol) {
+      setWriteWarning('请先选择需要更新价值的理财产品。');
       return;
     }
     try {
       setWriteWarning(null);
       await portfolioApi.upsertManualPrice({
         accountId: writableAccountId,
-        symbol: selectedNavWealthOption.registrationCode,
+        symbol: selectedNavWealthOption.symbol,
         market: 'bank',
         priceDate: bankNavForm.priceDate,
         price: Number(bankNavForm.price),
@@ -1485,8 +1515,8 @@ const PortfolioPage: React.FC = () => {
       await refreshPortfolioData(eventPage, { refreshPrices: true });
       setBankNavForm((prev) => ({ ...prev, selectedProduct: '', price: '' }));
       showPortfolioToast(
-        '净值已保存',
-        `${selectedNavWealthOption.productName || selectedNavWealthOption.registrationCode} ${bankNavForm.priceDate} 的单位净值已更新。`,
+        '价值已保存',
+        `${selectedNavWealthOption.productName || selectedNavWealthOption.symbol} ${bankNavForm.priceDate} 的当前总价值已更新。`,
       );
     } catch (err) {
       setError(getParsedApiError(err));
@@ -1501,24 +1531,27 @@ const PortfolioPage: React.FC = () => {
     }
     try {
       setWriteWarning(null);
-      const isBankProductOut = bankForm.direction === 'out' && bankForm.assetKind !== 'demand';
+      const wealthDirection: PortfolioCashDirection = bankForm.assetKind === 'wealth' && bankForm.wealthAction === 'redeem' ? 'out' : 'in';
+      const ledgerDirection = bankForm.assetKind === 'wealth' ? wealthDirection : bankForm.direction;
+      const isBankProductOut = ledgerDirection === 'out' && bankForm.assetKind !== 'demand';
+      const isWealthFollowUp = bankForm.assetKind === 'wealth' && bankForm.wealthAction !== 'buy';
       const selectedBankProduct = bankForm.assetKind === 'deposit' ? selectedDepositOption : selectedWealthOption;
-      if (isBankProductOut && !selectedBankProduct) {
-        setWriteWarning(bankForm.assetKind === 'deposit' ? '请先选择要取出的定期产品。' : '请先选择要赎回的理财产品。');
+      if ((isBankProductOut || isWealthFollowUp) && !selectedBankProduct) {
+        setWriteWarning(getBankProductRequiredMessage(bankForm.assetKind, bankForm.wealthAction));
         return;
       }
       await portfolioApi.createBankLedger({
         accountId: writableAccountId,
         eventDate: bankForm.eventDate,
         assetKind: bankForm.assetKind,
-        direction: bankForm.direction,
+        direction: ledgerDirection,
         amount: Number(bankForm.amount),
         currency: writableAccount?.baseCurrency || 'CNY',
         bankName: selectedBankProduct?.bankName || bankForm.bankName,
         productName: bankForm.assetKind !== 'demand' ? selectedBankProduct?.productName || bankForm.productName || undefined : undefined,
         registrationCode: bankForm.assetKind === 'wealth' ? selectedBankProduct?.registrationCode || bankForm.registrationCode || undefined : undefined,
-        linkedEntryId: isBankProductOut && selectedBankProduct?.linkedEntryId ? selectedBankProduct.linkedEntryId : undefined,
-        quantity: bankForm.assetKind === 'wealth' ? Number(bankForm.quantity) : undefined,
+        linkedEntryId: (isBankProductOut || isWealthFollowUp) && selectedBankProduct?.linkedEntryId ? selectedBankProduct.linkedEntryId : undefined,
+        quantity: undefined,
         startDate: bankForm.assetKind !== 'demand' ? selectedBankProduct?.startDate || bankForm.startDate || undefined : undefined,
         maturityDate: bankForm.assetKind !== 'demand' ? selectedBankProduct?.maturityDate || bankForm.maturityDate || undefined : undefined,
         annualRate: bankForm.assetKind === 'deposit' ? Number(selectedBankProduct?.annualRate ?? bankForm.annualRate) : undefined,
@@ -1530,17 +1563,6 @@ const PortfolioPage: React.FC = () => {
           : undefined,
         incomeMode: bankForm.assetKind === 'wealth' ? (selectedBankProduct?.incomeMode as PortfolioBankIncomeMode | undefined) || bankForm.incomeMode : undefined,
       });
-      if (bankForm.assetKind === 'wealth' && bankForm.direction === 'in' && bankForm.nav) {
-        await portfolioApi.upsertManualPrice({
-          accountId: writableAccountId,
-          symbol: bankForm.registrationCode,
-          market: 'bank',
-          priceDate: bankForm.eventDate,
-          price: Number(bankForm.nav),
-          currency: writableAccount?.baseCurrency || 'CNY',
-          note: '买入确认净值',
-        });
-      }
       await refreshPortfolioData(eventPage, { refreshPrices: true });
       setBankForm((prev) => ({
         ...prev,
@@ -1557,8 +1579,8 @@ const PortfolioPage: React.FC = () => {
         riskLevel: '',
       }));
       showPortfolioToast(
-        getBankSuccessTitle(bankForm.assetKind, bankForm.direction),
-        `${selectedBankProduct?.productName || bankForm.productName || bankForm.bankName} ${getBankAmountPlaceholder(bankForm.assetKind, bankForm.direction)} ${formatMoney(Number(bankForm.amount), writableAccount?.baseCurrency || 'CNY')}。`,
+        getBankSuccessTitle(bankForm.assetKind, ledgerDirection, bankForm.wealthAction),
+        `${selectedBankProduct?.productName || bankForm.productName || bankForm.bankName} ${getBankAmountPlaceholder(bankForm.assetKind, ledgerDirection, bankForm.wealthAction)} ${formatMoney(Number(bankForm.amount), writableAccount?.baseCurrency || 'CNY')}。`,
       );
     } catch (err) {
       setError(getParsedApiError(err));
@@ -2240,7 +2262,7 @@ const PortfolioPage: React.FC = () => {
                         ) : null}
                       </td>
                       <td className="portfolio-position-cell portfolio-position-number-cell text-right">{formatPositionQuantity(row)}</td>
-                      <td className="portfolio-position-cell portfolio-position-number-cell text-right">{(row.market === 'bank' && !row.registrationCode) || row.market === 'advisory' ? '-' : row.avgCost.toFixed(4)}</td>
+                      <td className="portfolio-position-cell portfolio-position-number-cell text-right">{row.market === 'bank' || row.market === 'advisory' ? '-' : row.avgCost.toFixed(4)}</td>
                       <td className="portfolio-position-cell portfolio-position-number-cell text-right">
                         <div>{formatPositionPrice(row)}</div>
                         <div className={`portfolio-position-price-source text-[11px] ${hasPositionPrice(row) ? 'text-secondary' : 'text-warning'}`} title={getPositionPriceLabel(row)}>
@@ -2251,21 +2273,21 @@ const PortfolioPage: React.FC = () => {
                       <td
                         className={`portfolio-position-cell portfolio-position-number-cell text-right ${getChinaPnlColorClass(
                           row.unrealizedPnlBase,
-                          (row.market !== 'bank' || Boolean(row.registrationCode)) && hasPositionPrice(row),
+                          (row.market !== 'bank' || isBankWealthPosition(row)) && hasPositionPrice(row),
                         )}`}
                       >
-                        {row.market === 'bank' && !row.registrationCode ? '-' : formatPositionMoney(row.unrealizedPnlBase, row)}
+                        {row.market === 'bank' && !isBankWealthPosition(row) ? '-' : formatPositionMoney(row.unrealizedPnlBase, row)}
                       </td>
                       <td
                         className={`portfolio-position-cell portfolio-position-number-cell text-right ${getChinaPnlColorClass(
                           row.unrealizedPnlPct,
-                          (row.market !== 'bank' || Boolean(row.registrationCode))
+                          (row.market !== 'bank' || isBankWealthPosition(row))
                             && hasPositionPrice(row)
                             && row.unrealizedPnlPct !== null
                             && row.unrealizedPnlPct !== undefined,
                         )}`}
                       >
-                        {row.market === 'bank' && !row.registrationCode ? '-' : formatSignedPct(row.unrealizedPnlPct)}
+                        {row.market === 'bank' && !isBankWealthPosition(row) ? '-' : formatSignedPct(row.unrealizedPnlPct)}
                       </td>
                     </tr>
                     );
@@ -2512,6 +2534,8 @@ const PortfolioPage: React.FC = () => {
                       onChange={(e) => setBankForm((prev) => ({
                         ...prev,
                         assetKind: e.target.value as PortfolioBankAssetKind,
+                        wealthAction: e.target.value === 'wealth' ? 'buy' : prev.wealthAction,
+                        direction: e.target.value === 'wealth' ? 'in' : prev.direction,
                         linkedEntryId: '',
                         registrationCode: '',
                         quantity: '',
@@ -2524,20 +2548,35 @@ const PortfolioPage: React.FC = () => {
                   </label>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.direction}
-                    onChange={(e) => setBankForm((prev) => ({
-                      ...prev,
-                      direction: e.target.value as PortfolioCashDirection,
-                      linkedEntryId: '',
-                      registrationCode: '',
-                    }))}>
-                    <option value="in">存入/买入</option>
-                    <option value="out">取出/赎回</option>
-                  </select>
-                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder={getBankAmountPlaceholder(bankForm.assetKind, bankForm.direction)} value={bankForm.amount}
+                  {bankForm.assetKind === 'wealth' ? (
+                    <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.wealthAction}
+                      onChange={(e) => setBankForm((prev) => ({
+                        ...prev,
+                        wealthAction: e.target.value as BankWealthAction,
+                        direction: e.target.value === 'redeem' ? 'out' : 'in',
+                        linkedEntryId: '',
+                        registrationCode: '',
+                      }))}>
+                      <option value="buy">买入</option>
+                      <option value="append">追加</option>
+                      <option value="redeem">赎回</option>
+                    </select>
+                  ) : (
+                    <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.direction}
+                      onChange={(e) => setBankForm((prev) => ({
+                        ...prev,
+                        direction: e.target.value as PortfolioCashDirection,
+                        linkedEntryId: '',
+                        registrationCode: '',
+                      }))}>
+                      <option value="in">存入/买入</option>
+                      <option value="out">取出/赎回</option>
+                    </select>
+                  )}
+                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder={getBankAmountPlaceholder(bankForm.assetKind, bankForm.assetKind === 'wealth' && bankForm.wealthAction === 'redeem' ? 'out' : bankForm.direction, bankForm.wealthAction)} value={bankForm.amount}
                     onChange={(e) => setBankForm((prev) => ({ ...prev, amount: e.target.value }))} required />
                 </div>
-                {(bankForm.assetKind === 'demand' || bankForm.direction === 'in') ? (
+                {(bankForm.assetKind === 'demand' || (bankForm.direction === 'in' && bankForm.assetKind !== 'wealth') || (bankForm.assetKind === 'wealth' && bankForm.wealthAction === 'buy')) ? (
                   <input className={PORTFOLIO_INPUT_CLASS} placeholder="银行名称（例如 招商银行）" value={bankForm.bankName}
                     onChange={(e) => setBankForm((prev) => ({ ...prev, bankName: e.target.value }))} required />
                 ) : null}
@@ -2553,22 +2592,31 @@ const PortfolioPage: React.FC = () => {
                     </select>
                   ) : null}
                   {bankForm.direction === 'out' && bankForm.assetKind === 'wealth' ? (
-                    <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.registrationCode}
-                      onChange={(e) => setBankForm((prev) => ({ ...prev, registrationCode: e.target.value }))} required>
+                    <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.linkedEntryId}
+                      onChange={(e) => setBankForm((prev) => ({ ...prev, linkedEntryId: e.target.value }))} required>
                       <option value="">选择要赎回的理财产品</option>
                       {bankWealthOptions.map((item) => (
                         <option key={item.optionValue} value={item.optionValue}>{formatBankPositionOption(item)}</option>
                       ))}
                     </select>
                   ) : null}
-                  {bankForm.direction === 'in' ? (
+                  {bankForm.assetKind === 'wealth' && bankForm.wealthAction === 'append' ? (
+                    <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.linkedEntryId}
+                      onChange={(e) => setBankForm((prev) => ({ ...prev, linkedEntryId: e.target.value }))} required>
+                      <option value="">选择要追加的理财产品</option>
+                      {bankWealthOptions.map((item) => (
+                        <option key={item.optionValue} value={item.optionValue}>{formatBankPositionOption(item)}</option>
+                      ))}
+                    </select>
+                  ) : null}
+                  {bankForm.direction === 'in' && (bankForm.assetKind !== 'wealth' || bankForm.wealthAction === 'buy') ? (
                     <>
                     <div className="grid grid-cols-2 gap-2">
                     <input className={PORTFOLIO_INPUT_CLASS} placeholder={bankForm.assetKind === 'deposit' ? '定期产品名称' : '理财产品名称'} value={bankForm.productName}
                       onChange={(e) => setBankForm((prev) => ({ ...prev, productName: e.target.value }))} required />
                     {bankForm.assetKind === 'wealth' ? (
                       <input className={PORTFOLIO_INPUT_CLASS} placeholder="理财登记编码" value={bankForm.registrationCode}
-                        onChange={(e) => setBankForm((prev) => ({ ...prev, registrationCode: e.target.value.toUpperCase() }))} required />
+                        onChange={(e) => setBankForm((prev) => ({ ...prev, registrationCode: e.target.value.toUpperCase() }))} />
                     ) : null}
                     </div>
                     <div className="grid grid-cols-2 gap-2">
@@ -2591,22 +2639,7 @@ const PortfolioPage: React.FC = () => {
                   ) : null}
                   {bankForm.assetKind === 'wealth' ? (
                     <>
-                    {bankForm.direction === 'out' ? (
-                      <>
-                      <div className="text-xs text-secondary">
-                        可赎回份额：{selectedWealthOption ? formatAssetQuantity(selectedWealthOption.quantity, 'bank') : '--'}
-                      </div>
-                      <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="本次赎回份额" value={bankForm.quantity}
-                        onChange={(e) => setBankForm((prev) => ({ ...prev, quantity: e.target.value }))} required />
-                      </>
-                    ) : (
-                      <>
-                    <div className="grid grid-cols-2 gap-2">
-                      <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="买入确认份额" value={bankForm.quantity}
-                        onChange={(e) => setBankForm((prev) => ({ ...prev, quantity: e.target.value }))} required />
-                      <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.000001" placeholder="买入确认净值" value={bankForm.nav}
-                        onChange={(e) => setBankForm((prev) => ({ ...prev, nav: e.target.value }))} required />
-                    </div>
+                    {bankForm.wealthAction === 'buy' ? (
                     <div className="grid grid-cols-2 gap-2">
                       <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.incomeMode}
                         onChange={(e) => setBankForm((prev) => ({ ...prev, incomeMode: e.target.value as PortfolioBankIncomeMode }))}>
@@ -2633,13 +2666,12 @@ const PortfolioPage: React.FC = () => {
                         <option value="R5">R5</option>
                       </select>
                     </div>
-                      </>
-                    )}
+                    ) : null}
                     </>
                   ) : null}
                   </>
                 ) : null}
-                <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>{getBankSubmitLabel(bankForm.assetKind, bankForm.direction)}</button>
+                <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>{getBankSubmitLabel(bankForm.assetKind, bankForm.assetKind === 'wealth' && bankForm.wealthAction === 'redeem' ? 'out' : bankForm.direction, bankForm.wealthAction)}</button>
               </form>
               ) : null}
 
@@ -2647,7 +2679,7 @@ const PortfolioPage: React.FC = () => {
               <form className="space-y-2" onSubmit={handleBankNavSubmit}>
                 <select className={PORTFOLIO_SELECT_CLASS} value={bankNavForm.selectedProduct}
                   onChange={(e) => setBankNavForm((prev) => ({ ...prev, selectedProduct: e.target.value }))} required>
-                  <option value="">选择要更新净值的理财产品</option>
+                  <option value="">选择要更新价值的理财产品</option>
                   {bankWealthOptions.map((item) => (
                     <option key={item.optionValue} value={item.optionValue}>{formatBankPositionOption(item)}</option>
                   ))}
@@ -2655,10 +2687,10 @@ const PortfolioPage: React.FC = () => {
                 <div className="grid grid-cols-2 gap-2">
                   <input className={PORTFOLIO_INPUT_CLASS} type="date" value={bankNavForm.priceDate}
                     onChange={(e) => setBankNavForm((prev) => ({ ...prev, priceDate: e.target.value }))} required />
-                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.000001" placeholder="最新单位净值" value={bankNavForm.price}
+                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder="当前总价值" value={bankNavForm.price}
                     onChange={(e) => setBankNavForm((prev) => ({ ...prev, price: e.target.value }))} required />
                 </div>
-                <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>保存净值</button>
+                <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>保存价值</button>
               </form>
               ) : null}
 
@@ -3114,7 +3146,7 @@ const PortfolioPage: React.FC = () => {
               {eventType === 'bank' && bankEvents.map((item) => (
                 <div key={`b-${item.id}`} className="flex items-start justify-between gap-3 border-b border-white/5 py-2 text-xs text-secondary">
                   <div className="min-w-0">
-                    {item.eventDate} {formatBankAssetKind(item.assetKind)} {formatCashDirectionLabel(item.direction)} {item.amount} {item.currency} · {item.bankName}{item.productName ? ` · ${item.productName}` : ''}{item.registrationCode ? ` · ${item.registrationCode}` : ''}{item.quantity ? ` · 份额 ${formatAssetQuantity(item.quantity)}` : ''}
+                    {item.eventDate} {formatBankAssetKind(item.assetKind)} {formatCashDirectionLabel(item.direction)} {item.amount} {item.currency} · {item.bankName}{item.productName ? ` · ${item.productName}` : ''}{item.registrationCode ? ` · ${item.registrationCode}` : ''}
                   </div>
                   {!writeBlocked ? (
                     <button

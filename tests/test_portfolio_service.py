@@ -1189,7 +1189,7 @@ class PortfolioServiceTestCase(unittest.TestCase):
                     with repo.portfolio_write_session():
                         pass
 
-    def test_bank_account_supports_demand_deposit_and_wealth_nav(self) -> None:
+    def test_bank_account_supports_demand_deposit_and_wealth_value_updates(self) -> None:
         account = self.service.create_account(name="Bank", broker="CMB", market="bank", base_currency="CNY")
         aid = account["id"]
 
@@ -1215,7 +1215,7 @@ class PortfolioServiceTestCase(unittest.TestCase):
             maturity_date=date(2026, 4, 2),
             annual_rate=1.8,
         )
-        self.service.record_bank_ledger(
+        wealth_buy = self.service.record_bank_ledger(
             account_id=aid,
             event_date=date(2026, 1, 3),
             asset_kind="wealth",
@@ -1224,12 +1224,10 @@ class PortfolioServiceTestCase(unittest.TestCase):
             bank_name="招商银行",
             currency="CNY",
             product_name="稳健理财",
-            registration_code="CMB-W001",
-            quantity=100000,
-            income_mode="reinvest",
             investment_nature="fixed_income",
             risk_level="R2",
         )
+        wealth_symbol = f"BANK:W:{wealth_buy['id']}"
 
         initial = self.service.get_portfolio_snapshot(
             account_id=aid,
@@ -1242,53 +1240,66 @@ class PortfolioServiceTestCase(unittest.TestCase):
         positions = {item["product_name"]: item for item in bank_account["positions"]}
         self.assertEqual(positions["三个月定期"]["annual_rate"], 1.8)
         self.assertEqual(positions["三个月定期"]["start_date"], "2026-01-02")
-        self.assertEqual(positions["稳健理财"]["registration_code"], "CMB-W001")
-        self.assertEqual(positions["稳健理财"]["price_source"], "bank_cost_nav")
+        self.assertEqual(positions["稳健理财"]["symbol"], wealth_symbol)
+        self.assertEqual(positions["稳健理财"]["price_source"], "bank_net_invested_estimate")
+        self.assertEqual(positions["稳健理财"]["quantity"], 1.0)
+        self.assertAlmostEqual(positions["稳健理财"]["market_value_base"], 100000.0, places=6)
+
+        self.service.record_bank_ledger(
+            account_id=aid,
+            event_date=date(2026, 1, 4),
+            asset_kind="wealth",
+            direction="in",
+            amount=20000,
+            bank_name="招商银行",
+            currency="CNY",
+            product_name="稳健理财",
+            linked_entry_id=wealth_buy["id"],
+        )
 
         self.service.upsert_manual_price(
             account_id=aid,
-            symbol="CMB-W001",
+            symbol=wealth_symbol,
             market="bank",
-            price_date=date(2026, 1, 4),
-            price=1.01,
+            price_date=date(2026, 1, 5),
+            price=121000,
             currency="CNY",
         )
         updated = self.service.get_portfolio_snapshot(
             account_id=aid,
-            as_of=date(2026, 1, 4),
+            as_of=date(2026, 1, 5),
             refresh_prices=True,
         )
-        wealth = next(item for item in updated["accounts"][0]["positions"] if item.get("registration_code") == "CMB-W001")
-        self.assertEqual(wealth["price_source"], "manual_price")
-        self.assertAlmostEqual(wealth["last_price"], 1.01, places=6)
-        self.assertAlmostEqual(wealth["market_value_base"], 101000.0, places=6)
+        wealth = next(item for item in updated["accounts"][0]["positions"] if item.get("symbol") == wealth_symbol)
+        self.assertEqual(wealth["price_source"], "bank_value_update")
+        self.assertAlmostEqual(wealth["last_price"], 121000.0, places=6)
+        self.assertAlmostEqual(wealth["market_value_base"], 121000.0, places=6)
         self.assertAlmostEqual(wealth["unrealized_pnl_base"], 1000.0, places=6)
 
         self.service.record_bank_ledger(
             account_id=aid,
-            event_date=date(2026, 1, 5),
+            event_date=date(2026, 1, 6),
             asset_kind="wealth",
             direction="out",
-            amount=50500,
+            amount=51000,
             bank_name="招商银行",
             currency="CNY",
             product_name="稳健理财",
-            registration_code="CMB-W001",
-            quantity=50000,
-            income_mode="reinvest",
+            linked_entry_id=wealth_buy["id"],
         )
         redeemed = self.service.get_portfolio_snapshot(
             account_id=aid,
-            as_of=date(2026, 1, 5),
+            as_of=date(2026, 1, 6),
             refresh_prices=True,
         )
         wealth_after_redeem = next(
-            item for item in redeemed["accounts"][0]["positions"] if item.get("registration_code") == "CMB-W001"
+            item for item in redeemed["accounts"][0]["positions"] if item.get("symbol") == wealth_symbol
         )
-        self.assertAlmostEqual(wealth_after_redeem["quantity"], 50000.0, places=6)
-        self.assertAlmostEqual(wealth_after_redeem["total_cost"], 50000.0, places=6)
-        self.assertAlmostEqual(wealth_after_redeem["market_value_base"], 50500.0, places=6)
-        self.assertAlmostEqual(redeemed["accounts"][0]["total_cash"], -89500.0, places=6)
+        self.assertAlmostEqual(wealth_after_redeem["quantity"], 1.0, places=6)
+        self.assertAlmostEqual(wealth_after_redeem["total_cost"], 120000.0, places=6)
+        self.assertAlmostEqual(wealth_after_redeem["market_value_base"], 70000.0, places=6)
+        self.assertAlmostEqual(wealth_after_redeem["unrealized_pnl_base"], 1000.0, places=6)
+        self.assertAlmostEqual(redeemed["accounts"][0]["total_cash"], -109000.0, places=6)
 
     def test_bank_deposit_with_same_terms_redeems_by_linked_entry(self) -> None:
         account = self.service.create_account(name="Bank", broker="CMB", market="bank", base_currency="CNY")
