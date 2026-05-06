@@ -76,6 +76,8 @@ export interface PortfolioPositionItem {
   priceAvailable?: boolean;
   bankName?: string | null;
   productName?: string | null;
+  productPublicCode?: string | null;
+  issuerName?: string | null;
   registrationCode?: string | null;
   linkedEntryId?: number | null;
   startDate?: string | null;
@@ -92,6 +94,7 @@ export interface PortfolioPositionItem {
   investedAmount?: number | null;
   redeemedAmount?: number | null;
   valueAmount?: number | null;
+  wealthUnits?: number | null;
   policyId?: number | null;
   policyName?: string | null;
   insurer?: string | null;
@@ -305,15 +308,46 @@ export interface PortfolioBankLedgerCreateRequest {
   currency?: string;
   bankName: string;
   productName?: string;
+  productCode?: string;
+  productPublicCode?: string;
+  issuerName?: string;
   registrationCode?: string;
   linkedEntryId?: number;
   quantity?: number;
+  unitNav?: number;
+  navDate?: string;
   startDate?: string;
   maturityDate?: string;
   annualRate?: number;
   investmentNature?: PortfolioBankInvestmentNature;
   riskLevel?: PortfolioBankRiskLevel;
   incomeMode?: PortfolioBankIncomeMode;
+}
+
+export interface PortfolioBankWealthProductItem {
+  productCode?: string | null;
+  productName: string;
+  productPublicCode?: string | null;
+  issuerName?: string | null;
+  riskLevel?: string | null;
+  investmentType?: string | null;
+  termType?: string | null;
+  redeemable?: string | null;
+  benchmark?: string | null;
+  managementFee?: string | null;
+  custodyFee?: string | null;
+  subscriptionFee?: string | null;
+}
+
+export interface PortfolioBankWealthProductSearchResponse {
+  products: PortfolioBankWealthProductItem[];
+}
+
+export interface PortfolioBankWealthNavResponse {
+  unitNav?: number | null;
+  navDate?: string | null;
+  changePct?: number | null;
+  source: string;
 }
 
 export interface PortfolioDeleteResponse {
@@ -372,9 +406,14 @@ export interface PortfolioBankLedgerListItem {
   currency: string;
   bankName: string;
   productName?: string | null;
+  productCode?: string | null;
+  productPublicCode?: string | null;
+  issuerName?: string | null;
   registrationCode?: string | null;
   linkedEntryId?: number | null;
   quantity?: number | null;
+  unitNav?: number | null;
+  navDate?: string | null;
   startDate?: string | null;
   maturityDate?: string | null;
   annualRate?: number | null;

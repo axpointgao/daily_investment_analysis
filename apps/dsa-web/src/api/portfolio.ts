@@ -10,6 +10,8 @@ import type {
   PortfolioAnalysisResponse,
   PortfolioBankLedgerCreateRequest,
   PortfolioBankLedgerListResponse,
+  PortfolioBankWealthNavResponse,
+  PortfolioBankWealthProductSearchResponse,
   PortfolioCashLedgerCreateRequest,
   PortfolioCashLedgerListResponse,
   PortfolioCorporateActionCreateRequest,
@@ -248,9 +250,14 @@ export const portfolioApi = {
       currency: payload.currency,
       bank_name: payload.bankName,
       product_name: payload.productName,
+      product_code: payload.productCode,
+      product_public_code: payload.productPublicCode,
+      issuer_name: payload.issuerName,
       registration_code: payload.registrationCode,
       linked_entry_id: payload.linkedEntryId,
       quantity: payload.quantity,
+      unit_nav: payload.unitNav,
+      nav_date: payload.navDate,
       start_date: payload.startDate,
       maturity_date: payload.maturityDate,
       annual_rate: payload.annualRate,
@@ -259,6 +266,22 @@ export const portfolioApi = {
       income_mode: payload.incomeMode,
     });
     return toCamelCase<PortfolioEventCreatedResponse>(response.data);
+  },
+
+  async searchBankWealthProducts(keyword: string): Promise<PortfolioBankWealthProductSearchResponse> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/bank-wealth/search', {
+      keyword,
+      limit: 10,
+    });
+    return toCamelCase<PortfolioBankWealthProductSearchResponse>(response.data);
+  },
+
+  async getBankWealthNav(productIdentifier: string, navDate?: string): Promise<PortfolioBankWealthNavResponse> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/bank-wealth/nav', {
+      product_identifier: productIdentifier,
+      nav_date: navDate,
+    });
+    return toCamelCase<PortfolioBankWealthNavResponse>(response.data);
   },
 
   async deleteBankLedger(entryId: number): Promise<PortfolioDeleteResponse> {

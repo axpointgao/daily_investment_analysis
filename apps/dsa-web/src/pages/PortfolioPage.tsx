@@ -16,6 +16,7 @@ import type {
   PortfolioAdvisoryProductType,
   PortfolioAnalysisResponse,
   PortfolioBankAssetKind,
+  PortfolioBankWealthProductItem,
   PortfolioBankIncomeMode,
   PortfolioBankInvestmentNature,
   PortfolioBankLedgerListItem,
@@ -112,11 +113,22 @@ type AssetNameMaps = {
 };
 
 const PORTFOLIO_INPUT_CLASS =
-  'input-surface input-focus-glow h-11 w-full rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+  'input-surface input-focus-glow h-9 w-full rounded-lg border bg-transparent px-3 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
 const PORTFOLIO_SELECT_CLASS = `${PORTFOLIO_INPUT_CLASS} appearance-none pr-10`;
 const PORTFOLIO_FILE_PICKER_CLASS =
-  'input-surface input-focus-glow flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
-const PORTFOLIO_FIELD_LABEL_CLASS = 'mb-1 block text-[11px] font-medium text-secondary';
+  'input-surface input-focus-glow flex h-9 w-full cursor-pointer items-center justify-center rounded-lg border bg-transparent px-3 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+const PORTFOLIO_FIELD_LABEL_CLASS = 'mb-1.5 block text-[11px] font-medium leading-none text-secondary';
+const PORTFOLIO_FORM_CLASS = 'space-y-2';
+const PORTFOLIO_ENTRY_FORM_CLASS = 'max-w-5xl space-y-2';
+const PORTFOLIO_FORM_GRID_CLASS = 'grid gap-2 sm:grid-cols-2 lg:grid-cols-4';
+const PORTFOLIO_FORM_GRID_8_CLASS = 'grid gap-2 sm:grid-cols-2 lg:grid-cols-8';
+const PORTFOLIO_FORM_GRID_2_CLASS = 'grid gap-2 md:grid-cols-2';
+const PORTFOLIO_FORM_ACTION_CLASS = 'btn-secondary h-9 w-full self-end whitespace-nowrap !px-3 !py-1.5 text-sm';
+const PORTFOLIO_FORM_TEXT_ACTION_CLASS =
+  'h-9 w-full cursor-pointer text-left text-[11px] font-medium leading-none text-primary transition-colors hover:text-primary/80 disabled:cursor-not-allowed disabled:opacity-60';
+const PORTFOLIO_FORM_SPAN_2_CLASS = 'md:col-span-2';
+const PORTFOLIO_FORM_SPAN_4_CLASS = 'lg:col-span-4';
+const BANK_WEALTH_SEARCH_TIMEOUT_MS = 15000;
 const PORTFOLIO_ASSET_COLORS = [
   'hsl(var(--primary))',
   'hsl(var(--color-purple))',
@@ -127,6 +139,44 @@ const PORTFOLIO_ASSET_COLORS = [
   'hsl(326 62% 58%)',
   'hsl(24 84% 56%)',
 ];
+
+function PortfolioField({
+  label,
+  action,
+  className = '',
+  children,
+}: {
+  label: string;
+  action?: React.ReactNode;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className={`block min-w-0 ${className}`}>
+      <span className={`${PORTFOLIO_FIELD_LABEL_CLASS} flex items-center justify-between gap-2`}>
+        <span>{label}</span>
+        {action ? <span>{action}</span> : null}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error('timeout')), timeoutMs);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 
 function getTodayIso(): string {
   return toDateInputValue(new Date());
@@ -170,10 +220,16 @@ function isBankWealthPosition(row: PortfolioPositionItem): boolean {
   return row.market === 'bank' && Boolean(row.symbol?.startsWith('BANK:W:'));
 }
 
+function isBankWealthNavPosition(row: PortfolioPositionItem): boolean {
+  if (!isBankWealthPosition(row)) return false;
+  const units = row.wealthUnits ?? row.quantity;
+  return Number.isFinite(units) && units > 0;
+}
+
 function formatPositionPrice(row: PortfolioPositionItem): string {
   if (!hasPositionPrice(row)) return '--';
   if (row.market === 'advisory') return '-';
-  if (isBankWealthPosition(row)) return '-';
+  if (isBankWealthPosition(row) && !isBankWealthNavPosition(row)) return '-';
   return row.lastPrice.toFixed(4);
 }
 
@@ -193,7 +249,7 @@ function parsePositiveFormNumber(value: string): number | null {
 
 function formatPositionQuantity(row: PortfolioPositionItem): string {
   if (row.market === 'advisory') return '-';
-  if (row.market === 'bank') return '-';
+  if (row.market === 'bank' && !isBankWealthNavPosition(row)) return '-';
   return formatAssetQuantity(row.quantity, row.market);
 }
 
@@ -222,6 +278,7 @@ function getPositionPriceLabel(row: PortfolioPositionItem): string {
   if (row.priceSource === 'bank_value_update') return row.priceDate ? `价值更新 · ${row.priceDate}` : '价值更新';
   if (row.priceSource === 'bank_net_invested_estimate') return '流水金额';
   if (row.priceSource === 'bank_cost_nav') return row.priceDate ? `成本净值 · ${row.priceDate}` : '成本净值';
+  if (row.priceSource === 'bank_wealth_nav') return row.priceDate ? `理财净值 · ${row.priceDate}` : '理财净值';
   if (row.priceSource === 'insurance_value_update') return row.priceDate ? `保单价值 · ${row.priceDate}` : '保单价值';
   if (row.priceSource === 'insurance_no_value') return '待录入价值';
   if (row.priceSource === 'insurance_net_invested') return '净投入暂估';
@@ -445,6 +502,8 @@ function formatBankPositionOption(row: PortfolioPositionItem): string {
   const title = getPositionDisplayName(row);
   const details = [
     row.bankName,
+    row.issuerName,
+    row.productPublicCode,
     row.registrationCode,
     row.startDate && row.maturityDate ? `${row.startDate} 至 ${row.maturityDate}` : row.startDate || row.maturityDate,
     row.annualRate != null ? `年化 ${row.annualRate}%` : '',
@@ -514,6 +573,30 @@ function getBankProductRequiredMessage(
   if (assetKind === 'deposit') return '请先选择要取出的定期产品。';
   if (wealthAction === 'append') return '请先选择要追加的理财产品。';
   return '请先选择要赎回的理财产品。';
+}
+
+function normalizeBankRiskLevel(value?: string | null): '' | PortfolioBankRiskLevel {
+  const text = String(value || '').toUpperCase();
+  if (text.includes('R2') || text.includes('较低风险')) return 'R2';
+  if (text.includes('R1') || text.includes('低风险')) return 'R1';
+  if (text.includes('R3') || text.includes('中风险')) return 'R3';
+  if (text.includes('R4') || text.includes('较高风险')) return 'R4';
+  if (text.includes('R5') || text.includes('高风险')) return 'R5';
+  return '';
+}
+
+function normalizeBankInvestmentNature(value?: string | null): '' | PortfolioBankInvestmentNature {
+  const text = String(value || '');
+  if (text.includes('固定收益')) return 'fixed_income';
+  if (text.includes('混合')) return 'mixed';
+  if (text.includes('权益')) return 'equity';
+  if (text.includes('衍生')) return 'commodity_derivative';
+  if (text.includes('现金')) return 'cash_management';
+  return '';
+}
+
+function getBankWealthCandidateKey(product: PortfolioBankWealthProductItem, index: number): string {
+  return `${product.productCode || ''}|${product.productPublicCode || ''}|${product.productName}|${index}`;
 }
 
 function getCodeCandidates(symbol: string): string[] {
@@ -847,6 +930,9 @@ const PortfolioPage: React.FC = () => {
     amount: '',
     bankName: '',
     productName: '',
+    productCode: '',
+    productPublicCode: '',
+    issuerName: '',
     registrationCode: '',
     linkedEntryId: '',
     quantity: '',
@@ -858,6 +944,12 @@ const PortfolioPage: React.FC = () => {
     riskLevel: '' as '' | PortfolioBankRiskLevel,
     incomeMode: 'reinvest' as PortfolioBankIncomeMode,
   });
+  const [bankWealthSearchResults, setBankWealthSearchResults] = useState<PortfolioBankWealthProductItem[]>([]);
+  const [bankWealthSearchLoading, setBankWealthSearchLoading] = useState(false);
+  const [bankWealthNavLoading, setBankWealthNavLoading] = useState(false);
+  const [bankWealthCandidateModalOpen, setBankWealthCandidateModalOpen] = useState(false);
+  const [selectedBankWealthCandidateKey, setSelectedBankWealthCandidateKey] = useState('');
+  const [bankWealthMatchedProduct, setBankWealthMatchedProduct] = useState<PortfolioBankWealthProductItem | null>(null);
   const [bankNavForm, setBankNavForm] = useState({
     selectedProduct: '',
     priceDate: getTodayIso(),
@@ -1523,6 +1615,148 @@ const PortfolioPage: React.FC = () => {
     }
   };
 
+  const handleBankWealthProductSearch = async () => {
+    const keyword = bankForm.productName.trim();
+    if (!keyword) {
+      setWriteWarning('请先输入理财产品名称。');
+      return;
+    }
+    try {
+      setWriteWarning(null);
+      setBankWealthSearchLoading(true);
+      setBankWealthNavLoading(false);
+      setBankWealthCandidateModalOpen(false);
+      setSelectedBankWealthCandidateKey('');
+      setBankWealthMatchedProduct(null);
+      setBankWealthSearchResults([]);
+      setBankForm((prev) => ({
+        ...prev,
+        productCode: '',
+        productPublicCode: '',
+        issuerName: '',
+        registrationCode: '',
+        bankName: '',
+        riskLevel: '',
+        investmentNature: '',
+        quantity: '',
+        nav: '',
+      }));
+      const response = await withTimeout(
+        portfolioApi.searchBankWealthProducts(keyword),
+        BANK_WEALTH_SEARCH_TIMEOUT_MS,
+      );
+      const products = response.products || [];
+      setBankWealthSearchResults(products);
+      if (!products.length) {
+        setWriteWarning('问财没有返回匹配的银行理财产品，可继续手动填写后保存。');
+        return;
+      }
+      setSelectedBankWealthCandidateKey(getBankWealthCandidateKey(products[0], 0));
+      setBankWealthCandidateModalOpen(true);
+    } catch (err) {
+      setBankWealthMatchedProduct(null);
+      setBankWealthSearchResults([]);
+      setBankWealthCandidateModalOpen(false);
+      setSelectedBankWealthCandidateKey('');
+      setBankForm((prev) => ({
+        ...prev,
+        productCode: '',
+        productPublicCode: '',
+        issuerName: '',
+        registrationCode: '',
+        bankName: '',
+        riskLevel: '',
+        investmentNature: '',
+        quantity: '',
+        nav: '',
+      }));
+      const parsed = getParsedApiError(err);
+      setWriteWarning(
+        err instanceof Error && err.message === 'timeout'
+          ? '银行理财查询超时，可继续手动填写后保存。'
+          : parsed.message || '问财查询失败，可继续手动填写后保存。',
+      );
+    } finally {
+      setBankWealthSearchLoading(false);
+      setBankWealthNavLoading(false);
+    }
+  };
+
+  const applyBankWealthNav = async (productIdentifier: string) => {
+    if (!productIdentifier || !bankForm.eventDate) {
+      return;
+    }
+    try {
+      setBankWealthNavLoading(true);
+      const nav = await portfolioApi.getBankWealthNav(productIdentifier, bankForm.eventDate);
+      if (nav.unitNav && nav.unitNav > 0) {
+        const amount = Number(bankForm.amount);
+        setBankForm((prev) => ({
+          ...prev,
+          nav: String(nav.unitNav),
+          quantity: amount > 0 ? String(amount / Number(nav.unitNav)) : prev.quantity,
+        }));
+      } else {
+        setBankForm((prev) => ({ ...prev, nav: '', quantity: '' }));
+        setWriteWarning('已选中产品，但问财未返回交易日单位净值；本次将按价值型理财记录。');
+      }
+    } catch (err) {
+      setBankForm((prev) => ({ ...prev, nav: '', quantity: '' }));
+      setWriteWarning(getParsedApiError(err).message || '交易日单位净值查询失败；本次将按价值型理财记录。');
+    } finally {
+      setBankWealthNavLoading(false);
+    }
+  };
+
+  const applyBankWealthProduct = async (product: PortfolioBankWealthProductItem) => {
+    const productName = product.productName || bankForm.productName;
+    const productIdentifier = product.productCode || product.productPublicCode || productName;
+    setBankWealthMatchedProduct(product);
+    setBankForm((prev) => ({
+      ...prev,
+      productName,
+      productCode: product.productCode || '',
+      productPublicCode: product.productPublicCode || '',
+      issuerName: product.issuerName || '',
+      bankName: product.issuerName || prev.bankName,
+      registrationCode: product.productPublicCode || prev.registrationCode,
+      riskLevel: normalizeBankRiskLevel(product.riskLevel),
+      investmentNature: normalizeBankInvestmentNature(product.investmentType),
+    }));
+    try {
+      await applyBankWealthNav(productIdentifier);
+    } finally {
+      setBankWealthCandidateModalOpen(false);
+    }
+  };
+
+  const handleConfirmBankWealthCandidate = async () => {
+    const selectedProduct = bankWealthSearchResults.find(
+      (item, index) => getBankWealthCandidateKey(item, index) === selectedBankWealthCandidateKey,
+    ) || bankWealthSearchResults[0];
+    if (!selectedProduct) {
+      setBankWealthCandidateModalOpen(false);
+      return;
+    }
+    await applyBankWealthProduct(selectedProduct);
+  };
+
+  const handleExistingBankWealthNavLookup = async () => {
+    if (!selectedWealthOption) {
+      setWriteWarning(getBankProductRequiredMessage(bankForm.assetKind, bankForm.wealthAction));
+      return;
+    }
+    const productIdentifier = (
+      selectedWealthOption.productCode
+      || selectedWealthOption.productPublicCode
+      || selectedWealthOption.registrationCode
+      || selectedWealthOption.productName
+      || selectedWealthOption.displayName
+      || ''
+    );
+    await applyBankWealthNav(productIdentifier);
+  };
+
   const handleBankLedgerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!writableAccountId) {
@@ -1549,9 +1783,14 @@ const PortfolioPage: React.FC = () => {
         currency: writableAccount?.baseCurrency || 'CNY',
         bankName: selectedBankProduct?.bankName || bankForm.bankName,
         productName: bankForm.assetKind !== 'demand' ? selectedBankProduct?.productName || bankForm.productName || undefined : undefined,
+        productCode: bankForm.assetKind === 'wealth' ? selectedBankProduct?.productCode || bankForm.productCode || undefined : undefined,
+        productPublicCode: bankForm.assetKind === 'wealth' ? selectedBankProduct?.productPublicCode || bankForm.productPublicCode || undefined : undefined,
+        issuerName: bankForm.assetKind === 'wealth' ? selectedBankProduct?.issuerName || bankForm.issuerName || undefined : undefined,
         registrationCode: bankForm.assetKind === 'wealth' ? selectedBankProduct?.registrationCode || bankForm.registrationCode || undefined : undefined,
         linkedEntryId: (isBankProductOut || isWealthFollowUp) && selectedBankProduct?.linkedEntryId ? selectedBankProduct.linkedEntryId : undefined,
-        quantity: undefined,
+        quantity: bankForm.assetKind === 'wealth' && bankForm.nav && bankForm.quantity ? Number(bankForm.quantity) : undefined,
+        unitNav: bankForm.assetKind === 'wealth' && bankForm.nav ? Number(bankForm.nav) : undefined,
+        navDate: bankForm.assetKind === 'wealth' && bankForm.nav ? bankForm.eventDate : undefined,
         startDate: bankForm.assetKind !== 'demand' ? selectedBankProduct?.startDate || bankForm.startDate || undefined : undefined,
         maturityDate: bankForm.assetKind !== 'demand' ? selectedBankProduct?.maturityDate || bankForm.maturityDate || undefined : undefined,
         annualRate: bankForm.assetKind === 'deposit' ? Number(selectedBankProduct?.annualRate ?? bankForm.annualRate) : undefined,
@@ -1568,6 +1807,9 @@ const PortfolioPage: React.FC = () => {
         ...prev,
         amount: '',
         productName: '',
+        productCode: '',
+        productPublicCode: '',
+        issuerName: '',
         registrationCode: '',
         linkedEntryId: '',
         quantity: '',
@@ -1578,6 +1820,8 @@ const PortfolioPage: React.FC = () => {
         investmentNature: '',
         riskLevel: '',
       }));
+      setBankWealthSearchResults([]);
+      setBankWealthMatchedProduct(null);
       showPortfolioToast(
         getBankSuccessTitle(bankForm.assetKind, ledgerDirection, bankForm.wealthAction),
         `${selectedBankProduct?.productName || bankForm.productName || bankForm.bankName} ${getBankAmountPlaceholder(bankForm.assetKind, ledgerDirection, bankForm.wealthAction)} ${formatMoney(Number(bankForm.amount), writableAccount?.baseCurrency || 'CNY')}。`,
@@ -1990,7 +2234,7 @@ const PortfolioPage: React.FC = () => {
   return (
     <div className="portfolio-page min-h-screen space-y-4 p-4 md:p-6">
       <section className="space-y-3">
-        <div className="space-y-2">
+        <div className={PORTFOLIO_FORM_CLASS}>
           <h1 className="text-xl md:text-2xl font-semibold text-foreground">持仓管理</h1>
           <p className="text-xs md:text-sm text-secondary">
             组合快照、手工录入、CSV 导入与资产分析（支持全组合 / 单账户切换）
@@ -2262,7 +2506,9 @@ const PortfolioPage: React.FC = () => {
                         ) : null}
                       </td>
                       <td className="portfolio-position-cell portfolio-position-number-cell text-right">{formatPositionQuantity(row)}</td>
-                      <td className="portfolio-position-cell portfolio-position-number-cell text-right">{row.market === 'bank' || row.market === 'advisory' ? '-' : row.avgCost.toFixed(4)}</td>
+                      <td className="portfolio-position-cell portfolio-position-number-cell text-right">
+                        {(row.market === 'bank' && !isBankWealthNavPosition(row)) || row.market === 'advisory' ? '-' : row.avgCost.toFixed(4)}
+                      </td>
                       <td className="portfolio-position-cell portfolio-position-number-cell text-right">
                         <div>{formatPositionPrice(row)}</div>
                         <div className={`portfolio-position-price-source text-[11px] ${hasPositionPrice(row) ? 'text-secondary' : 'text-warning'}`} title={getPositionPriceLabel(row)}>
@@ -2393,21 +2639,21 @@ const PortfolioPage: React.FC = () => {
 
       {!writeBlocked && selectedEntryPanel ? (
         <section>
-          <Card padding="md">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <Card padding="sm">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
               <div>
                 <h3 className="text-sm font-semibold text-foreground">录入流水</h3>
-                <p className="mt-1 text-xs text-secondary">
+                <p className="mt-0.5 text-xs text-secondary">
                   {writableAccount.name} · {formatMarketLabel(writableAccount.market)}
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-1.5">
                 {entryPanelOptions.map((item) => (
                   <button
                     key={item.value}
                     type="button"
                     aria-pressed={selectedEntryPanel === item.value}
-                    className={`btn-secondary !px-3.5 !py-1.5 !text-xs !font-medium ${
+                    className={`btn-secondary !px-3 !py-1.5 !text-xs !font-medium ${
                       selectedEntryPanel === item.value
                         ? '!border-primary !bg-primary !text-primary-foreground shadow-[0_8px_20px_hsl(var(--primary)/0.22),inset_0_1px_0_hsl(0_0%_100%/0.25)]'
                         : 'opacity-80 hover:opacity-100'
@@ -2420,116 +2666,150 @@ const PortfolioPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="mt-3 border-t border-white/10 pt-3">
+            <div className="mt-2 border-t border-white/10 pt-2">
               {selectedEntryPanel === 'trade' && (isStockAccount || isFundAccount || isCryptoAccount) ? (
-              <form className="space-y-2" onSubmit={handleTradeSubmit}>
-                <input
-                  className={PORTFOLIO_INPUT_CLASS}
-                  placeholder={isFundAccount ? '基金代码（例如 000001）' : isCryptoAccount ? '币种（BTC 或 ETH）' : '股票代码（例如 600519）'}
-                  value={tradeForm.symbol}
-                  onChange={(e) => setTradeForm((prev) => ({ ...prev, symbol: e.target.value }))}
-                  required
-                />
-                <div className="grid grid-cols-2 gap-2">
-                  <input className={PORTFOLIO_INPUT_CLASS} type="date" value={tradeForm.tradeDate}
-                    onChange={(e) => setTradeForm((prev) => ({ ...prev, tradeDate: e.target.value }))} required />
-                  <select className={PORTFOLIO_SELECT_CLASS} value={tradeForm.side}
-                    onChange={(e) => setTradeForm((prev) => ({ ...prev, side: e.target.value as PortfolioSide }))}>
-                    <option value="buy">{isFundAccount ? '申购' : '买入'}</option>
-                    <option value="sell">{isFundAccount ? '赎回' : '卖出'}</option>
-                  </select>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step={quantityStep} placeholder={getTradeQuantityPlaceholder(selectedMarket, tradeForm.side)} value={tradeForm.quantity}
-                    onChange={(e) => setTradeForm((prev) => ({ ...prev, quantity: e.target.value }))} required />
-                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder={getTradePricePlaceholder(selectedMarket)} value={tradeForm.price}
-                    onChange={(e) => setTradeForm((prev) => ({ ...prev, price: e.target.value }))} required />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="交易手续费（可选）" value={tradeForm.fee}
-                    onChange={(e) => setTradeForm((prev) => ({ ...prev, fee: e.target.value }))} />
+              <form className={PORTFOLIO_ENTRY_FORM_CLASS} onSubmit={handleTradeSubmit}>
+                <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                  <PortfolioField label={isFundAccount ? '基金代码' : isCryptoAccount ? '币种' : '股票代码'}>
+                    <input
+                      className={PORTFOLIO_INPUT_CLASS}
+                      placeholder={isFundAccount ? '000001' : isCryptoAccount ? 'BTC 或 ETH' : '600519'}
+                      value={tradeForm.symbol}
+                      onChange={(e) => setTradeForm((prev) => ({ ...prev, symbol: e.target.value }))}
+                      required
+                    />
+                  </PortfolioField>
+                  <PortfolioField label="交易日期">
+                    <input className={PORTFOLIO_INPUT_CLASS} type="date" value={tradeForm.tradeDate}
+                      onChange={(e) => setTradeForm((prev) => ({ ...prev, tradeDate: e.target.value }))} required />
+                  </PortfolioField>
+                  <PortfolioField label="交易方向">
+                    <select className={PORTFOLIO_SELECT_CLASS} value={tradeForm.side}
+                      onChange={(e) => setTradeForm((prev) => ({ ...prev, side: e.target.value as PortfolioSide }))}>
+                      <option value="buy">{isFundAccount ? '申购' : '买入'}</option>
+                      <option value="sell">{isFundAccount ? '赎回' : '卖出'}</option>
+                    </select>
+                  </PortfolioField>
+                  <PortfolioField label="数量">
+                    <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step={quantityStep} placeholder={getTradeQuantityPlaceholder(selectedMarket, tradeForm.side)} value={tradeForm.quantity}
+                      onChange={(e) => setTradeForm((prev) => ({ ...prev, quantity: e.target.value }))} required />
+                  </PortfolioField>
+                  <PortfolioField label={isFundAccount ? '成交净值' : '成交价格'}>
+                    <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder={getTradePricePlaceholder(selectedMarket)} value={tradeForm.price}
+                      onChange={(e) => setTradeForm((prev) => ({ ...prev, price: e.target.value }))} required />
+                  </PortfolioField>
+                  <PortfolioField label="手续费">
+                    <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="可选" value={tradeForm.fee}
+                      onChange={(e) => setTradeForm((prev) => ({ ...prev, fee: e.target.value }))} />
+                  </PortfolioField>
                   {isStockAccount ? (
-                    <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="交易税费（可选）" value={tradeForm.tax}
-                      onChange={(e) => setTradeForm((prev) => ({ ...prev, tax: e.target.value }))} />
+                    <PortfolioField label="税费">
+                      <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="可选" value={tradeForm.tax}
+                        onChange={(e) => setTradeForm((prev) => ({ ...prev, tax: e.target.value }))} />
+                    </PortfolioField>
                   ) : (
-                    <input className={PORTFOLIO_INPUT_CLASS} placeholder={`成交币种：${selectedMarket ? getDefaultCurrencyForMarket(selectedMarket) : ''}`} disabled />
+                    <PortfolioField label="成交币种">
+                      <input className={PORTFOLIO_INPUT_CLASS} placeholder={selectedMarket ? getDefaultCurrencyForMarket(selectedMarket) : ''} disabled />
+                    </PortfolioField>
                   )}
+                  <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId}>
+                    {isFundAccount ? '提交基金流水' : isCryptoAccount ? '提交数字货币流水' : '提交交易'}
+                  </button>
                 </div>
-                <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>
-                  {isFundAccount ? '提交基金流水' : isCryptoAccount ? '提交数字货币流水' : '提交交易'}
-                </button>
               </form>
               ) : null}
 
               {selectedEntryPanel === 'cash' && supportsCashLedger ? (
-              <form className="space-y-2" onSubmit={handleCashSubmit}>
-                <div className="grid grid-cols-2 gap-2">
-                  <input className={PORTFOLIO_INPUT_CLASS} type="date" value={cashForm.eventDate}
-                    onChange={(e) => setCashForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
-                  <select className={PORTFOLIO_SELECT_CLASS} value={cashForm.direction}
-                    onChange={(e) => setCashForm((prev) => ({ ...prev, direction: e.target.value as PortfolioCashDirection }))}>
-                    <option value="in">入金</option>
-                    <option value="out">出金</option>
-                  </select>
+              <form className={PORTFOLIO_ENTRY_FORM_CLASS} onSubmit={handleCashSubmit}>
+                <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                  <PortfolioField label="流水日期">
+                    <input className={PORTFOLIO_INPUT_CLASS} type="date" value={cashForm.eventDate}
+                      onChange={(e) => setCashForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
+                  </PortfolioField>
+                  <PortfolioField label="资金方向">
+                    <select className={PORTFOLIO_SELECT_CLASS} value={cashForm.direction}
+                      onChange={(e) => setCashForm((prev) => ({ ...prev, direction: e.target.value as PortfolioCashDirection }))}>
+                      <option value="in">入金</option>
+                      <option value="out">出金</option>
+                    </select>
+                  </PortfolioField>
+                  <PortfolioField label="金额">
+                    <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder={cashForm.direction === 'in' ? '入金金额' : '出金金额'}
+                      value={cashForm.amount} onChange={(e) => setCashForm((prev) => ({ ...prev, amount: e.target.value }))} required />
+                  </PortfolioField>
+                  <PortfolioField label="币种">
+                    <input className={PORTFOLIO_INPUT_CLASS} placeholder={`默认 ${writableAccount?.baseCurrency || '基准币'}`} value={cashForm.currency}
+                      onChange={(e) => setCashForm((prev) => ({ ...prev, currency: e.target.value.toUpperCase() }))} />
+                  </PortfolioField>
+                  <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId}>提交资金流水</button>
                 </div>
-                <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder={cashForm.direction === 'in' ? '入金金额' : '出金金额'}
-                  value={cashForm.amount} onChange={(e) => setCashForm((prev) => ({ ...prev, amount: e.target.value }))} required />
-                <input className={PORTFOLIO_INPUT_CLASS} placeholder={`资金币种（默认 ${writableAccount?.baseCurrency || '账户基准币'}）`} value={cashForm.currency}
-                  onChange={(e) => setCashForm((prev) => ({ ...prev, currency: e.target.value.toUpperCase() }))} />
-                <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>提交资金流水</button>
               </form>
               ) : null}
 
               {selectedEntryPanel === 'corporate' && isStockAccount ? (
-              <form className="space-y-2" onSubmit={handleCorporateSubmit}>
-                <input className={PORTFOLIO_INPUT_CLASS} placeholder="股票代码（例如 600519）" value={corpForm.symbol}
-                  onChange={(e) => setCorpForm((prev) => ({ ...prev, symbol: e.target.value }))} required />
-                <div className="grid grid-cols-2 gap-2">
-                  <input className={PORTFOLIO_INPUT_CLASS} type="date" value={corpForm.effectiveDate}
-                    onChange={(e) => setCorpForm((prev) => ({ ...prev, effectiveDate: e.target.value }))} required />
-                  <select className={PORTFOLIO_SELECT_CLASS} value={corpForm.actionType}
-                    onChange={(e) => setCorpForm((prev) => ({ ...prev, actionType: e.target.value as PortfolioCorporateActionType }))}>
-                    <option value="cash_dividend">现金分红</option>
-                    <option value="split_adjustment">拆并股调整</option>
-                  </select>
+              <form className={PORTFOLIO_ENTRY_FORM_CLASS} onSubmit={handleCorporateSubmit}>
+                <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                  <PortfolioField label="股票代码">
+                    <input className={PORTFOLIO_INPUT_CLASS} placeholder="600519" value={corpForm.symbol}
+                      onChange={(e) => setCorpForm((prev) => ({ ...prev, symbol: e.target.value }))} required />
+                  </PortfolioField>
+                  <PortfolioField label="生效日期">
+                    <input className={PORTFOLIO_INPUT_CLASS} type="date" value={corpForm.effectiveDate}
+                      onChange={(e) => setCorpForm((prev) => ({ ...prev, effectiveDate: e.target.value }))} required />
+                  </PortfolioField>
+                  <PortfolioField label="行为类型">
+                    <select className={PORTFOLIO_SELECT_CLASS} value={corpForm.actionType}
+                      onChange={(e) => setCorpForm((prev) => ({ ...prev, actionType: e.target.value as PortfolioCorporateActionType }))}>
+                      <option value="cash_dividend">现金分红</option>
+                      <option value="split_adjustment">拆并股调整</option>
+                    </select>
+                  </PortfolioField>
+                  {corpForm.actionType === 'cash_dividend' ? (
+                    <PortfolioField label="每股分红">
+                      <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.000001" placeholder="现金分红金额"
+                        value={corpForm.cashDividendPerShare}
+                        onChange={(e) => setCorpForm((prev) => ({ ...prev, cashDividendPerShare: e.target.value, splitRatio: '' }))} required />
+                    </PortfolioField>
+                  ) : (
+                    <PortfolioField label="拆并比例">
+                      <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.000001" placeholder="新股数 / 旧股数"
+                        value={corpForm.splitRatio}
+                        onChange={(e) => setCorpForm((prev) => ({ ...prev, splitRatio: e.target.value, cashDividendPerShare: '' }))} required />
+                    </PortfolioField>
+                  )}
+                  <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId}>提交公司行为</button>
                 </div>
-                {corpForm.actionType === 'cash_dividend' ? (
-                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.000001" placeholder="每股现金分红金额"
-                    value={corpForm.cashDividendPerShare}
-                    onChange={(e) => setCorpForm((prev) => ({ ...prev, cashDividendPerShare: e.target.value, splitRatio: '' }))} required />
-                ) : (
-                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.000001" placeholder="拆并股比例（新股数/旧股数）"
-                    value={corpForm.splitRatio}
-                    onChange={(e) => setCorpForm((prev) => ({ ...prev, splitRatio: e.target.value, cashDividendPerShare: '' }))} required />
-                )}
-                <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>提交公司行为</button>
               </form>
               ) : null}
 
               {selectedEntryPanel === 'manualPrice' && (isFundAccount || isCryptoAccount) ? (
-              <form className="space-y-2" onSubmit={handleManualPriceSubmit}>
-                <input className={PORTFOLIO_INPUT_CLASS} placeholder={isFundAccount ? '基金代码（例如 000001）' : '币种代码（BTC 或 ETH）'} value={manualPriceForm.symbol}
-                  onChange={(e) => setManualPriceForm((prev) => ({ ...prev, symbol: e.target.value }))} required />
-                <div className="grid grid-cols-2 gap-2">
-                  <input className={PORTFOLIO_INPUT_CLASS} type="date" value={manualPriceForm.priceDate}
-                    onChange={(e) => setManualPriceForm((prev) => ({ ...prev, priceDate: e.target.value }))} required />
-                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder={isFundAccount ? '最新单位净值' : '最新单币价格（USD）'} value={manualPriceForm.price}
-                    onChange={(e) => setManualPriceForm((prev) => ({ ...prev, price: e.target.value }))} required />
+              <form className={PORTFOLIO_ENTRY_FORM_CLASS} onSubmit={handleManualPriceSubmit}>
+                <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                  <PortfolioField label={isFundAccount ? '基金代码' : '币种代码'}>
+                    <input className={PORTFOLIO_INPUT_CLASS} placeholder={isFundAccount ? '000001' : 'BTC 或 ETH'} value={manualPriceForm.symbol}
+                      onChange={(e) => setManualPriceForm((prev) => ({ ...prev, symbol: e.target.value }))} required />
+                  </PortfolioField>
+                  <PortfolioField label="价格日期">
+                    <input className={PORTFOLIO_INPUT_CLASS} type="date" value={manualPriceForm.priceDate}
+                      onChange={(e) => setManualPriceForm((prev) => ({ ...prev, priceDate: e.target.value }))} required />
+                  </PortfolioField>
+                  <PortfolioField label={isFundAccount ? '单位净值' : '单币价格'}>
+                    <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder={isFundAccount ? '最新单位净值' : 'USD 价格'} value={manualPriceForm.price}
+                      onChange={(e) => setManualPriceForm((prev) => ({ ...prev, price: e.target.value }))} required />
+                  </PortfolioField>
+                  <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId}>保存手工价格</button>
                 </div>
-                <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>保存手工价格</button>
               </form>
               ) : null}
 
               {selectedEntryPanel === 'bank' && isBankAccount ? (
-              <form className="space-y-2" onSubmit={handleBankLedgerSubmit}>
-                <div className="grid grid-cols-2 gap-2">
-                  <label>
-                    <span className={PORTFOLIO_FIELD_LABEL_CLASS}>流水日期</span>
+              <form className={PORTFOLIO_ENTRY_FORM_CLASS} onSubmit={handleBankLedgerSubmit}>
+                <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                  <PortfolioField label="流水日期">
                     <input className={PORTFOLIO_INPUT_CLASS} type="date" value={bankForm.eventDate}
                       onChange={(e) => setBankForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
-                  </label>
-                  <label>
-                    <span className={PORTFOLIO_FIELD_LABEL_CLASS}>资产类型</span>
+                  </PortfolioField>
+                  <PortfolioField label="资产类型">
                     <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.assetKind}
                       onChange={(e) => setBankForm((prev) => ({
                         ...prev,
@@ -2538,6 +2818,9 @@ const PortfolioPage: React.FC = () => {
                         direction: e.target.value === 'wealth' ? 'in' : prev.direction,
                         linkedEntryId: '',
                         registrationCode: '',
+                        productCode: '',
+                        productPublicCode: '',
+                        issuerName: '',
                         quantity: '',
                         nav: '',
                       }))}>
@@ -2545,366 +2828,637 @@ const PortfolioPage: React.FC = () => {
                       <option value="deposit">定期存款</option>
                       <option value="wealth">银行理财</option>
                     </select>
-                  </label>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
+                  </PortfolioField>
                   {bankForm.assetKind === 'wealth' ? (
-                    <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.wealthAction}
-                      onChange={(e) => setBankForm((prev) => ({
-                        ...prev,
-                        wealthAction: e.target.value as BankWealthAction,
-                        direction: e.target.value === 'redeem' ? 'out' : 'in',
-                        linkedEntryId: '',
-                        registrationCode: '',
-                      }))}>
-                      <option value="buy">买入</option>
-                      <option value="append">追加</option>
-                      <option value="redeem">赎回</option>
-                    </select>
+                    <PortfolioField label="操作类型">
+                      <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.wealthAction}
+                        onChange={(e) => setBankForm((prev) => ({
+                          ...prev,
+                          wealthAction: e.target.value as BankWealthAction,
+                          direction: e.target.value === 'redeem' ? 'out' : 'in',
+                          linkedEntryId: '',
+                          registrationCode: '',
+                          productCode: '',
+                          productPublicCode: '',
+                          issuerName: '',
+                        }))}>
+                        <option value="buy">买入</option>
+                        <option value="append">追加</option>
+                        <option value="redeem">赎回</option>
+                      </select>
+                    </PortfolioField>
                   ) : (
-                    <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.direction}
-                      onChange={(e) => setBankForm((prev) => ({
-                        ...prev,
-                        direction: e.target.value as PortfolioCashDirection,
-                        linkedEntryId: '',
-                        registrationCode: '',
-                      }))}>
-                      <option value="in">存入/买入</option>
-                      <option value="out">取出/赎回</option>
-                    </select>
+                    <PortfolioField label="资金方向">
+                      <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.direction}
+                        onChange={(e) => setBankForm((prev) => ({
+                          ...prev,
+                          direction: e.target.value as PortfolioCashDirection,
+                          linkedEntryId: '',
+                          registrationCode: '',
+                        }))}>
+                        <option value="in">存入/买入</option>
+                        <option value="out">取出/赎回</option>
+                      </select>
+                    </PortfolioField>
                   )}
-                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder={getBankAmountPlaceholder(bankForm.assetKind, bankForm.assetKind === 'wealth' && bankForm.wealthAction === 'redeem' ? 'out' : bankForm.direction, bankForm.wealthAction)} value={bankForm.amount}
-                    onChange={(e) => setBankForm((prev) => ({ ...prev, amount: e.target.value }))} required />
+                  <PortfolioField label="发生金额">
+                    <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder={getBankAmountPlaceholder(bankForm.assetKind, bankForm.assetKind === 'wealth' && bankForm.wealthAction === 'redeem' ? 'out' : bankForm.direction, bankForm.wealthAction)} value={bankForm.amount}
+                      onChange={(e) => setBankForm((prev) => {
+                        const amount = Number(e.target.value);
+                        const nav = Number(prev.nav);
+                        return {
+                          ...prev,
+                          amount: e.target.value,
+                          quantity: prev.assetKind === 'wealth' && nav > 0 && amount > 0 ? String(amount / nav) : prev.quantity,
+                        };
+                      })} required />
+                  </PortfolioField>
                 </div>
-                {(bankForm.assetKind === 'demand' || (bankForm.direction === 'in' && bankForm.assetKind !== 'wealth') || (bankForm.assetKind === 'wealth' && bankForm.wealthAction === 'buy')) ? (
-                  <input className={PORTFOLIO_INPUT_CLASS} placeholder="银行名称（例如 招商银行）" value={bankForm.bankName}
-                    onChange={(e) => setBankForm((prev) => ({ ...prev, bankName: e.target.value }))} required />
+                {bankForm.assetKind === 'demand' ? (
+                  <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                    <PortfolioField label="银行名称">
+                      <input className={PORTFOLIO_INPUT_CLASS} placeholder="例如 招商银行" value={bankForm.bankName}
+                        onChange={(e) => setBankForm((prev) => ({ ...prev, bankName: e.target.value }))} required />
+                    </PortfolioField>
+                    {bankForm.assetKind === 'demand' ? (
+                      <div className="flex items-end">
+                        <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId}>
+                          {getBankSubmitLabel(bankForm.assetKind, bankForm.direction, bankForm.wealthAction)}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                {bankForm.assetKind === 'deposit' && bankForm.direction === 'in' ? (
+                  <>
+                    <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                      <PortfolioField label="银行名称">
+                        <input className={PORTFOLIO_INPUT_CLASS} placeholder="例如 招商银行" value={bankForm.bankName}
+                          onChange={(e) => setBankForm((prev) => ({ ...prev, bankName: e.target.value }))} required />
+                      </PortfolioField>
+                      <PortfolioField label="定期产品名称" className={PORTFOLIO_FORM_SPAN_2_CLASS}>
+                        <input className={PORTFOLIO_INPUT_CLASS} placeholder="产品名称" value={bankForm.productName}
+                          onChange={(e) => setBankForm((prev) => ({ ...prev, productName: e.target.value }))} required />
+                      </PortfolioField>
+                      <PortfolioField label="年化利率">
+                        <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="%" value={bankForm.annualRate}
+                          onChange={(e) => setBankForm((prev) => ({ ...prev, annualRate: e.target.value }))} required />
+                      </PortfolioField>
+                    </div>
+                    <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                      <PortfolioField label="起息日">
+                        <input className={PORTFOLIO_INPUT_CLASS} type="date" value={bankForm.startDate}
+                          onChange={(e) => setBankForm((prev) => ({ ...prev, startDate: e.target.value }))} required />
+                      </PortfolioField>
+                      <PortfolioField label="到期日">
+                        <input className={PORTFOLIO_INPUT_CLASS} type="date" value={bankForm.maturityDate}
+                          onChange={(e) => setBankForm((prev) => ({ ...prev, maturityDate: e.target.value }))} required />
+                      </PortfolioField>
+                      <div className="flex items-end">
+                        <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId}>
+                          {getBankSubmitLabel(bankForm.assetKind, bankForm.direction, bankForm.wealthAction)}
+                        </button>
+                      </div>
+                    </div>
+                  </>
                 ) : null}
                 {bankForm.assetKind !== 'demand' ? (
                   <>
                   {bankForm.direction === 'out' && bankForm.assetKind === 'deposit' ? (
-                    <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.linkedEntryId}
-                      onChange={(e) => setBankForm((prev) => ({ ...prev, linkedEntryId: e.target.value }))} required>
-                      <option value="">选择要取出的定期产品</option>
-                      {bankDepositOptions.map((item) => (
-                        <option key={item.optionValue} value={item.optionValue}>{formatBankPositionOption(item)}</option>
-                      ))}
-                    </select>
+                    <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                      <PortfolioField label="定期产品" className={PORTFOLIO_FORM_SPAN_2_CLASS}>
+                        <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.linkedEntryId}
+                          onChange={(e) => setBankForm((prev) => ({ ...prev, linkedEntryId: e.target.value }))} required>
+                          <option value="">选择要取出的定期产品</option>
+                          {bankDepositOptions.map((item) => (
+                            <option key={item.optionValue} value={item.optionValue}>{formatBankPositionOption(item)}</option>
+                          ))}
+                        </select>
+                      </PortfolioField>
+                      <div className="flex items-end">
+                        <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId}>
+                          {getBankSubmitLabel(bankForm.assetKind, bankForm.direction, bankForm.wealthAction)}
+                        </button>
+                      </div>
+                    </div>
                   ) : null}
                   {bankForm.direction === 'out' && bankForm.assetKind === 'wealth' ? (
-                    <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.linkedEntryId}
-                      onChange={(e) => setBankForm((prev) => ({ ...prev, linkedEntryId: e.target.value }))} required>
-                      <option value="">选择要赎回的理财产品</option>
-                      {bankWealthOptions.map((item) => (
-                        <option key={item.optionValue} value={item.optionValue}>{formatBankPositionOption(item)}</option>
-                      ))}
-                    </select>
-                  ) : null}
-                  {bankForm.assetKind === 'wealth' && bankForm.wealthAction === 'append' ? (
-                    <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.linkedEntryId}
-                      onChange={(e) => setBankForm((prev) => ({ ...prev, linkedEntryId: e.target.value }))} required>
-                      <option value="">选择要追加的理财产品</option>
-                      {bankWealthOptions.map((item) => (
-                        <option key={item.optionValue} value={item.optionValue}>{formatBankPositionOption(item)}</option>
-                      ))}
-                    </select>
-                  ) : null}
-                  {bankForm.direction === 'in' && (bankForm.assetKind !== 'wealth' || bankForm.wealthAction === 'buy') ? (
                     <>
-                    <div className="grid grid-cols-2 gap-2">
-                    <input className={PORTFOLIO_INPUT_CLASS} placeholder={bankForm.assetKind === 'deposit' ? '定期产品名称' : '理财产品名称'} value={bankForm.productName}
-                      onChange={(e) => setBankForm((prev) => ({ ...prev, productName: e.target.value }))} required />
-                    {bankForm.assetKind === 'wealth' ? (
-                      <input className={PORTFOLIO_INPUT_CLASS} placeholder="理财登记编码" value={bankForm.registrationCode}
-                        onChange={(e) => setBankForm((prev) => ({ ...prev, registrationCode: e.target.value.toUpperCase() }))} />
-                    ) : null}
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                    <label>
-                      <span className={PORTFOLIO_FIELD_LABEL_CLASS}>起息日</span>
-                      <input className={PORTFOLIO_INPUT_CLASS} type="date" value={bankForm.startDate}
-                        onChange={(e) => setBankForm((prev) => ({ ...prev, startDate: e.target.value }))} required={bankForm.assetKind === 'deposit'} />
-                    </label>
-                    <label>
-                      <span className={PORTFOLIO_FIELD_LABEL_CLASS}>到期日</span>
-                      <input className={PORTFOLIO_INPUT_CLASS} type="date" value={bankForm.maturityDate}
-                        onChange={(e) => setBankForm((prev) => ({ ...prev, maturityDate: e.target.value }))} required={bankForm.assetKind === 'deposit'} />
-                    </label>
-                    </div>
-                    {bankForm.assetKind === 'deposit' ? (
-                      <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="存款年化利率（%）" value={bankForm.annualRate}
-                        onChange={(e) => setBankForm((prev) => ({ ...prev, annualRate: e.target.value }))} required />
-                    ) : null}
+                      <div className={PORTFOLIO_FORM_GRID_8_CLASS}>
+                        <PortfolioField label="理财产品" className={PORTFOLIO_FORM_SPAN_4_CLASS}>
+                          <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.linkedEntryId}
+                            onChange={(e) => setBankForm((prev) => ({ ...prev, linkedEntryId: e.target.value, nav: '', quantity: '' }))} required>
+                            <option value="">选择要赎回的理财产品</option>
+                            {bankWealthOptions.map((item) => (
+                              <option key={item.optionValue} value={item.optionValue}>{formatBankPositionOption(item)}</option>
+                            ))}
+                          </select>
+                        </PortfolioField>
+                        <div className="flex items-end">
+                          <button
+                            type="button"
+                            className={PORTFOLIO_FORM_TEXT_ACTION_CLASS}
+                            onClick={handleExistingBankWealthNavLookup}
+                            disabled={bankWealthNavLoading || !selectedWealthOption}
+                          >
+                            {bankWealthNavLoading ? '查询中...' : '查询净值'}
+                          </button>
+                        </div>
+                      </div>
+                      <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                        {bankForm.nav ? (
+                          <>
+                            <PortfolioField label="单位净值">
+                              <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" value={bankForm.nav}
+                                onChange={(e) => setBankForm((prev) => {
+                                  const nav = Number(e.target.value);
+                                  const amount = Number(prev.amount);
+                                  return {
+                                    ...prev,
+                                    nav: e.target.value,
+                                    quantity: nav > 0 && amount > 0 ? String(amount / nav) : '',
+                                  };
+                                })} />
+                            </PortfolioField>
+                            <PortfolioField label="赎回份额">
+                              <input className={PORTFOLIO_INPUT_CLASS} value={bankForm.quantity} readOnly />
+                            </PortfolioField>
+                          </>
+                        ) : null}
+                        <div className="flex items-end">
+                          <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId}>
+                            {getBankSubmitLabel(bankForm.assetKind, 'out', bankForm.wealthAction)}
+                          </button>
+                        </div>
+                      </div>
                     </>
                   ) : null}
-                  {bankForm.assetKind === 'wealth' ? (
+                  {bankForm.assetKind === 'wealth' && bankForm.wealthAction === 'append' ? (
                     <>
-                    {bankForm.wealthAction === 'buy' ? (
-                    <div className="grid grid-cols-2 gap-2">
-                      <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.incomeMode}
-                        onChange={(e) => setBankForm((prev) => ({ ...prev, incomeMode: e.target.value as PortfolioBankIncomeMode }))}>
-                        <option value="reinvest">滚存</option>
-                        <option value="dividend">派息</option>
-                      </select>
-                      <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.investmentNature}
-                        onChange={(e) => setBankForm((prev) => ({ ...prev, investmentNature: e.target.value as '' | PortfolioBankInvestmentNature }))}>
-                        <option value="">投资性质（选填）</option>
-                        <option value="fixed_income">固定收益类</option>
-                        <option value="mixed">混合类</option>
-                        <option value="equity">权益类</option>
-                        <option value="commodity_derivative">商品及金融衍生品类</option>
-                        <option value="cash_management">现金管理类</option>
-                        <option value="other">其他</option>
-                      </select>
-                      <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.riskLevel}
-                        onChange={(e) => setBankForm((prev) => ({ ...prev, riskLevel: e.target.value as '' | PortfolioBankRiskLevel }))}>
-                        <option value="">风险等级（选填）</option>
-                        <option value="R1">R1</option>
-                        <option value="R2">R2</option>
-                        <option value="R3">R3</option>
-                        <option value="R4">R4</option>
-                        <option value="R5">R5</option>
-                      </select>
+                      <div className={PORTFOLIO_FORM_GRID_8_CLASS}>
+                        <PortfolioField label="理财产品" className={PORTFOLIO_FORM_SPAN_4_CLASS}>
+                          <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.linkedEntryId}
+                            onChange={(e) => setBankForm((prev) => ({ ...prev, linkedEntryId: e.target.value, nav: '', quantity: '' }))} required>
+                            <option value="">选择要追加的理财产品</option>
+                            {bankWealthOptions.map((item) => (
+                              <option key={item.optionValue} value={item.optionValue}>{formatBankPositionOption(item)}</option>
+                            ))}
+                          </select>
+                        </PortfolioField>
+                        <div className="flex items-end">
+                          <button
+                            type="button"
+                            className={PORTFOLIO_FORM_TEXT_ACTION_CLASS}
+                            onClick={handleExistingBankWealthNavLookup}
+                            disabled={bankWealthNavLoading || !selectedWealthOption}
+                          >
+                            {bankWealthNavLoading ? '查询中...' : '查询净值'}
+                          </button>
+                        </div>
+                      </div>
+                      <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                        {bankForm.nav ? (
+                          <>
+                            <PortfolioField label="单位净值">
+                              <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" value={bankForm.nav}
+                                onChange={(e) => setBankForm((prev) => {
+                                  const nav = Number(e.target.value);
+                                  const amount = Number(prev.amount);
+                                  return {
+                                    ...prev,
+                                    nav: e.target.value,
+                                    quantity: nav > 0 && amount > 0 ? String(amount / nav) : '',
+                                  };
+                                })} />
+                            </PortfolioField>
+                            <PortfolioField label="确定份额">
+                              <input className={PORTFOLIO_INPUT_CLASS} value={bankForm.quantity} readOnly />
+                            </PortfolioField>
+                          </>
+                        ) : null}
+                        <div className="flex items-end">
+                          <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId}>
+                            {getBankSubmitLabel(bankForm.assetKind, 'in', bankForm.wealthAction)}
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  ) : null}
+                  {bankForm.direction === 'in' && bankForm.assetKind === 'wealth' && bankForm.wealthAction === 'buy' ? (
+                    <>
+                    <div className={PORTFOLIO_FORM_GRID_8_CLASS}>
+                      <PortfolioField label="理财产品名称" className={PORTFOLIO_FORM_SPAN_4_CLASS}>
+                        <input className={PORTFOLIO_INPUT_CLASS} placeholder="输入完整产品名" value={bankForm.productName}
+                          onChange={(e) => setBankForm((prev) => ({ ...prev, productName: e.target.value }))} required />
+                      </PortfolioField>
+                      <div className="flex items-end">
+                          <button
+                            type="button"
+                            className={PORTFOLIO_FORM_TEXT_ACTION_CLASS}
+                            onClick={handleBankWealthProductSearch}
+                            disabled={bankWealthSearchLoading}
+                          >
+                            {bankWealthSearchLoading ? '查询中...' : '查询产品'}
+                          </button>
+                      </div>
                     </div>
+                    </>
+                  ) : null}
+	                  {bankForm.assetKind === 'wealth' ? (
+	                    <>
+	                    {bankForm.wealthAction === 'buy' ? (
+	                    <>
+	                    <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                      <PortfolioField label="银行名称">
+                        <input className={PORTFOLIO_INPUT_CLASS} placeholder="例如 招商银行" value={bankForm.bankName}
+                          onChange={(e) => setBankForm((prev) => ({ ...prev, bankName: e.target.value }))} required />
+                      </PortfolioField>
+                      <PortfolioField label="产品公布代码">
+                        <input className={PORTFOLIO_INPUT_CLASS} placeholder="可选" value={bankForm.registrationCode}
+                          onChange={(e) => setBankForm((prev) => ({ ...prev, registrationCode: e.target.value.toUpperCase() }))} />
+                      </PortfolioField>
+	                      <PortfolioField label="投资性质">
+	                        <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.investmentNature}
+	                          onChange={(e) => setBankForm((prev) => ({ ...prev, investmentNature: e.target.value as '' | PortfolioBankInvestmentNature }))}>
+                          <option value="">选填</option>
+                          <option value="fixed_income">固定收益类</option>
+                          <option value="mixed">混合类</option>
+                          <option value="equity">权益类</option>
+                          <option value="commodity_derivative">商品及金融衍生品类</option>
+                          <option value="cash_management">现金管理类</option>
+                          <option value="other">其他</option>
+                        </select>
+                      </PortfolioField>
+                      <PortfolioField label="风险等级">
+                        <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.riskLevel}
+                          onChange={(e) => setBankForm((prev) => ({ ...prev, riskLevel: e.target.value as '' | PortfolioBankRiskLevel }))}>
+                          <option value="">选填</option>
+                          <option value="R1">R1</option>
+                          <option value="R2">R2</option>
+                          <option value="R3">R3</option>
+                          <option value="R4">R4</option>
+                          <option value="R5">R5</option>
+                        </select>
+                      </PortfolioField>
+                    </div>
+                    <div className={PORTFOLIO_FORM_GRID_CLASS}>
+	                      <PortfolioField label="收益方式">
+	                        <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.incomeMode}
+	                          onChange={(e) => setBankForm((prev) => ({ ...prev, incomeMode: e.target.value as PortfolioBankIncomeMode }))}>
+	                          <option value="reinvest">滚存</option>
+	                          <option value="dividend">派息</option>
+	                        </select>
+	                      </PortfolioField>
+                      {bankWealthMatchedProduct && bankForm.nav ? (
+                        <>
+                          <PortfolioField label="单位净值">
+                            <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" value={bankForm.nav}
+                              onChange={(e) => setBankForm((prev) => {
+                                const nav = Number(e.target.value);
+                                const amount = Number(prev.amount);
+                                return {
+                                  ...prev,
+                                  nav: e.target.value,
+                                  quantity: nav > 0 && amount > 0 ? String(amount / nav) : '',
+                                };
+                              })} />
+                          </PortfolioField>
+                          <PortfolioField label="确定份额">
+                            <input className={PORTFOLIO_INPUT_CLASS} value={bankForm.quantity} readOnly />
+                          </PortfolioField>
+                        </>
+                      ) : null}
+	                      <div className="flex items-end">
+	                        <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId}>
+	                          {getBankSubmitLabel(bankForm.assetKind, 'in', bankForm.wealthAction)}
+	                        </button>
+	                      </div>
+	                    </div>
+                    </>
                     ) : null}
                     </>
                   ) : null}
                   </>
                 ) : null}
-                <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>{getBankSubmitLabel(bankForm.assetKind, bankForm.assetKind === 'wealth' && bankForm.wealthAction === 'redeem' ? 'out' : bankForm.direction, bankForm.wealthAction)}</button>
+                {bankForm.assetKind !== 'demand' && bankForm.assetKind !== 'deposit' && bankForm.assetKind !== 'wealth' ? (
+                  <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                    <div>
+                      <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId}>
+                        {getBankSubmitLabel(bankForm.assetKind, bankForm.assetKind === 'wealth' && bankForm.wealthAction === 'redeem' ? 'out' : bankForm.direction, bankForm.wealthAction)}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </form>
               ) : null}
 
               {selectedEntryPanel === 'bankNav' && isBankAccount ? (
-              <form className="space-y-2" onSubmit={handleBankNavSubmit}>
-                <select className={PORTFOLIO_SELECT_CLASS} value={bankNavForm.selectedProduct}
-                  onChange={(e) => setBankNavForm((prev) => ({ ...prev, selectedProduct: e.target.value }))} required>
-                  <option value="">选择要更新价值的理财产品</option>
-                  {bankWealthOptions.map((item) => (
-                    <option key={item.optionValue} value={item.optionValue}>{formatBankPositionOption(item)}</option>
-                  ))}
-                </select>
-                <div className="grid grid-cols-2 gap-2">
-                  <input className={PORTFOLIO_INPUT_CLASS} type="date" value={bankNavForm.priceDate}
-                    onChange={(e) => setBankNavForm((prev) => ({ ...prev, priceDate: e.target.value }))} required />
-                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder="当前总价值" value={bankNavForm.price}
-                    onChange={(e) => setBankNavForm((prev) => ({ ...prev, price: e.target.value }))} required />
+              <form className={PORTFOLIO_ENTRY_FORM_CLASS} onSubmit={handleBankNavSubmit}>
+                <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                  <PortfolioField label="理财产品" className={PORTFOLIO_FORM_SPAN_2_CLASS}>
+                    <select className={PORTFOLIO_SELECT_CLASS} value={bankNavForm.selectedProduct}
+                      onChange={(e) => setBankNavForm((prev) => ({ ...prev, selectedProduct: e.target.value }))} required>
+                      <option value="">选择要更新价值的理财产品</option>
+                      {bankWealthOptions.map((item) => (
+                        <option key={item.optionValue} value={item.optionValue}>{formatBankPositionOption(item)}</option>
+                      ))}
+                    </select>
+                  </PortfolioField>
+                  <PortfolioField label="估值日期">
+                    <input className={PORTFOLIO_INPUT_CLASS} type="date" value={bankNavForm.priceDate}
+                      onChange={(e) => setBankNavForm((prev) => ({ ...prev, priceDate: e.target.value }))} required />
+                  </PortfolioField>
+                  <PortfolioField label="当前总价值">
+                    <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder="当前总价值" value={bankNavForm.price}
+                      onChange={(e) => setBankNavForm((prev) => ({ ...prev, price: e.target.value }))} required />
+                  </PortfolioField>
+                  <div className="flex items-end">
+                    <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId}>保存价值</button>
+                  </div>
                 </div>
-                <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>保存价值</button>
               </form>
               ) : null}
 
               {selectedEntryPanel === 'advisory' && isAdvisoryAccount ? (
-              <form className="space-y-2" onSubmit={handleAdvisoryLedgerSubmit}>
-                <div className="grid grid-cols-2 gap-2">
-                  <input className={PORTFOLIO_INPUT_CLASS} type="date" value={advisoryForm.eventDate}
-                    onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
-                  <select className={PORTFOLIO_SELECT_CLASS} value={advisoryForm.productType}
-                    onChange={(e) => setAdvisoryForm((prev) => ({
-                      ...prev,
-                      selectedProduct: '',
-                      productType: e.target.value as PortfolioAdvisoryProductType,
-                      eventType: e.target.value === 'dca_plan' ? 'initial_buy' : 'buy',
-                      productCode: '',
-                      productName: '',
-                      amount: '',
-                    }))}>
-                    <option value="advisory_combo">投顾组合</option>
-                    <option value="dca_plan">定投计划</option>
-                  </select>
-                </div>
-                <select className={PORTFOLIO_SELECT_CLASS} value={advisoryForm.eventType}
-                  onChange={(e) => setAdvisoryForm((prev) => ({
-                    ...prev,
-                    selectedProduct: '',
-                    eventType: e.target.value as AdvisoryFormEventType,
-                    amount: '',
-                  }))}>
-                  {advisoryForm.productType === 'advisory_combo' ? (
-                    <>
-                      <option value="buy">买入</option>
-                      <option value="append_buy">追加买入</option>
-                      <option value="redeem">赎回</option>
-                    </>
-                  ) : (
-                    <>
-                      <option value="initial_buy">首次买入</option>
-                      <option value="follow_buy">跟投</option>
-                      <option value="redeem">赎回/止盈</option>
-                    </>
-                  )}
-                </select>
-                {advisoryEventRequiresExistingProduct ? (
-                  <>
-                  <select className={PORTFOLIO_SELECT_CLASS} value={advisoryForm.selectedProduct}
-                    onChange={(e) => {
-                      const option = advisoryFormProductOptions.find((item) => item.optionValue === e.target.value);
-                      setAdvisoryForm((prev) => ({
+              <form className={PORTFOLIO_ENTRY_FORM_CLASS} onSubmit={handleAdvisoryLedgerSubmit}>
+                <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                  <PortfolioField label="流水日期">
+                    <input className={PORTFOLIO_INPUT_CLASS} type="date" value={advisoryForm.eventDate}
+                      onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
+                  </PortfolioField>
+                  <PortfolioField label="产品类型">
+                    <select className={PORTFOLIO_SELECT_CLASS} value={advisoryForm.productType}
+                      onChange={(e) => setAdvisoryForm((prev) => ({
                         ...prev,
-                        selectedProduct: option?.optionValue || '',
-                        productCode: option?.productCode || '',
-                        productName: option?.productName || option?.displayName || '',
-                        productType: option?.productType === 'dca_plan' ? 'dca_plan' : 'advisory_combo',
-                        platform: option?.platform || prev.platform,
-                        riskLevel: option?.riskLevel || prev.riskLevel,
-                        investmentStyle: option?.investmentStyle || prev.investmentStyle,
-                      }));
-                    }} required>
-                    <option value="">{advisoryProductSelectPlaceholder}</option>
-                    {advisoryFormProductOptions.map((item) => (
-                      <option key={item.optionValue} value={item.optionValue}>{formatAdvisoryPositionOption(item)}</option>
-                    ))}
-                  </select>
-                  <div className="text-xs text-secondary">
-                    当前价值：{selectedAdvisoryOption ? formatMoney(selectedAdvisoryOption.marketValueBase, selectedAdvisoryOption.valuationCurrency) : '--'}
+                        selectedProduct: '',
+                        productType: e.target.value as PortfolioAdvisoryProductType,
+                        eventType: e.target.value === 'dca_plan' ? 'initial_buy' : 'buy',
+                        productCode: '',
+                        productName: '',
+                        amount: '',
+                      }))}>
+                      <option value="advisory_combo">投顾组合</option>
+                      <option value="dca_plan">定投计划</option>
+                    </select>
+                  </PortfolioField>
+                  <PortfolioField label="操作类型">
+                    <select className={PORTFOLIO_SELECT_CLASS} value={advisoryForm.eventType}
+                      onChange={(e) => setAdvisoryForm((prev) => ({
+                        ...prev,
+                        selectedProduct: '',
+                        eventType: e.target.value as AdvisoryFormEventType,
+                        amount: '',
+                      }))}>
+                      {advisoryForm.productType === 'advisory_combo' ? (
+                        <>
+                          <option value="buy">买入</option>
+                          <option value="append_buy">追加买入</option>
+                          <option value="redeem">赎回</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="initial_buy">首次买入</option>
+                          <option value="follow_buy">跟投</option>
+                          <option value="redeem">赎回/止盈</option>
+                        </>
+                      )}
+                    </select>
+                  </PortfolioField>
+                  <PortfolioField label={advisoryForm.eventType === 'redeem' ? '到账金额' : '投入金额'}>
+                    <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01"
+                      placeholder={advisoryForm.eventType === 'redeem' ? '赎回/止盈到账金额' : '投入金额'}
+                      value={advisoryForm.amount}
+                      onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, amount: e.target.value }))} required />
+                  </PortfolioField>
+                </div>
+                {advisoryEventRequiresExistingProduct ? (
+                  <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                    <PortfolioField label="投顾产品" className={PORTFOLIO_FORM_SPAN_2_CLASS}>
+                      <select className={PORTFOLIO_SELECT_CLASS} value={advisoryForm.selectedProduct}
+                        onChange={(e) => {
+                          const option = advisoryFormProductOptions.find((item) => item.optionValue === e.target.value);
+                          setAdvisoryForm((prev) => ({
+                            ...prev,
+                            selectedProduct: option?.optionValue || '',
+                            productCode: option?.productCode || '',
+                            productName: option?.productName || option?.displayName || '',
+                            productType: option?.productType === 'dca_plan' ? 'dca_plan' : 'advisory_combo',
+                            platform: option?.platform || prev.platform,
+                            riskLevel: option?.riskLevel || prev.riskLevel,
+                            investmentStyle: option?.investmentStyle || prev.investmentStyle,
+                          }));
+                        }} required>
+                        <option value="">{advisoryProductSelectPlaceholder}</option>
+                        {advisoryFormProductOptions.map((item) => (
+                          <option key={item.optionValue} value={item.optionValue}>{formatAdvisoryPositionOption(item)}</option>
+                        ))}
+                      </select>
+                    </PortfolioField>
+                    <div className="lg:col-span-2">
+                      <span className={PORTFOLIO_FIELD_LABEL_CLASS}>当前价值</span>
+                      <div className="flex h-9 items-center rounded-lg border border-white/10 bg-white/[0.02] px-3 text-xs text-secondary">
+                        {selectedAdvisoryOption ? formatMoney(selectedAdvisoryOption.marketValueBase, selectedAdvisoryOption.valuationCurrency) : '--'}
+                      </div>
+                    </div>
                   </div>
-                  </>
                 ) : (
                   <>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input className={PORTFOLIO_INPUT_CLASS} placeholder="平台（例如 陆基金/陆金所）" value={advisoryForm.platform}
-                      onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, platform: e.target.value }))} required />
-                    <input className={PORTFOLIO_INPUT_CLASS} placeholder="产品代码/外部 ID（可选）" value={advisoryForm.productCode}
-                      onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, productCode: e.target.value.toUpperCase() }))} />
+                  <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                    <PortfolioField label="平台">
+                      <input className={PORTFOLIO_INPUT_CLASS} placeholder="例如 陆基金/陆金所" value={advisoryForm.platform}
+                        onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, platform: e.target.value }))} required />
+                    </PortfolioField>
+                    <PortfolioField label="产品代码">
+                      <input className={PORTFOLIO_INPUT_CLASS} placeholder="可选" value={advisoryForm.productCode}
+                        onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, productCode: e.target.value.toUpperCase() }))} />
+                    </PortfolioField>
+                    <PortfolioField label="产品名称" className={PORTFOLIO_FORM_SPAN_2_CLASS}>
+                      <input className={PORTFOLIO_INPUT_CLASS} placeholder="投顾产品名称" value={advisoryForm.productName}
+                        onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, productName: e.target.value }))} required />
+                    </PortfolioField>
                   </div>
-                  <input className={PORTFOLIO_INPUT_CLASS} placeholder="投顾产品名称" value={advisoryForm.productName}
-                    onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, productName: e.target.value }))} required />
                   </>
                 )}
-                <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01"
-                  placeholder={advisoryForm.eventType === 'redeem' ? '赎回/止盈到账金额' : '投入金额'}
-                  value={advisoryForm.amount}
-                  onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, amount: e.target.value }))} required />
                 {!advisoryEventRequiresExistingProduct ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    <input className={PORTFOLIO_INPUT_CLASS} placeholder="风险等级（可选）" value={advisoryForm.riskLevel}
-                      onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, riskLevel: e.target.value }))} />
-                    <input className={PORTFOLIO_INPUT_CLASS} placeholder="投资风格（可选）" value={advisoryForm.investmentStyle}
-                      onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, investmentStyle: e.target.value }))} />
+                  <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                    <PortfolioField label="风险等级">
+                      <input className={PORTFOLIO_INPUT_CLASS} placeholder="可选" value={advisoryForm.riskLevel}
+                        onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, riskLevel: e.target.value }))} />
+                    </PortfolioField>
+                    <PortfolioField label="投资风格">
+                      <input className={PORTFOLIO_INPUT_CLASS} placeholder="可选" value={advisoryForm.investmentStyle}
+                        onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, investmentStyle: e.target.value }))} />
+                    </PortfolioField>
                   </div>
                 ) : null}
-                <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>
-                  {advisoryForm.eventType === 'redeem' ? '提交投顾赎回' : '提交投顾投入'}
-                </button>
+                <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                  <div>
+                    <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId}>
+                      {advisoryForm.eventType === 'redeem' ? '提交投顾赎回' : '提交投顾投入'}
+                    </button>
+                  </div>
+                </div>
               </form>
               ) : null}
 
               {selectedEntryPanel === 'advisoryNav' && isAdvisoryAccount ? (
-              <form className="space-y-2" onSubmit={handleAdvisoryNavSubmit}>
-                <select className={PORTFOLIO_SELECT_CLASS} value={advisoryNavForm.selectedProduct}
-                  onChange={(e) => setAdvisoryNavForm((prev) => ({ ...prev, selectedProduct: e.target.value }))} required>
-                  <option value="">选择要更新价值的投顾产品</option>
-                  {advisoryOptions.map((item) => (
-                    <option key={item.optionValue} value={item.optionValue}>{formatAdvisoryPositionOption(item)}</option>
-                  ))}
-                </select>
-                <div className="grid grid-cols-2 gap-2">
-                  <input className={PORTFOLIO_INPUT_CLASS} type="date" value={advisoryNavForm.priceDate}
-                    onChange={(e) => setAdvisoryNavForm((prev) => ({ ...prev, priceDate: e.target.value }))} required />
-                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder="当前总价值" value={advisoryNavForm.price}
-                    onChange={(e) => setAdvisoryNavForm((prev) => ({ ...prev, price: e.target.value }))} required />
+              <form className={PORTFOLIO_ENTRY_FORM_CLASS} onSubmit={handleAdvisoryNavSubmit}>
+                <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                  <PortfolioField label="投顾产品" className={PORTFOLIO_FORM_SPAN_2_CLASS}>
+                    <select className={PORTFOLIO_SELECT_CLASS} value={advisoryNavForm.selectedProduct}
+                      onChange={(e) => setAdvisoryNavForm((prev) => ({ ...prev, selectedProduct: e.target.value }))} required>
+                      <option value="">选择要更新价值的投顾产品</option>
+                      {advisoryOptions.map((item) => (
+                        <option key={item.optionValue} value={item.optionValue}>{formatAdvisoryPositionOption(item)}</option>
+                      ))}
+                    </select>
+                  </PortfolioField>
+                  <PortfolioField label="估值日期">
+                    <input className={PORTFOLIO_INPUT_CLASS} type="date" value={advisoryNavForm.priceDate}
+                      onChange={(e) => setAdvisoryNavForm((prev) => ({ ...prev, priceDate: e.target.value }))} required />
+                  </PortfolioField>
+                  <PortfolioField label="当前总价值">
+                    <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder="当前总价值" value={advisoryNavForm.price}
+                      onChange={(e) => setAdvisoryNavForm((prev) => ({ ...prev, price: e.target.value }))} required />
+                  </PortfolioField>
+                  <div className="flex items-end">
+                    <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId}>保存投顾价值</button>
+                  </div>
                 </div>
-                <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>保存投顾价值</button>
               </form>
               ) : null}
 
               {selectedEntryPanel === 'insurancePolicy' && isInsuranceAccount ? (
-              <form className="space-y-2" onSubmit={handleInsurancePolicySubmit}>
-                <input className={PORTFOLIO_INPUT_CLASS} placeholder="保单名称（必填）" value={insurancePolicyForm.policyName}
-                  onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, policyName: e.target.value }))} required />
-                <div className="grid grid-cols-2 gap-2">
-                  <input className={PORTFOLIO_INPUT_CLASS} placeholder="保险公司（选填）" value={insurancePolicyForm.insurer}
-                    onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, insurer: e.target.value }))} />
-                  <input className={PORTFOLIO_INPUT_CLASS} placeholder="保单号（选填）" value={insurancePolicyForm.policyNo}
-                    onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, policyNo: e.target.value }))} />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <select className={PORTFOLIO_SELECT_CLASS} value={insurancePolicyForm.insuranceKind}
-                    onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, insuranceKind: e.target.value as PortfolioInsuranceKind }))}>
-                    <option value="annuity">年金险</option>
-                    <option value="whole_life">终身寿险</option>
-                    <option value="endowment">两全保险</option>
-                    <option value="universal">万能险</option>
-                    <option value="unit_linked">投连险</option>
-                    <option value="other">其他保险</option>
-                  </select>
-                  <select className={PORTFOLIO_SELECT_CLASS} value={insurancePolicyForm.designType}
-                    onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, designType: e.target.value as PortfolioInsuranceDesignType }))}>
-                    <option value="ordinary">普通型</option>
-                    <option value="participating">分红型</option>
-                    <option value="universal">万能型</option>
-                    <option value="unit_linked">投资连结型</option>
-                    <option value="other">其他</option>
-                  </select>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <select className={PORTFOLIO_SELECT_CLASS} value={insurancePolicyForm.paymentMode}
-                    onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, paymentMode: e.target.value as PortfolioInsurancePaymentMode }))}>
-                    <option value="single">趸交</option>
-                    <option value="annual">年交</option>
-                    <option value="semiannual">半年交</option>
-                    <option value="quarterly">季交</option>
-                    <option value="monthly">月交</option>
-                    <option value="irregular">不定期</option>
-                  </select>
-                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder="每期保费（选填）" value={insurancePolicyForm.premiumPerPeriod}
-                    onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, premiumPerPeriod: e.target.value }))} />
+              <form className={PORTFOLIO_ENTRY_FORM_CLASS} onSubmit={handleInsurancePolicySubmit}>
+                <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                  <PortfolioField label="保单名称" className={PORTFOLIO_FORM_SPAN_2_CLASS}>
+                    <input className={PORTFOLIO_INPUT_CLASS} placeholder="必填" value={insurancePolicyForm.policyName}
+                      onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, policyName: e.target.value }))} required />
+                  </PortfolioField>
+                  <PortfolioField label="保险公司">
+                    <input className={PORTFOLIO_INPUT_CLASS} placeholder="选填" value={insurancePolicyForm.insurer}
+                      onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, insurer: e.target.value }))} />
+                  </PortfolioField>
+                  <PortfolioField label="保单号">
+                    <input className={PORTFOLIO_INPUT_CLASS} placeholder="选填" value={insurancePolicyForm.policyNo}
+                      onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, policyNo: e.target.value }))} />
+                  </PortfolioField>
+                  <PortfolioField label="险种">
+                    <select className={PORTFOLIO_SELECT_CLASS} value={insurancePolicyForm.insuranceKind}
+                      onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, insuranceKind: e.target.value as PortfolioInsuranceKind }))}>
+                      <option value="annuity">年金险</option>
+                      <option value="whole_life">终身寿险</option>
+                      <option value="endowment">两全保险</option>
+                      <option value="universal">万能险</option>
+                      <option value="unit_linked">投连险</option>
+                      <option value="other">其他保险</option>
+                    </select>
+                  </PortfolioField>
+                  <PortfolioField label="设计类型">
+                    <select className={PORTFOLIO_SELECT_CLASS} value={insurancePolicyForm.designType}
+                      onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, designType: e.target.value as PortfolioInsuranceDesignType }))}>
+                      <option value="ordinary">普通型</option>
+                      <option value="participating">分红型</option>
+                      <option value="universal">万能型</option>
+                      <option value="unit_linked">投资连结型</option>
+                      <option value="other">其他</option>
+                    </select>
+                  </PortfolioField>
+                  <PortfolioField label="缴费方式">
+                    <select className={PORTFOLIO_SELECT_CLASS} value={insurancePolicyForm.paymentMode}
+                      onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, paymentMode: e.target.value as PortfolioInsurancePaymentMode }))}>
+                      <option value="single">趸交</option>
+                      <option value="annual">年交</option>
+                      <option value="semiannual">半年交</option>
+                      <option value="quarterly">季交</option>
+                      <option value="monthly">月交</option>
+                      <option value="irregular">不定期</option>
+                    </select>
+                  </PortfolioField>
+                  <PortfolioField label="每期保费">
+                    <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder="选填" value={insurancePolicyForm.premiumPerPeriod}
+                      onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, premiumPerPeriod: e.target.value }))} />
+                  </PortfolioField>
                 </div>
                 {insurancePolicyForm.paymentMode !== 'irregular' ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    <input className={PORTFOLIO_INPUT_CLASS} type="date" value={insurancePolicyForm.firstPaymentDate}
-                      onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, firstPaymentDate: e.target.value }))} />
-                    <input className={PORTFOLIO_INPUT_CLASS} type="number" min="1" step="1" placeholder="应交期数（选填）" value={insurancePolicyForm.totalPeriods}
-                      onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, totalPeriods: e.target.value }))} />
+                  <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                    <PortfolioField label="首次缴费日">
+                      <input className={PORTFOLIO_INPUT_CLASS} type="date" value={insurancePolicyForm.firstPaymentDate}
+                        onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, firstPaymentDate: e.target.value }))} />
+                    </PortfolioField>
+                    <PortfolioField label="应交期数">
+                      <input className={PORTFOLIO_INPUT_CLASS} type="number" min="1" step="1" placeholder="选填" value={insurancePolicyForm.totalPeriods}
+                        onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, totalPeriods: e.target.value }))} />
+                    </PortfolioField>
+                    <div className="flex items-end">
+                      <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId}>保存保单</button>
+                    </div>
                   </div>
-                ) : null}
-                <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>保存保单</button>
+                ) : (
+                  <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                    <div>
+                      <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId}>保存保单</button>
+                    </div>
+                  </div>
+                )}
               </form>
               ) : null}
 
               {selectedEntryPanel === 'insuranceLedger' && isInsuranceAccount ? (
-              <form className="space-y-2" onSubmit={handleInsuranceLedgerSubmit}>
-                <select className={PORTFOLIO_SELECT_CLASS} value={insuranceLedgerForm.policyId}
-                  onChange={(e) => {
-                    const policy = insurancePolicies.find((item) => String(item.id) === e.target.value);
-                    const nextEventType = getDefaultInsuranceEventType(policy);
-                    setInsuranceLedgerForm((prev) => ({
-                      ...prev,
-                      policyId: e.target.value,
-                      eventType: nextEventType,
-                      amount: prev.amount || (policy?.premiumPerPeriod ? String(policy.premiumPerPeriod) : ''),
-                    }));
-                  }} required>
-                  <option value="">选择保单</option>
-                  {insurancePolicies.map((item) => (
-                    <option key={item.id} value={item.id}>{item.policyName}{item.insurer ? ` · ${item.insurer}` : ''}</option>
-                  ))}
-                </select>
-                <div className="grid grid-cols-2 gap-2">
-                  <input className={PORTFOLIO_INPUT_CLASS} type="date" value={insuranceLedgerForm.eventDate}
-                    onChange={(e) => setInsuranceLedgerForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
-                  <select className={PORTFOLIO_SELECT_CLASS} value={insuranceLedgerForm.eventType}
-                    onChange={(e) => setInsuranceLedgerForm((prev) => ({ ...prev, eventType: e.target.value as PortfolioInsuranceEventType }))} disabled={!selectedInsurancePolicy}>
-                    {insuranceLedgerEventOptions.length === 0 ? (
-                      <option value={insuranceLedgerForm.eventType}>{selectedInsurancePolicy ? '保单已终止' : '先选择保单'}</option>
-                    ) : insuranceLedgerEventOptions.map((item) => (
-                      <option key={item.value} value={item.value}>{item.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder={insuranceLedgerForm.eventType === 'value_update' ? '当前现金价值/账户价值' : '金额'} value={insuranceLedgerForm.amount}
-                    onChange={(e) => setInsuranceLedgerForm((prev) => ({ ...prev, amount: e.target.value }))} required />
+              <form className={PORTFOLIO_ENTRY_FORM_CLASS} onSubmit={handleInsuranceLedgerSubmit}>
+                <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                  <PortfolioField label="保单" className={PORTFOLIO_FORM_SPAN_2_CLASS}>
+                    <select className={PORTFOLIO_SELECT_CLASS} value={insuranceLedgerForm.policyId}
+                      onChange={(e) => {
+                        const policy = insurancePolicies.find((item) => String(item.id) === e.target.value);
+                        const nextEventType = getDefaultInsuranceEventType(policy);
+                        setInsuranceLedgerForm((prev) => ({
+                          ...prev,
+                          policyId: e.target.value,
+                          eventType: nextEventType,
+                          amount: prev.amount || (policy?.premiumPerPeriod ? String(policy.premiumPerPeriod) : ''),
+                        }));
+                      }} required>
+                      <option value="">选择保单</option>
+                      {insurancePolicies.map((item) => (
+                        <option key={item.id} value={item.id}>{item.policyName}{item.insurer ? ` · ${item.insurer}` : ''}</option>
+                      ))}
+                    </select>
+                  </PortfolioField>
+                  <PortfolioField label="流水日期">
+                    <input className={PORTFOLIO_INPUT_CLASS} type="date" value={insuranceLedgerForm.eventDate}
+                      onChange={(e) => setInsuranceLedgerForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
+                  </PortfolioField>
+                  <PortfolioField label="事件类型">
+                    <select className={PORTFOLIO_SELECT_CLASS} value={insuranceLedgerForm.eventType}
+                      onChange={(e) => setInsuranceLedgerForm((prev) => ({ ...prev, eventType: e.target.value as PortfolioInsuranceEventType }))} disabled={!selectedInsurancePolicy}>
+                      {insuranceLedgerEventOptions.length === 0 ? (
+                        <option value={insuranceLedgerForm.eventType}>{selectedInsurancePolicy ? '保单已终止' : '先选择保单'}</option>
+                      ) : insuranceLedgerEventOptions.map((item) => (
+                        <option key={item.value} value={item.value}>{item.label}</option>
+                      ))}
+                    </select>
+                  </PortfolioField>
+                  <PortfolioField label={insuranceLedgerForm.eventType === 'value_update' ? '当前价值' : '金额'}>
+                    <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder={insuranceLedgerForm.eventType === 'value_update' ? '现金价值/账户价值' : '金额'} value={insuranceLedgerForm.amount}
+                      onChange={(e) => setInsuranceLedgerForm((prev) => ({ ...prev, amount: e.target.value }))} required />
+                  </PortfolioField>
                   {insuranceLedgerForm.eventType === 'premium' ? (
-                    <input className={PORTFOLIO_INPUT_CLASS} type="number" min="1" step="1" placeholder="期数（选填）" value={insuranceLedgerForm.periodNo}
-                      onChange={(e) => setInsuranceLedgerForm((prev) => ({ ...prev, periodNo: e.target.value }))} />
+                    <PortfolioField label="期数">
+                      <input className={PORTFOLIO_INPUT_CLASS} type="number" min="1" step="1" placeholder="选填" value={insuranceLedgerForm.periodNo}
+                        onChange={(e) => setInsuranceLedgerForm((prev) => ({ ...prev, periodNo: e.target.value }))} />
+                    </PortfolioField>
                   ) : (
-                    <input className={PORTFOLIO_INPUT_CLASS} placeholder="系统自动归类为返还/价值" disabled />
+                    <PortfolioField label="归类">
+                      <input className={PORTFOLIO_INPUT_CLASS} placeholder="系统自动归类为返还/价值" disabled />
+                    </PortfolioField>
                   )}
+                  <div className="flex items-end">
+                    <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId || insurancePolicies.length === 0 || insuranceLedgerEventOptions.length === 0}>
+                      {insuranceLedgerForm.eventType === 'value_update' ? '保存保单价值' : '提交保险流水'}
+                    </button>
+                  </div>
                 </div>
-                <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId || insurancePolicies.length === 0 || insuranceLedgerEventOptions.length === 0}>
-                  {insuranceLedgerForm.eventType === 'value_update' ? '保存保单价值' : '提交保险流水'}
-                </button>
               </form>
               ) : null}
             </div>
@@ -2916,7 +3470,7 @@ const PortfolioPage: React.FC = () => {
         {isStockAccount ? (
         <Card padding="md">
           <h3 className="text-sm font-semibold text-foreground mb-3">券商 CSV 导入</h3>
-          <div className="space-y-2">
+          <div className={PORTFOLIO_FORM_CLASS}>
             {brokerLoadWarning ? (
               <InlineAlert
                 variant="warning"
@@ -2924,7 +3478,7 @@ const PortfolioPage: React.FC = () => {
                 message={brokerLoadWarning}
               />
             ) : null}
-            <div className="grid grid-cols-2 gap-2">
+            <div className={PORTFOLIO_FORM_GRID_2_CLASS}>
               <select className={PORTFOLIO_SELECT_CLASS} value={selectedBroker} onChange={(e) => setSelectedBroker(e.target.value)}>
                 {brokers.length > 0 ? (
                   brokers.map((item) => <option key={item.broker} value={item.broker}>{formatBrokerLabel(item.broker, item.displayName)}</option>)
@@ -3146,7 +3700,7 @@ const PortfolioPage: React.FC = () => {
               {eventType === 'bank' && bankEvents.map((item) => (
                 <div key={`b-${item.id}`} className="flex items-start justify-between gap-3 border-b border-white/5 py-2 text-xs text-secondary">
                   <div className="min-w-0">
-                    {item.eventDate} {formatBankAssetKind(item.assetKind)} {formatCashDirectionLabel(item.direction)} {item.amount} {item.currency} · {item.bankName}{item.productName ? ` · ${item.productName}` : ''}{item.registrationCode ? ` · ${item.registrationCode}` : ''}
+                    {item.eventDate} {formatBankAssetKind(item.assetKind)} {formatCashDirectionLabel(item.direction)} {item.amount} {item.currency} · {item.bankName}{item.productName ? ` · ${item.productName}` : ''}{item.productPublicCode ? ` · ${item.productPublicCode}` : ''}{item.registrationCode ? ` · ${item.registrationCode}` : ''}
                   </div>
                   {!writeBlocked ? (
                     <button
@@ -3262,6 +3816,91 @@ const PortfolioPage: React.FC = () => {
           }
         }}
       />
+      {bankWealthSearchLoading || bankWealthCandidateModalOpen ? (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-background/62 px-4 backdrop-blur-sm"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="bank-wealth-search-title"
+        >
+          <div className="w-full max-w-xl rounded-2xl border border-border/70 bg-card px-5 py-4 text-foreground shadow-soft-card-strong">
+            {bankWealthSearchLoading ? (
+              <div className="text-center">
+                <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary/25 border-t-primary" />
+                <h3 id="bank-wealth-search-title" className="mt-3 text-sm font-semibold text-foreground">
+                  正在查询银行理财
+                </h3>
+                <p className="mt-1 text-xs leading-5 text-secondary">
+                  正在通过问财匹配产品信息，请稍候。
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 id="bank-wealth-search-title" className="text-sm font-semibold text-foreground">
+                      选择银行理财产品
+                    </h3>
+                    <p className="mt-1 text-xs leading-5 text-secondary">
+                      确认后将填入产品信息，并继续查询交易日单位净值。
+                    </p>
+                  </div>
+                  {bankWealthNavLoading ? (
+                    <span className="shrink-0 text-xs text-secondary">净值查询中...</span>
+                  ) : null}
+                </div>
+                <div className="mt-4 max-h-[360px] space-y-2 overflow-y-auto pr-1">
+                  {bankWealthSearchResults.map((product, index) => {
+                    const candidateKey = getBankWealthCandidateKey(product, index);
+                    const selected = selectedBankWealthCandidateKey === candidateKey;
+                    return (
+                      <button
+                        key={candidateKey}
+                        type="button"
+                        className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                          selected
+                            ? 'border-primary bg-primary/8 text-foreground'
+                            : 'border-border/70 bg-muted/30 text-secondary hover:border-primary/50 hover:text-foreground'
+                        }`}
+                        onClick={() => setSelectedBankWealthCandidateKey(candidateKey)}
+                        disabled={bankWealthNavLoading}
+                      >
+                        <span className="block truncate text-sm font-medium">{product.productName}</span>
+                        <span className="mt-1 block text-xs leading-5">
+                          {[product.issuerName, product.productPublicCode, product.riskLevel, product.investmentType]
+                            .filter(Boolean)
+                            .join(' · ') || '暂无更多信息'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-4 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className="btn-secondary h-9 w-24 !px-3 !py-1.5 text-sm"
+                    onClick={() => {
+                      setBankWealthCandidateModalOpen(false);
+                      setSelectedBankWealthCandidateKey('');
+                    }}
+                    disabled={bankWealthNavLoading}
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary h-9 w-24 !px-3 !py-1.5 text-sm"
+                    onClick={() => void handleConfirmBankWealthCandidate()}
+                    disabled={bankWealthNavLoading || !selectedBankWealthCandidateKey}
+                  >
+                    {bankWealthNavLoading ? '查询中...' : '确定'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
       <Drawer
         isOpen={portfolioAnalysisDrawerOpen}
         onClose={() => setPortfolioAnalysisDrawerOpen(false)}

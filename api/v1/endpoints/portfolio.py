@@ -21,6 +21,11 @@ from api.v1.schemas.portfolio import (
     PortfolioAnalysisResponse,
     PortfolioBankLedgerCreateRequest,
     PortfolioBankLedgerListResponse,
+    PortfolioBankWealthNavRequest,
+    PortfolioBankWealthNavResponse,
+    PortfolioBankWealthProductItem,
+    PortfolioBankWealthProductSearchRequest,
+    PortfolioBankWealthProductSearchResponse,
     PortfolioCashLedgerListResponse,
     PortfolioCashLedgerCreateRequest,
     PortfolioCorporateActionListResponse,
@@ -45,6 +50,7 @@ from api.v1.schemas.portfolio import (
     PortfolioTradeListResponse,
     PortfolioTradeCreateRequest,
 )
+from src.services.iwencai_wealth_client import IwencaiWealthClient, IwencaiWealthError
 from src.services.portfolio_analysis_service import PortfolioAnalysisError, PortfolioAnalysisService
 from src.services.portfolio_import_service import PortfolioImportService
 from src.services.portfolio_risk_service import PortfolioRiskService
@@ -347,9 +353,14 @@ def create_bank_ledger(request: PortfolioBankLedgerCreateRequest) -> PortfolioEv
             currency=request.currency,
             bank_name=request.bank_name,
             product_name=request.product_name,
+            product_code=request.product_code,
+            product_public_code=request.product_public_code,
+            issuer_name=request.issuer_name,
             registration_code=request.registration_code,
             linked_entry_id=request.linked_entry_id,
             quantity=request.quantity,
+            unit_nav=request.unit_nav,
+            nav_date=request.nav_date,
             start_date=request.start_date,
             maturity_date=request.maturity_date,
             annual_rate=request.annual_rate,
@@ -364,6 +375,69 @@ def create_bank_ledger(request: PortfolioBankLedgerCreateRequest) -> PortfolioEv
         raise _bad_request(exc)
     except Exception as exc:
         raise _internal_error("Create bank ledger event failed", exc)
+
+
+@router.post(
+    "/bank-wealth/search",
+    response_model=PortfolioBankWealthProductSearchResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Search bank wealth products via iWencai",
+)
+def search_bank_wealth_products(
+    request: PortfolioBankWealthProductSearchRequest,
+) -> PortfolioBankWealthProductSearchResponse:
+    try:
+        products = IwencaiWealthClient().search_products(request.keyword, limit=request.limit)
+        return PortfolioBankWealthProductSearchResponse(
+            products=[
+                PortfolioBankWealthProductItem(
+                    product_code=item.product_code,
+                    product_name=item.product_name,
+                    product_public_code=item.public_code,
+                    issuer_name=item.issuer_name,
+                    risk_level=item.risk_level,
+                    investment_type=item.investment_type,
+                    term_type=item.term_type,
+                    redeemable=item.redeemable,
+                    benchmark=item.benchmark,
+                    management_fee=item.management_fee,
+                    custody_fee=item.custody_fee,
+                    subscription_fee=item.subscription_fee,
+                )
+                for item in products
+            ]
+        )
+    except IwencaiWealthError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Search bank wealth products failed", exc)
+
+
+@router.post(
+    "/bank-wealth/nav",
+    response_model=PortfolioBankWealthNavResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Fetch bank wealth NAV via iWencai",
+)
+def get_bank_wealth_nav(request: PortfolioBankWealthNavRequest) -> PortfolioBankWealthNavResponse:
+    try:
+        client = IwencaiWealthClient()
+        nav = (
+            client.get_historical_nav(request.product_identifier, request.nav_date)
+            if request.nav_date
+            else client.get_latest_nav(request.product_identifier)
+        )
+        if nav is None:
+            return PortfolioBankWealthNavResponse(unit_nav=None, nav_date=None, change_pct=None)
+        return PortfolioBankWealthNavResponse(
+            unit_nav=nav.unit_nav,
+            nav_date=nav.nav_date.isoformat() if nav.nav_date else None,
+            change_pct=nav.change_pct,
+        )
+    except IwencaiWealthError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Fetch bank wealth NAV failed", exc)
 
 
 @router.get(

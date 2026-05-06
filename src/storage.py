@@ -676,9 +676,14 @@ class PortfolioBankLedger(Base):
     currency = Column(String(8), nullable=False, default='CNY')
     bank_name = Column(String(64), nullable=False)
     product_name = Column(String(128))
+    product_code = Column(String(64), index=True)
+    product_public_code = Column(String(64), index=True)
+    issuer_name = Column(String(64))
     registration_code = Column(String(64), index=True)
     linked_entry_id = Column(Integer, ForeignKey('portfolio_bank_ledger.id'), index=True)
     quantity = Column(Float)
+    unit_nav = Column(Float)
+    nav_date = Column(Date)
     start_date = Column(Date)
     maturity_date = Column(Date)
     annual_rate = Column(Float)
@@ -1006,8 +1011,13 @@ class DatabaseManager:
                 existing_columns = {column["name"] for column in inspector.get_columns("portfolio_bank_ledger")}
                 additions = {
                     "registration_code": "VARCHAR(64)",
+                    "product_code": "VARCHAR(64)",
+                    "product_public_code": "VARCHAR(64)",
+                    "issuer_name": "VARCHAR(64)",
                     "linked_entry_id": "INTEGER",
                     "quantity": "FLOAT",
+                    "unit_nav": "FLOAT",
+                    "nav_date": "DATE",
                     "start_date": "DATE",
                     "annual_rate": "FLOAT",
                     "investment_nature": "VARCHAR(32)",

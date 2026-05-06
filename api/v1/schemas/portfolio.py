@@ -116,9 +116,14 @@ class PortfolioBankLedgerCreateRequest(BaseModel):
     currency: Optional[str] = Field(None, min_length=3, max_length=8)
     bank_name: str = Field(..., min_length=1, max_length=64)
     product_name: Optional[str] = Field(None, max_length=128)
+    product_code: Optional[str] = Field(None, max_length=64)
+    product_public_code: Optional[str] = Field(None, max_length=64)
+    issuer_name: Optional[str] = Field(None, max_length=64)
     registration_code: Optional[str] = Field(None, max_length=64)
     linked_entry_id: Optional[int] = Field(None, gt=0)
     quantity: Optional[float] = Field(None, gt=0)
+    unit_nav: Optional[float] = Field(None, gt=0)
+    nav_date: Optional[date] = None
     start_date: Optional[date] = None
     maturity_date: Optional[date] = None
     annual_rate: Optional[float] = Field(None, ge=0)
@@ -144,9 +149,14 @@ class PortfolioBankLedgerListItem(BaseModel):
     currency: str
     bank_name: str
     product_name: Optional[str] = None
+    product_code: Optional[str] = None
+    product_public_code: Optional[str] = None
+    issuer_name: Optional[str] = None
     registration_code: Optional[str] = None
     linked_entry_id: Optional[int] = None
     quantity: Optional[float] = None
+    unit_nav: Optional[float] = None
+    nav_date: Optional[str] = None
     start_date: Optional[str] = None
     maturity_date: Optional[str] = None
     annual_rate: Optional[float] = None
@@ -161,6 +171,42 @@ class PortfolioBankLedgerListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class PortfolioBankWealthProductSearchRequest(BaseModel):
+    keyword: str = Field(..., min_length=1, max_length=128)
+    limit: int = Field(10, ge=1, le=20)
+
+
+class PortfolioBankWealthProductItem(BaseModel):
+    product_code: Optional[str] = None
+    product_name: str
+    product_public_code: Optional[str] = None
+    issuer_name: Optional[str] = None
+    risk_level: Optional[str] = None
+    investment_type: Optional[str] = None
+    term_type: Optional[str] = None
+    redeemable: Optional[str] = None
+    benchmark: Optional[str] = None
+    management_fee: Optional[str] = None
+    custody_fee: Optional[str] = None
+    subscription_fee: Optional[str] = None
+
+
+class PortfolioBankWealthProductSearchResponse(BaseModel):
+    products: List[PortfolioBankWealthProductItem] = Field(default_factory=list)
+
+
+class PortfolioBankWealthNavRequest(BaseModel):
+    product_identifier: str = Field(..., min_length=1, max_length=128)
+    nav_date: Optional[date] = None
+
+
+class PortfolioBankWealthNavResponse(BaseModel):
+    unit_nav: Optional[float] = None
+    nav_date: Optional[str] = None
+    change_pct: Optional[float] = None
+    source: str = "iwencai"
 
 
 class PortfolioAdvisoryLedgerCreateRequest(BaseModel):
@@ -403,6 +449,7 @@ class PortfolioPositionItem(BaseModel):
     invested_amount: Optional[float] = None
     redeemed_amount: Optional[float] = None
     value_amount: Optional[float] = None
+    wealth_units: Optional[float] = None
     policy_id: Optional[int] = None
     policy_name: Optional[str] = None
     insurer: Optional[str] = None

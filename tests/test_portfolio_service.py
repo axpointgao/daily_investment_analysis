@@ -20,7 +20,7 @@ from sqlalchemy import select
 
 from src.config import Config
 from src.repositories.portfolio_repo import PortfolioBusyError, PortfolioRepository
-from src.services.portfolio_service import _AvgState, PortfolioConflictError, PortfolioOversellError, PortfolioService
+from src.services.portfolio_service import _AvgState, _ResolvedPositionPrice, PortfolioConflictError, PortfolioOversellError, PortfolioService
 from src.storage import DatabaseManager, PortfolioDailySnapshot, PortfolioPosition, PortfolioPositionLot, PortfolioTrade
 
 
@@ -1300,6 +1300,165 @@ class PortfolioServiceTestCase(unittest.TestCase):
         self.assertAlmostEqual(wealth_after_redeem["market_value_base"], 70000.0, places=6)
         self.assertAlmostEqual(wealth_after_redeem["unrealized_pnl_base"], 1000.0, places=6)
         self.assertAlmostEqual(redeemed["accounts"][0]["total_cash"], -109000.0, places=6)
+
+    def test_bank_wealth_supports_unit_nav_quantity(self) -> None:
+        account = self.service.create_account(name="Bank", broker="BOC", market="bank", base_currency="CNY")
+        aid = account["id"]
+
+        wealth_buy = self.service.record_bank_ledger(
+            account_id=aid,
+            event_date=date(2026, 1, 3),
+            asset_kind="wealth",
+            direction="in",
+            amount=102560,
+            bank_name="中银理财",
+            currency="CNY",
+            product_name="中银理财-稳富全球配置7天持有期1号A",
+            product_code="YH0662195.YH",
+            product_public_code="CYQWFQQPZ7D1A",
+            issuer_name="中银理财",
+            unit_nav=1.0256,
+            nav_date=date(2026, 1, 3),
+        )
+
+        snapshot = self.service.get_portfolio_snapshot(
+            account_id=aid,
+            as_of=date(2026, 1, 3),
+            refresh_prices=False,
+        )
+        wealth = next(item for item in snapshot["accounts"][0]["positions"] if item.get("symbol") == f"BANK:W:{wealth_buy['id']}")
+        self.assertEqual(wealth["price_source"], "bank_wealth_nav")
+        self.assertEqual(wealth["price_provider"], "iwencai")
+        self.assertEqual(wealth["product_code"], "YH0662195.YH")
+        self.assertEqual(wealth["product_public_code"], "CYQWFQQPZ7D1A")
+        self.assertAlmostEqual(wealth["quantity"], 100000.0, places=6)
+        self.assertAlmostEqual(wealth["last_price"], 1.0256, places=6)
+        self.assertAlmostEqual(wealth["market_value_base"], 102560.0, places=6)
+
+        self.service.record_bank_ledger(
+            account_id=aid,
+            event_date=date(2026, 1, 4),
+            asset_kind="wealth",
+            direction="out",
+            amount=103000,
+            bank_name="中银理财",
+            currency="CNY",
+            product_name="中银理财-稳富全球配置7天持有期1号A",
+            linked_entry_id=wealth_buy["id"],
+            unit_nav=1.03,
+            nav_date=date(2026, 1, 4),
+        )
+        redeemed = self.service.get_portfolio_snapshot(
+            account_id=aid,
+            as_of=date(2026, 1, 4),
+            refresh_prices=False,
+        )
+        self.assertEqual(redeemed["accounts"][0]["positions"], [])
+        self.assertAlmostEqual(redeemed["accounts"][0]["total_cash"], 440.0, places=6)
+
+    def test_bank_wealth_value_update_is_overridden_only_by_newer_nav(self) -> None:
+        account = self.service.create_account(name="Bank", broker="BOC", market="bank", base_currency="CNY")
+        aid = account["id"]
+        wealth_buy = self.service.record_bank_ledger(
+            account_id=aid,
+            event_date=date(2026, 1, 3),
+            asset_kind="wealth",
+            direction="in",
+            amount=100000,
+            bank_name="中银理财",
+            currency="CNY",
+            product_name="中银理财-稳富全球配置7天持有期1号A",
+            product_code="YH0662195.YH",
+            product_public_code="CYQWFQQPZ7D1A",
+            issuer_name="中银理财",
+            unit_nav=1.0,
+            nav_date=date(2026, 1, 3),
+        )
+        wealth_symbol = f"BANK:W:{wealth_buy['id']}"
+        self.service.upsert_manual_price(
+            account_id=aid,
+            symbol=wealth_symbol,
+            market="bank",
+            price_date=date(2026, 1, 5),
+            price=101000,
+            currency="CNY",
+        )
+
+        with patch.object(
+            PortfolioService,
+            "_fetch_bank_wealth_nav",
+            return_value=_ResolvedPositionPrice(
+                price=1.02,
+                source="bank_wealth_nav",
+                price_date=date(2026, 1, 4),
+                is_stale=True,
+                is_available=True,
+                provider="iwencai",
+            ),
+        ):
+            stale_nav = self.service.get_portfolio_snapshot(
+                account_id=aid,
+                as_of=date(2026, 1, 5),
+                refresh_prices=True,
+            )
+
+        stale_position = next(item for item in stale_nav["accounts"][0]["positions"] if item.get("symbol") == wealth_symbol)
+        self.assertEqual(stale_position["price_source"], "bank_value_update")
+        self.assertEqual(stale_position["price_date"], "2026-01-05")
+        self.assertAlmostEqual(stale_position["market_value_base"], 101000.0, places=6)
+
+        with patch.object(
+            PortfolioService,
+            "_fetch_bank_wealth_nav",
+            return_value=_ResolvedPositionPrice(
+                price=1.03,
+                source="bank_wealth_nav",
+                price_date=date(2026, 1, 6),
+                is_stale=False,
+                is_available=True,
+                provider="iwencai",
+            ),
+        ):
+            newer_nav = self.service.get_portfolio_snapshot(
+                account_id=aid,
+                as_of=date(2026, 1, 6),
+                refresh_prices=True,
+            )
+
+        newer_position = next(item for item in newer_nav["accounts"][0]["positions"] if item.get("symbol") == wealth_symbol)
+        self.assertEqual(newer_position["price_source"], "bank_wealth_nav")
+        self.assertEqual(newer_position["price_date"], "2026-01-06")
+        self.assertAlmostEqual(newer_position["last_price"], 1.03, places=6)
+        self.assertAlmostEqual(newer_position["market_value_base"], 103000.0, places=6)
+
+    def test_bank_snapshot_cache_does_not_reuse_previous_day(self) -> None:
+        account = self.service.create_account(name="Bank", broker="BOC", market="bank", base_currency="CNY")
+        aid = account["id"]
+
+        self.service.record_bank_ledger(
+            account_id=aid,
+            event_date=date(2026, 1, 3),
+            asset_kind="wealth",
+            direction="in",
+            amount=100000,
+            bank_name="中银理财",
+            currency="CNY",
+            product_name="稳健理财",
+        )
+        first = self.service.get_portfolio_snapshot(
+            account_id=aid,
+            as_of=date(2026, 1, 3),
+            refresh_prices=False,
+        )
+        self.assertEqual(len(first["accounts"][0]["positions"]), 1)
+
+        second = self.service.get_portfolio_snapshot(
+            account_id=aid,
+            as_of=date(2026, 1, 4),
+            refresh_prices=False,
+        )
+        self.assertEqual(len(second["accounts"][0]["positions"]), 1)
+        self.assertEqual(second["as_of"], "2026-01-04")
 
     def test_bank_deposit_with_same_terms_redeems_by_linked_entry(self) -> None:
         account = self.service.create_account(name="Bank", broker="CMB", market="bank", base_currency="CNY")

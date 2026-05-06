@@ -488,9 +488,14 @@ class PortfolioRepository:
         currency: str,
         bank_name: str,
         product_name: Optional[str] = None,
+        product_code: Optional[str] = None,
+        product_public_code: Optional[str] = None,
+        issuer_name: Optional[str] = None,
         registration_code: Optional[str] = None,
         linked_entry_id: Optional[int] = None,
         quantity: Optional[float] = None,
+        unit_nav: Optional[float] = None,
+        nav_date: Optional[date] = None,
         start_date: Optional[date] = None,
         maturity_date: Optional[date] = None,
         annual_rate: Optional[float] = None,
@@ -509,9 +514,14 @@ class PortfolioRepository:
                 currency=currency,
                 bank_name=bank_name,
                 product_name=product_name,
+                product_code=product_code,
+                product_public_code=product_public_code,
+                issuer_name=issuer_name,
                 registration_code=registration_code,
                 linked_entry_id=linked_entry_id,
                 quantity=quantity,
+                unit_nav=unit_nav,
+                nav_date=nav_date,
                 start_date=start_date,
                 maturity_date=maturity_date,
                 annual_rate=annual_rate,
@@ -1437,7 +1447,7 @@ class PortfolioRepository:
                 .where(
                     and_(
                         PortfolioDailySnapshot.account_id == account_id,
-                        PortfolioDailySnapshot.snapshot_date <= as_of,
+                        PortfolioDailySnapshot.snapshot_date == as_of,
                         PortfolioDailySnapshot.cost_method == cost_method,
                     )
                 )

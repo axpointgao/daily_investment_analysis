@@ -118,6 +118,14 @@ const AGENT_CONFIG_GROUPS: AgentConfigGroup[] = [
     defaultOpen: true,
   },
   {
+    id: 'bank-wealth',
+    title: '银行理财能力',
+    description: '影响持仓里的银行理财产品查询、确认日单位净值和刷新估值。',
+    impact: '未配置问财时，银行理财仍可按金额流水和手动价值更新维护。',
+    keys: ['IWENCAI_API_KEY', 'IWENCAI_BASE_URL'],
+    defaultOpen: true,
+  },
+  {
     id: 'stock-chat',
     title: '股票问股策略',
     description: '影响问股/股票分析 Agent，不影响基金诊断、保险、银行和持仓账本。',
@@ -137,7 +145,7 @@ const AGENT_CONFIG_GROUPS: AgentConfigGroup[] = [
 ];
 
 const AGENT_GROUP_KEY_SET = new Set(AGENT_CONFIG_GROUPS.flatMap((group) => group.keys));
-const AGENT_ALWAYS_HIDDEN_KEYS = new Set(['YINGMI_STARGATE_BASE_URL']);
+const AGENT_ALWAYS_HIDDEN_KEYS = new Set(['YINGMI_STARGATE_BASE_URL', 'IWENCAI_BASE_URL']);
 
 const PORTFOLIO_PROMPT_GROUPS: PortfolioPromptGroup[] = [
   {

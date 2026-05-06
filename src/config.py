@@ -609,6 +609,8 @@ class Config:
     tushare_third_party_token: Optional[str] = None
     tiantian_fund_api_base_url: Optional[str] = None
     ttfund_apikey: Optional[str] = None
+    iwencai_api_key: Optional[str] = None
+    iwencai_base_url: str = "https://openapi.iwencai.com"
     yingmi_api_key: Optional[str] = None
     yingmi_stargate_base_url: str = "https://stargate.yingmi.com/api"
     yingmi_enabled: bool = True
@@ -967,6 +969,7 @@ class Config:
             "SCHEDULE_TIME",
             "SCHEDULE_RUN_IMMEDIATELY",
             "TTFUND_APIKEY",
+            "IWENCAI_API_KEY",
             "YINGMI_API_KEY",
             "YINGMI_ENABLED",
             "YINGMI_FUND_ANALYSIS_DEPTH",
@@ -1339,6 +1342,11 @@ class Config:
             tushare_third_party_token=os.getenv('TUSHARE_THIRD_PARTY_TOKEN') or None,
             tiantian_fund_api_base_url=os.getenv('TIANTIAN_FUND_API_BASE_URL') or None,
             ttfund_apikey=cls._resolve_env_value('TTFUND_APIKEY') or None,
+            iwencai_api_key=cls._resolve_env_value('IWENCAI_API_KEY') or None,
+            iwencai_base_url=(
+                os.getenv('IWENCAI_BASE_URL', 'https://openapi.iwencai.com').strip().rstrip("/")
+                or 'https://openapi.iwencai.com'
+            ),
             yingmi_api_key=cls._resolve_env_value('YINGMI_API_KEY') or None,
             yingmi_stargate_base_url=(
                 os.getenv('YINGMI_STARGATE_BASE_URL', 'https://stargate.yingmi.com/api').strip().rstrip("/")

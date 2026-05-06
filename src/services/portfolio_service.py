@@ -349,9 +349,14 @@ class PortfolioService:
         bank_name: str,
         currency: Optional[str] = None,
         product_name: Optional[str] = None,
+        product_code: Optional[str] = None,
+        product_public_code: Optional[str] = None,
+        issuer_name: Optional[str] = None,
         registration_code: Optional[str] = None,
         linked_entry_id: Optional[int] = None,
         quantity: Optional[float] = None,
+        unit_nav: Optional[float] = None,
+        nav_date: Optional[date] = None,
         start_date: Optional[date] = None,
         maturity_date: Optional[date] = None,
         annual_rate: Optional[float] = None,
@@ -372,6 +377,9 @@ class PortfolioService:
         if not bank_name_norm:
             raise ValueError("bank_name is required")
         product_name_norm = (product_name or "").strip() or None
+        product_code_norm = (product_code or "").strip().upper() or None
+        product_public_code_norm = (product_public_code or "").strip().upper() or None
+        issuer_name_norm = (issuer_name or "").strip() or None
         registration_code_norm = (registration_code or "").strip().upper() or None
         investment_nature_norm = (investment_nature or "").strip().lower() or None
         risk_level_norm = (risk_level or "").strip().upper() or None
@@ -390,6 +398,11 @@ class PortfolioService:
             if linked_entry.event_date and event_date < linked_entry.event_date:
                 raise ValueError("event_date must be >= linked entry date")
             product_name_norm = product_name_norm or (linked_entry.product_name or None)
+            product_code_norm = product_code_norm or (getattr(linked_entry, "product_code", None) or None)
+            product_public_code_norm = product_public_code_norm or (
+                getattr(linked_entry, "product_public_code", None) or None
+            )
+            issuer_name_norm = issuer_name_norm or (getattr(linked_entry, "issuer_name", None) or None)
             registration_code_norm = registration_code_norm or (
                 linked_entry.registration_code.strip().upper() if linked_entry.registration_code else None
             )
@@ -426,6 +439,12 @@ class PortfolioService:
                 raise ValueError("risk_level must be R1-R5")
             if start_date and maturity_date and maturity_date < start_date:
                 raise ValueError("maturity_date must be >= start_date")
+            if unit_nav is not None and unit_nav <= 0:
+                raise ValueError("unit_nav must be > 0")
+            if quantity is None and direction_norm == "in" and unit_nav is not None:
+                quantity = float(amount) / float(unit_nav)
+            if nav_date is not None and nav_date > event_date:
+                raise ValueError("nav_date must be <= event_date")
         currency_norm = self._normalize_currency(currency or account.base_currency)
         row = self.repo.add_bank_ledger(
             account_id=account_id,
@@ -436,9 +455,14 @@ class PortfolioService:
             currency=currency_norm,
             bank_name=bank_name_norm,
             product_name=product_name_norm,
+            product_code=product_code_norm,
+            product_public_code=product_public_code_norm,
+            issuer_name=issuer_name_norm,
             registration_code=registration_code_norm,
             linked_entry_id=int(linked_entry_id) if linked_entry_id is not None else None,
             quantity=float(quantity) if quantity is not None else None,
+            unit_nav=float(unit_nav) if unit_nav is not None else None,
+            nav_date=nav_date,
             start_date=start_date,
             maturity_date=maturity_date,
             annual_rate=float(annual_rate) if annual_rate is not None else None,
@@ -1802,11 +1826,12 @@ class PortfolioService:
                             requested_quantity=amount,
                             available_quantity=amount + float(item["last_price"] or 0.0),
                         )
-                continue
                 if asset_kind == "wealth":
                     lot_id = int(event.linked_entry_id or event.id)
                     symbol = self._make_bank_wealth_symbol(lot_id)
                     registration_code = str(event.registration_code or "").strip().upper()
+                    product_code = str(getattr(event, "product_code", "") or "").strip().upper()
+                    product_public_code = str(getattr(event, "product_public_code", "") or "").strip().upper()
                     key = ("wealth", lot_id, currency)
                     item = bank_assets.setdefault(
                         key,
@@ -1817,6 +1842,9 @@ class PortfolioService:
                             "currency": currency,
                             "bank_name": str(event.bank_name or "").strip(),
                             "product_name": str(event.product_name or "").strip() or None,
+                            "product_code": product_code or None,
+                            "product_public_code": product_public_code or None,
+                            "issuer_name": str(getattr(event, "issuer_name", "") or "").strip() or None,
                             "registration_code": registration_code or None,
                             "linked_entry_id": lot_id,
                             "start_date": event.start_date.isoformat() if event.start_date else None,
@@ -1827,7 +1855,8 @@ class PortfolioService:
                             "invested_amount": 0.0,
                             "redeemed_amount": 0.0,
                             "value_amount": 0.0,
-                            "quantity": 1.0,
+                            "wealth_units": 0.0,
+                            "quantity": 0.0,
                             "avg_cost": 0.0,
                             "total_cost": 0.0,
                             "last_price": 0.0,
@@ -1844,6 +1873,25 @@ class PortfolioService:
                         },
                     )
                     current_value = float(item["value_amount"] or 0.0)
+                    current_units = float(item.get("wealth_units") or 0.0)
+                    unit_nav = float(getattr(event, "unit_nav", None) or 0.0)
+                    event_units = float(event.quantity or 0.0)
+                    if event.direction == "in" and event_units <= EPS and unit_nav > EPS:
+                        event_units = amount / unit_nav
+                    if event.direction == "out" and event_units <= EPS and unit_nav > EPS:
+                        event_units = min(current_units, amount / unit_nav)
+                    if event.direction == "out" and unit_nav > EPS and current_units > EPS:
+                        current_value = current_units * unit_nav
+                        item["value_amount"] = current_value
+                        item["last_price"] = unit_nav
+                        item["price_source"] = "bank_wealth_nav"
+                        item["price_provider"] = "iwencai"
+                        item["price_date"] = (
+                            getattr(event, "nav_date", None).isoformat()
+                            if getattr(event, "nav_date", None)
+                            else event_date.isoformat()
+                        )
+                        item["value_estimated"] = False
                     if event.direction == "out" and amount - current_value > EPS:
                         raise PortfolioOversellError(
                             symbol=symbol,
@@ -1854,6 +1902,26 @@ class PortfolioService:
                     if event.direction == "in":
                         item["invested_amount"] = float(item["invested_amount"] or 0.0) + amount
                         item["value_amount"] = current_value + amount
+                        item["wealth_units"] = current_units + max(0.0, event_units)
+                        item["quantity"] = item["wealth_units"]
+                        if unit_nav > EPS:
+                            item["last_price"] = unit_nav
+                            item["price_source"] = "bank_wealth_nav"
+                            item["price_provider"] = "iwencai"
+                            item["price_date"] = (
+                                getattr(event, "nav_date", None).isoformat()
+                                if getattr(event, "nav_date", None)
+                                else event_date.isoformat()
+                            )
+                            item["value_amount"] = float(item["wealth_units"] or 0.0) * unit_nav
+                            item["value_estimated"] = False
+                        if product_code:
+                            item["product_code"] = product_code
+                        if product_public_code:
+                            item["product_public_code"] = product_public_code
+                        issuer_name = str(getattr(event, "issuer_name", "") or "").strip()
+                        if issuer_name:
+                            item["issuer_name"] = issuer_name
                         if registration_code:
                             item["registration_code"] = registration_code
                         if event.investment_nature:
@@ -1865,7 +1933,10 @@ class PortfolioService:
                     else:
                         item["redeemed_amount"] = float(item["redeemed_amount"] or 0.0) + amount
                         item["value_amount"] = max(0.0, current_value - amount)
-                    item["price_date"] = event_date.isoformat()
+                        item["wealth_units"] = max(0.0, current_units - max(0.0, event_units))
+                        item["quantity"] = item["wealth_units"]
+                    if unit_nav <= EPS:
+                        item["price_date"] = event_date.isoformat()
                     item["price_stale"] = event_date < as_of_date
                     continue
                 continue
@@ -1880,8 +1951,9 @@ class PortfolioService:
                 if item is None:
                     continue
                 value_amount = max(0.0, float(event.price or 0.0))
+                units = float(item.get("wealth_units") or item.get("quantity") or 0.0)
                 item["value_amount"] = value_amount
-                item["last_price"] = value_amount
+                item["last_price"] = value_amount / units if units > EPS else value_amount
                 item["price_source"] = "bank_value_update"
                 item["price_provider"] = "manual_price"
                 item["price_date"] = event_date.isoformat()
@@ -2035,8 +2107,32 @@ class PortfolioService:
                 invested_amount = float(item.get("invested_amount") or 0.0)
                 redeemed_amount = float(item.get("redeemed_amount") or 0.0)
                 value_amount = max(0.0, float(item.get("value_amount") or 0.0))
-                if value_amount <= EPS and invested_amount <= EPS and redeemed_amount <= EPS:
+                units = float(item.get("wealth_units") or item.get("quantity") or 0.0)
+                if value_amount <= EPS and units <= EPS:
                     continue
+                if refresh_prices and units > EPS:
+                    latest_price = self._fetch_bank_wealth_nav(
+                        product_identifier=(
+                            str(item.get("product_code") or "")
+                            or str(item.get("product_public_code") or "")
+                            or str(item.get("product_name") or "")
+                        ),
+                        as_of_date=as_of_date,
+                    )
+                    if (
+                        latest_price is not None
+                        and latest_price.price > EPS
+                        and self._should_apply_bank_wealth_nav(current_item=item, latest_price=latest_price)
+                    ):
+                        value_amount = units * latest_price.price
+                        item["value_amount"] = value_amount
+                        item["last_price"] = latest_price.price
+                        item["price_source"] = "bank_wealth_nav"
+                        item["price_provider"] = latest_price.provider
+                        item["price_date"] = latest_price.price_date.isoformat() if latest_price.price_date else None
+                        item["price_stale"] = latest_price.is_stale
+                        item["price_available"] = latest_price.is_available
+                        item["value_estimated"] = False
                 market_conversion = self._convert_amount(
                     amount=value_amount,
                     from_currency=item["currency"],
@@ -2064,15 +2160,16 @@ class PortfolioService:
                     if market_base is not None and cost_base is not None and redeemed_base is not None
                     else 0.0
                 )
-                item["quantity"] = 1.0
+                item["quantity"] = round(units, 8) if units > EPS else 1.0
                 item["total_cost"] = round(invested_amount, 8)
-                item["avg_cost"] = round(invested_amount, 8)
+                item["avg_cost"] = round((invested_amount / units), 8) if units > EPS else round(invested_amount, 8)
                 item["market_value_base"] = round(market_base or 0.0, 8)
                 item["unrealized_pnl_base"] = round(unrealized_base, 8)
                 item["unrealized_pnl_pct"] = (
                     round((unrealized_base / cost_base) * 100, 8) if cost_base and market_base is not None else None
                 )
-                item["last_price"] = round(value_amount, 8)
+                if units <= EPS or float(item.get("last_price") or 0.0) <= EPS:
+                    item["last_price"] = round(value_amount, 8)
                 item["invested_amount"] = round(invested_amount, 8)
                 item["redeemed_amount"] = round(redeemed_amount, 8)
                 item["value_amount"] = round(value_amount, 8)
@@ -2570,6 +2667,33 @@ class PortfolioService:
                     provider="tiantianfund",
                 )
         return None
+
+    @staticmethod
+    def _fetch_bank_wealth_nav(*, product_identifier: str, as_of_date: date) -> Optional[_ResolvedPositionPrice]:
+        identifier = str(product_identifier or "").strip()
+        if not identifier:
+            return None
+        try:
+            from src.services.iwencai_wealth_client import IwencaiWealthClient, IwencaiWealthError
+
+            if not IwencaiWealthClient.is_configured():
+                return None
+            nav = IwencaiWealthClient(timeout=8.0).get_latest_nav(identifier)
+        except IwencaiWealthError:
+            return None
+        except Exception:
+            return None
+        if nav is None or nav.unit_nav <= 0:
+            return None
+        price_date = nav.nav_date or as_of_date
+        return _ResolvedPositionPrice(
+            price=float(nav.unit_nav),
+            source="bank_wealth_nav",
+            price_date=price_date,
+            is_stale=price_date < as_of_date,
+            is_available=True,
+            provider="iwencai",
+        )
 
     @staticmethod
     def _extract_fund_nav_payload(payload: Any) -> Tuple[Optional[float], Optional[date]]:
@@ -3180,9 +3304,14 @@ class PortfolioService:
             "currency": row.currency,
             "bank_name": row.bank_name,
             "product_name": row.product_name,
+            "product_code": getattr(row, "product_code", None),
+            "product_public_code": getattr(row, "product_public_code", None),
+            "issuer_name": getattr(row, "issuer_name", None),
             "registration_code": row.registration_code,
             "linked_entry_id": int(row.linked_entry_id) if row.linked_entry_id is not None else None,
             "quantity": float(row.quantity) if row.quantity is not None else None,
+            "unit_nav": float(row.unit_nav) if getattr(row, "unit_nav", None) is not None else None,
+            "nav_date": row.nav_date.isoformat() if getattr(row, "nav_date", None) else None,
             "start_date": row.start_date.isoformat() if row.start_date else None,
             "maturity_date": row.maturity_date.isoformat() if row.maturity_date else None,
             "annual_rate": float(row.annual_rate) if row.annual_rate is not None else None,
@@ -3492,6 +3621,34 @@ class PortfolioService:
             return None
         try:
             return int(symbol_norm[len(BANK_WEALTH_SYMBOL_PREFIX):])
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _should_apply_bank_wealth_nav(
+        *,
+        current_item: Dict[str, Any],
+        latest_price: _ResolvedPositionPrice,
+    ) -> bool:
+        current_date = PortfolioService._parse_iso_date(current_item.get("price_date"))
+        latest_date = latest_price.price_date
+        if current_date is None or latest_date is None:
+            return True
+        if latest_date > current_date:
+            return True
+        if latest_date < current_date:
+            return False
+        return current_item.get("price_source") != "bank_value_update"
+
+    @staticmethod
+    def _parse_iso_date(value: Any) -> Optional[date]:
+        if isinstance(value, date):
+            return value
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            return datetime.strptime(text[:10], "%Y-%m-%d").date()
         except ValueError:
             return None
 
