@@ -78,6 +78,21 @@ python main.py --serve-only
 uvicorn server:app --reload --host 0.0.0.0 --port 8000
 ```
 
+### 云端 Docker 部署
+
+云端 Docker Compose 更新时必须同时维护 Web/API 与定时任务两个服务：
+
+```bash
+cd /opt/daily_investment_analysis
+git pull --ff-only origin main
+docker compose -f ./docker/docker-compose.yml build server analyzer
+docker compose -f ./docker/docker-compose.yml up -d server analyzer
+```
+
+- `server` 提供 Web UI / API，启动命令是 `--serve-only`，不会执行定时任务。
+- `analyzer` 负责 `SCHEDULE_ENABLED` / `SCHEDULE_TIME` 驱动的每日定时分析与通知。
+- 只执行 `up -d server` 会导致云端定时任务容器缺失，18:00 分析和通知不会触发。
+
 ### 后端验证
 
 ```bash
