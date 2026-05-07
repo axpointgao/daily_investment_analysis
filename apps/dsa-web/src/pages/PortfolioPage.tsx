@@ -2584,7 +2584,7 @@ const PortfolioPage: React.FC = () => {
                   <col className="portfolio-position-col-type" />
                   <col className="portfolio-position-col-asset" />
                   <col className="portfolio-position-col-quantity" />
-                  <col className="portfolio-position-col-price" />
+                  <col className="portfolio-position-col-cost" />
                   <col className="portfolio-position-col-price" />
                   <col className="portfolio-position-col-money" />
                   <col className="portfolio-position-col-pnl" />

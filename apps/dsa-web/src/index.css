@@ -2062,7 +2062,7 @@ textarea {
 }
 
 .portfolio-position-col-type {
-  width: 7%;
+  width: 6%;
 }
 
 .portfolio-position-col-asset {
@@ -2073,13 +2073,20 @@ textarea {
   width: 8%;
 }
 
-.portfolio-position-col-price {
-  width: 8.5%;
+.portfolio-position-col-cost {
+  width: 9%;
 }
 
-.portfolio-position-col-money,
-.portfolio-position-col-pnl {
+.portfolio-position-col-price {
+  width: 12%;
+}
+
+.portfolio-position-col-money {
   width: 13%;
+}
+
+.portfolio-position-col-pnl {
+  width: 11%;
 }
 
 .portfolio-position-col-rate {
@@ -2290,7 +2297,7 @@ textarea {
 
 @media (max-width: 1024px) {
   .portfolio-position-col-type {
-    width: 7%;
+    width: 6%;
   }
 
   .portfolio-position-col-asset {
@@ -2301,13 +2308,20 @@ textarea {
     width: 7%;
   }
 
-  .portfolio-position-col-price {
-    width: 8.5%;
+  .portfolio-position-col-cost {
+    width: 9%;
   }
 
-  .portfolio-position-col-money,
-  .portfolio-position-col-pnl {
+  .portfolio-position-col-price {
+    width: 12%;
+  }
+
+  .portfolio-position-col-money {
     width: 13%;
+  }
+
+  .portfolio-position-col-pnl {
+    width: 11%;
   }
 
   .portfolio-position-col-rate {
