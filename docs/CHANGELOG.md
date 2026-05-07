@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 > For user-friendly release highlights, see the [GitHub Releases](https://github.com/ZhuLinsen/daily_stock_analysis/releases) page.
 
 ## [Unreleased]
+- [新功能] 持仓明细新增现金流 XIRR 年化收益率、全局产品标签和按标签优先展示的资产分布视图。
+- [改进] Web 持仓页资产分布将标签视图命名为资产属性，未设置标签归入未定义，并从资产属性视图中过滤现金。
+- [改进] 持仓账户新增现金跟踪口径，银行、投顾和保险默认不再因产品买入或缴费自动生成负现金，并为持仓明细补充估值模型和展示值字段。
+- [修复] 修复持仓服务 `_data_manager` 初始化位置错误导致股票名称解析或实时价刷新可能失败的问题。
 - [新功能] 银行理财接入问财 Skills，可按产品名称查询银行理财产品并按确认日单位净值记录份额，刷新持仓时可用最新净值估值；问财失败时保留手动价值更新。
 - [改进] Web 持仓页录入流水表单增加字段标题、下拉箭头和短按钮宽度限制，并收敛表单最大宽度，提升银行理财、投顾、保险等多字段录入的可读性。
 - [修复] Web 持仓明细对净值型银行理财展示份额、成本净值和单位净值，并将问财净值来源显示为中文。

@@ -454,6 +454,7 @@ class PortfolioAccount(Base):
     broker = Column(String(64))
     market = Column(String(16), nullable=False, default='cn', index=True)  # cn/hk/us/fund/crypto/bank/advisory/insurance
     base_currency = Column(String(8), nullable=False, default='CNY')
+    cash_tracking_mode = Column(String(16), nullable=False, default='managed')  # managed/asset_only
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     created_at = Column(DateTime, default=datetime.now, index=True)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
@@ -660,6 +661,30 @@ class PortfolioManualPrice(Base):
     __table_args__ = (
         Index('ix_portfolio_manual_price_lookup', 'account_id', 'symbol', 'market', 'price_date'),
     )
+
+
+class PortfolioTag(Base):
+    """User-defined global tag for portfolio products."""
+
+    __tablename__ = 'portfolio_tags'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(32), nullable=False, unique=True, index=True)
+    color = Column(String(32), nullable=False, default='hsl(var(--primary))')
+    sort_order = Column(Integer, nullable=False, default=0, index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class PortfolioProductTagAssignment(Base):
+    """Global product_key -> tag assignment."""
+
+    __tablename__ = 'portfolio_product_tag_assignments'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_key = Column(String(160), nullable=False, unique=True, index=True)
+    tag_id = Column(Integer, ForeignKey('portfolio_tags.id'), nullable=False, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
 
 
 class PortfolioBankLedger(Base):
@@ -1029,6 +1054,12 @@ class DatabaseManager:
                         continue
                     connection.execute(
                         text(f"ALTER TABLE portfolio_bank_ledger ADD COLUMN {column_name} {column_type}")
+                    )
+            if "portfolio_accounts" in table_names:
+                existing_columns = {column["name"] for column in inspector.get_columns("portfolio_accounts")}
+                if "cash_tracking_mode" not in existing_columns:
+                    connection.execute(
+                        text("ALTER TABLE portfolio_accounts ADD COLUMN cash_tracking_mode VARCHAR(16) DEFAULT 'managed'")
                     )
             if "portfolio_advisory_ledger" in table_names:
                 existing_columns = {column["name"] for column in inspector.get_columns("portfolio_advisory_ledger")}

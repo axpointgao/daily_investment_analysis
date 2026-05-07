@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 PortfolioMarket = Literal["cn", "hk", "us", "fund", "crypto", "bank", "advisory", "insurance"]
+PortfolioCashTrackingMode = Literal["managed", "asset_only"]
 PortfolioAdvisoryProductType = Literal["advisory_combo", "dca_plan"]
 PortfolioAdvisoryEventType = Literal["buy", "initial_buy", "dca_buy", "follow_buy", "redeem"]
 
@@ -18,6 +19,7 @@ class PortfolioAccountCreateRequest(BaseModel):
     broker: Optional[str] = Field(None, max_length=64)
     market: PortfolioMarket = "cn"
     base_currency: str = Field("CNY", min_length=3, max_length=8)
+    cash_tracking_mode: Optional[PortfolioCashTrackingMode] = None
     owner_id: Optional[str] = Field(None, max_length=64)
 
 
@@ -26,6 +28,7 @@ class PortfolioAccountUpdateRequest(BaseModel):
     broker: Optional[str] = Field(None, max_length=64)
     market: Optional[PortfolioMarket] = None
     base_currency: Optional[str] = Field(None, min_length=3, max_length=8)
+    cash_tracking_mode: Optional[PortfolioCashTrackingMode] = None
     owner_id: Optional[str] = Field(None, max_length=64)
     is_active: Optional[bool] = None
 
@@ -37,6 +40,7 @@ class PortfolioAccountItem(BaseModel):
     broker: Optional[str] = None
     market: str
     base_currency: str
+    cash_tracking_mode: str = "managed"
     is_active: bool
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -350,6 +354,39 @@ class PortfolioDeleteResponse(BaseModel):
     deleted: int
 
 
+class PortfolioTagItem(BaseModel):
+    id: int
+    name: str
+    color: str
+    sort_order: int
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class PortfolioTagListResponse(BaseModel):
+    tags: List[PortfolioTagItem] = Field(default_factory=list)
+
+
+class PortfolioTagCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=32)
+    color: str = Field("hsl(var(--primary))", min_length=1, max_length=32)
+
+
+class PortfolioTagUpdateRequest(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=32)
+    color: Optional[str] = Field(None, min_length=1, max_length=32)
+
+
+class PortfolioProductTagUpdateRequest(BaseModel):
+    product_key: str = Field(..., min_length=1, max_length=160)
+    tag_id: Optional[int] = Field(None, gt=0)
+
+
+class PortfolioProductTagUpdateResponse(BaseModel):
+    product_key: str
+    tag_id: Optional[int] = None
+
+
 class PortfolioTradeListItem(BaseModel):
     id: int
     account_id: int
@@ -415,6 +452,10 @@ class PortfolioCorporateActionListResponse(BaseModel):
 
 class PortfolioPositionItem(BaseModel):
     symbol: str
+    product_key: Optional[str] = None
+    tag_id: Optional[int] = None
+    tag_name: Optional[str] = None
+    tag_color: Optional[str] = None
     display_name: Optional[str] = None
     market: str
     currency: str
@@ -425,6 +466,10 @@ class PortfolioPositionItem(BaseModel):
     market_value_base: float
     unrealized_pnl_base: float
     unrealized_pnl_pct: Optional[float] = None
+    annualized_return_pct: Optional[float] = None
+    valuation_model: Optional[str] = None
+    cost_display_value: Optional[float] = None
+    price_display_value: Optional[float] = None
     valuation_currency: str
     price_source: str = "unknown"
     price_provider: Optional[str] = None
@@ -433,6 +478,8 @@ class PortfolioPositionItem(BaseModel):
     price_available: bool = True
     bank_name: Optional[str] = None
     product_name: Optional[str] = None
+    product_public_code: Optional[str] = None
+    issuer_name: Optional[str] = None
     registration_code: Optional[str] = None
     linked_entry_id: Optional[int] = None
     start_date: Optional[str] = None
@@ -477,6 +524,8 @@ class PortfolioAccountSnapshot(BaseModel):
     broker: Optional[str] = None
     market: str
     base_currency: str
+    cash_tracking_mode: str = "managed"
+    snapshot_schema_version: Optional[int] = None
     as_of: str
     cost_method: str
     total_cash: Optional[float] = None
@@ -506,6 +555,7 @@ class PortfolioSnapshotResponse(BaseModel):
     fx_missing: bool = False
     missing_fx_pairs: List[Dict[str, str]] = Field(default_factory=list)
     asset_breakdown: Dict[str, float] = Field(default_factory=dict)
+    tag_breakdown: List[Dict[str, Any]] = Field(default_factory=list)
     accounts: List[PortfolioAccountSnapshot] = Field(default_factory=list)
 
 

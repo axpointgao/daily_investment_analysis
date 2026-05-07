@@ -26,8 +26,10 @@ from src.storage import (
     PortfolioInsuranceLedger,
     PortfolioInsurancePolicy,
     PortfolioManualPrice,
+    PortfolioProductTagAssignment,
     PortfolioPosition,
     PortfolioPositionLot,
+    PortfolioTag,
     PortfolioTrade,
     StockDaily,
 )
@@ -54,6 +56,102 @@ class PortfolioRepository:
         self.db = db_manager or DatabaseManager.get_instance()
 
     # ------------------------------------------------------------------
+    # Product tag CRUD
+    # ------------------------------------------------------------------
+    def list_tags(self) -> List[PortfolioTag]:
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(PortfolioTag).order_by(PortfolioTag.sort_order.asc(), PortfolioTag.id.asc())
+            ).scalars().all()
+            return list(rows)
+
+    def get_tag(self, tag_id: int) -> Optional[PortfolioTag]:
+        with self.db.get_session() as session:
+            row = session.get(PortfolioTag, tag_id)
+            if row is not None:
+                session.expunge(row)
+            return row
+
+    def create_tag(self, *, name: str, color: str) -> PortfolioTag:
+        with self.portfolio_write_session() as session:
+            next_order = int(session.execute(select(func.coalesce(func.max(PortfolioTag.sort_order), 0))).scalar_one() or 0) + 1
+            row = PortfolioTag(name=name, color=color, sort_order=next_order)
+            session.add(row)
+            session.flush()
+            session.refresh(row)
+            session.expunge(row)
+            return row
+
+    def update_tag(self, tag_id: int, fields: Dict[str, Any]) -> Optional[PortfolioTag]:
+        with self.portfolio_write_session() as session:
+            row = session.get(PortfolioTag, tag_id)
+            if row is None:
+                return None
+            for key, value in fields.items():
+                setattr(row, key, value)
+            row.updated_at = datetime.now()
+            session.flush()
+            session.refresh(row)
+            session.expunge(row)
+            return row
+
+    def delete_tag(self, tag_id: int) -> bool:
+        with self.portfolio_write_session() as session:
+            row = session.get(PortfolioTag, tag_id)
+            if row is None:
+                return False
+            session.execute(
+                delete(PortfolioProductTagAssignment).where(PortfolioProductTagAssignment.tag_id == tag_id)
+            )
+            session.delete(row)
+            return True
+
+    def set_product_tag(self, *, product_key: str, tag_id: Optional[int]) -> Optional[PortfolioProductTagAssignment]:
+        with self.portfolio_write_session() as session:
+            existing = session.execute(
+                select(PortfolioProductTagAssignment)
+                .where(PortfolioProductTagAssignment.product_key == product_key)
+                .limit(1)
+            ).scalar_one_or_none()
+            if tag_id is None:
+                if existing is not None:
+                    session.delete(existing)
+                return None
+
+            tag = session.get(PortfolioTag, tag_id)
+            if tag is None:
+                raise ValueError(f"Tag not found: {tag_id}")
+            if existing is None:
+                existing = PortfolioProductTagAssignment(product_key=product_key, tag_id=tag_id)
+                session.add(existing)
+            else:
+                existing.tag_id = tag_id
+                existing.updated_at = datetime.now()
+            session.flush()
+            session.refresh(existing)
+            session.expunge(existing)
+            return existing
+
+    def get_product_tag_map(self, product_keys: Iterable[str]) -> Dict[str, Dict[str, Any]]:
+        keys = sorted({str(key or "").strip() for key in product_keys if str(key or "").strip()})
+        if not keys:
+            return {}
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(PortfolioProductTagAssignment, PortfolioTag)
+                .join(PortfolioTag, PortfolioTag.id == PortfolioProductTagAssignment.tag_id)
+                .where(PortfolioProductTagAssignment.product_key.in_(keys))
+            ).all()
+            return {
+                assignment.product_key: {
+                    "tag_id": int(tag.id),
+                    "tag_name": tag.name,
+                    "tag_color": tag.color,
+                }
+                for assignment, tag in rows
+            }
+
+    # ------------------------------------------------------------------
     # Account CRUD
     # ------------------------------------------------------------------
     def create_account(
@@ -63,6 +161,7 @@ class PortfolioRepository:
         broker: Optional[str],
         market: str,
         base_currency: str,
+        cash_tracking_mode: str,
         owner_id: Optional[str] = None,
     ) -> PortfolioAccount:
         with self.db.get_session() as session:
@@ -72,6 +171,7 @@ class PortfolioRepository:
                 broker=broker,
                 market=market,
                 base_currency=base_currency,
+                cash_tracking_mode=cash_tracking_mode,
                 is_active=True,
             )
             session.add(row)

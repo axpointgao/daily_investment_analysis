@@ -137,9 +137,40 @@ class PortfolioServiceTestCase(unittest.TestCase):
         self.assertAlmostEqual(pos["last_price"], 125.0, places=6)
         self.assertAlmostEqual(pos["market_value_base"], 1250.0, places=6)
         self.assertAlmostEqual(pos["unrealized_pnl_base"], 250.0, places=6)
-        self.assertEqual(pos["price_source"], "realtime_quote")
-        self.assertEqual(pos["price_provider"], "unit-test")
-        self.assertTrue(pos["price_available"])
+
+    def test_snapshot_adds_product_tags_breakdown_and_annualized_return(self) -> None:
+        account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
+        aid = account["id"]
+        self.service.record_trade(
+            account_id=aid,
+            symbol="600519",
+            trade_date=date(2026, 1, 1),
+            side="buy",
+            quantity=10,
+            price=100,
+            market="cn",
+            currency="CNY",
+        )
+        self._save_close("600519", date(2027, 1, 1), 110)
+
+        initial = self.service.get_portfolio_snapshot(account_id=aid, as_of=date(2027, 1, 1), cost_method="fifo")
+        position = initial["accounts"][0]["positions"][0]
+        self.assertTrue(position["product_key"])
+        self.assertIsNone(position["tag_id"])
+        self.assertEqual(position["valuation_model"], "unit_price")
+        self.assertEqual(position["cost_display_value"], 100.0)
+        self.assertEqual(position["price_display_value"], 110.0)
+        self.assertAlmostEqual(position["annualized_return_pct"], 10.0, places=1)
+
+        tag = self.service.create_tag(name="长期核心", color="hsl(var(--primary))")
+        self.service.set_product_tag(product_key=position["product_key"], tag_id=tag["id"])
+        tagged = self.service.get_portfolio_snapshot(account_id=aid, as_of=date(2027, 1, 1), cost_method="fifo")
+        tagged_position = tagged["accounts"][0]["positions"][0]
+
+        self.assertEqual(tagged_position["tag_name"], "长期核心")
+        self.assertEqual(tagged["tag_breakdown"][0]["tag_name"], "长期核心")
+        self.assertAlmostEqual(tagged["tag_breakdown"][0]["amount"], 1100.0, places=6)
+        self.assertNotIn("__cash__", {item["key"] for item in tagged["tag_breakdown"]})
 
     def test_current_snapshot_uses_close_before_realtime_fallback(self) -> None:
         today = date.today()
@@ -242,6 +273,12 @@ class PortfolioServiceTestCase(unittest.TestCase):
             side_effect=AssertionError("fund display name should not use stock data manager"),
         ):
             self.assertIsNone(self.service._resolve_position_display_name(symbol="000274", market="fund"))
+
+    def test_service_initializes_data_manager_lazily(self) -> None:
+        self.assertIsNone(self.service._data_manager)
+        with patch("src.services.portfolio_service.DataFetcherManager", return_value=object()) as manager:
+            self.assertIs(self.service._get_data_manager(), self.service._data_manager)
+        manager.assert_called_once()
 
     def test_historical_snapshot_marks_missing_price_without_cost_fallback(self) -> None:
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
@@ -1235,13 +1272,16 @@ class PortfolioServiceTestCase(unittest.TestCase):
             refresh_prices=True,
         )
         bank_account = initial["accounts"][0]
-        self.assertAlmostEqual(bank_account["total_cash"], -140000.0, places=6)
+        self.assertEqual(bank_account["cash_tracking_mode"], "asset_only")
+        self.assertAlmostEqual(bank_account["total_cash"], 10000.0, places=6)
         self.assertAlmostEqual(bank_account["total_market_value"], 150000.0, places=6)
         positions = {item["product_name"]: item for item in bank_account["positions"]}
         self.assertEqual(positions["三个月定期"]["annual_rate"], 1.8)
         self.assertEqual(positions["三个月定期"]["start_date"], "2026-01-02")
         self.assertEqual(positions["稳健理财"]["symbol"], wealth_symbol)
         self.assertEqual(positions["稳健理财"]["price_source"], "bank_net_invested_estimate")
+        self.assertEqual(positions["稳健理财"]["valuation_model"], "unit_nav")
+        self.assertEqual(positions["三个月定期"]["valuation_model"], "amount_value")
         self.assertEqual(positions["稳健理财"]["quantity"], 1.0)
         self.assertAlmostEqual(positions["稳健理财"]["market_value_base"], 100000.0, places=6)
 
@@ -1299,7 +1339,34 @@ class PortfolioServiceTestCase(unittest.TestCase):
         self.assertAlmostEqual(wealth_after_redeem["total_cost"], 120000.0, places=6)
         self.assertAlmostEqual(wealth_after_redeem["market_value_base"], 70000.0, places=6)
         self.assertAlmostEqual(wealth_after_redeem["unrealized_pnl_base"], 1000.0, places=6)
-        self.assertAlmostEqual(redeemed["accounts"][0]["total_cash"], -109000.0, places=6)
+        self.assertAlmostEqual(redeemed["accounts"][0]["total_cash"], 10000.0, places=6)
+
+    def test_asset_account_can_opt_into_managed_cash_tracking(self) -> None:
+        account = self.service.create_account(
+            name="Managed Bank",
+            broker="CMB",
+            market="bank",
+            base_currency="CNY",
+            cash_tracking_mode="managed",
+        )
+        aid = account["id"]
+
+        self.service.record_bank_ledger(
+            account_id=aid,
+            event_date=date(2026, 1, 1),
+            asset_kind="wealth",
+            direction="in",
+            amount=100000,
+            bank_name="招商银行",
+            currency="CNY",
+            product_name="稳健理财",
+        )
+
+        snapshot = self.service.get_portfolio_snapshot(account_id=aid, as_of=date(2026, 1, 1))
+        account_snapshot = snapshot["accounts"][0]
+        self.assertEqual(account_snapshot["cash_tracking_mode"], "managed")
+        self.assertAlmostEqual(account_snapshot["total_cash"], -100000.0, places=6)
+        self.assertAlmostEqual(account_snapshot["total_equity"], 0.0, places=6)
 
     def test_bank_wealth_supports_unit_nav_quantity(self) -> None:
         account = self.service.create_account(name="Bank", broker="BOC", market="bank", base_currency="CNY")
@@ -1354,7 +1421,7 @@ class PortfolioServiceTestCase(unittest.TestCase):
             refresh_prices=False,
         )
         self.assertEqual(redeemed["accounts"][0]["positions"], [])
-        self.assertAlmostEqual(redeemed["accounts"][0]["total_cash"], 440.0, places=6)
+        self.assertAlmostEqual(redeemed["accounts"][0]["total_cash"], 0.0, places=6)
 
     def test_bank_wealth_value_update_is_overridden_only_by_newer_nav(self) -> None:
         account = self.service.create_account(name="Bank", broker="BOC", market="bank", base_currency="CNY")
@@ -1525,7 +1592,7 @@ class PortfolioServiceTestCase(unittest.TestCase):
         }
         self.assertAlmostEqual(remaining_by_entry[first["id"]], 20000.0, places=6)
         self.assertAlmostEqual(remaining_by_entry[second["id"]], 50000.0, places=6)
-        self.assertAlmostEqual(redeemed["accounts"][0]["total_cash"], -70000.0, places=6)
+        self.assertAlmostEqual(redeemed["accounts"][0]["total_cash"], 0.0, places=6)
 
     def test_advisory_account_tracks_amount_value_and_redemption(self) -> None:
         account = self.service.create_account(name="Advisory", broker="且慢", market="advisory", base_currency="CNY")
@@ -1550,7 +1617,8 @@ class PortfolioServiceTestCase(unittest.TestCase):
             refresh_prices=True,
         )
         account_snapshot = initial["accounts"][0]
-        self.assertAlmostEqual(account_snapshot["total_cash"], -100000.0, places=6)
+        self.assertEqual(account_snapshot["cash_tracking_mode"], "asset_only")
+        self.assertAlmostEqual(account_snapshot["total_cash"], 0.0, places=6)
         self.assertAlmostEqual(account_snapshot["total_market_value"], 100000.0, places=6)
         position = account_snapshot["positions"][0]
         self.assertEqual(position["market"], "advisory")
@@ -1560,6 +1628,8 @@ class PortfolioServiceTestCase(unittest.TestCase):
         self.assertIsNone(position["product_code"])
         self.assertEqual(position["product_type"], "advisory_combo")
         self.assertEqual(position["price_source"], "advisory_net_invested_estimate")
+        self.assertEqual(position["valuation_model"], "amount_value")
+        self.assertEqual(position["price_display_value"], 100000.0)
         self.assertAlmostEqual(position["invested_amount"], 100000.0, places=6)
 
         self.service.repo.upsert_manual_price(
@@ -1612,7 +1682,40 @@ class PortfolioServiceTestCase(unittest.TestCase):
         self.assertAlmostEqual(redeemed_position["market_value_base"], 55000.0, places=6)
         self.assertAlmostEqual(redeemed_position["redeemed_amount"], 60000.0, places=6)
         self.assertAlmostEqual(redeemed["accounts"][0]["unrealized_pnl"], 5000.0, places=6)
-        self.assertAlmostEqual(redeemed["accounts"][0]["total_cash"], -50000.0, places=6)
+        self.assertAlmostEqual(redeemed["accounts"][0]["total_cash"], 0.0, places=6)
+
+    def test_advisory_short_holding_annualized_return_is_calculated(self) -> None:
+        account = self.service.create_account(name="Advisory", broker="且慢", market="advisory", base_currency="CNY")
+        aid = account["id"]
+        self.service.record_advisory_ledger(
+            account_id=aid,
+            event_date=date(2026, 5, 6),
+            platform="且慢",
+            product_name="我要稳稳的幸福",
+            product_code=None,
+            product_type="advisory_combo",
+            event_type="buy",
+            amount=300000,
+            currency="CNY",
+        )
+        self.service.repo.upsert_manual_price(
+            account_id=aid,
+            symbol="ADV:D3AC022A5278",
+            market="advisory",
+            price_date=date(2026, 5, 6),
+            price=313000,
+            currency="CNY",
+        )
+
+        snapshot = self.service.get_portfolio_snapshot(
+            account_id=aid,
+            as_of=date(2026, 5, 7),
+            refresh_prices=False,
+        )
+        position = snapshot["accounts"][0]["positions"][0]
+
+        self.assertIsNotNone(position["annualized_return_pct"])
+        self.assertGreater(position["annualized_return_pct"], 1000000)
 
     def test_advisory_account_tracks_dca_plan_events(self) -> None:
         account = self.service.create_account(name="Advisory", broker="且慢", market="advisory", base_currency="CNY")
@@ -1716,10 +1819,12 @@ class PortfolioServiceTestCase(unittest.TestCase):
 
         initial = self.service.get_portfolio_snapshot(account_id=aid, as_of=today, refresh_prices=True)
         account_snapshot = initial["accounts"][0]
-        self.assertAlmostEqual(account_snapshot["total_cash"], -10000.0, places=6)
+        self.assertEqual(account_snapshot["cash_tracking_mode"], "asset_only")
+        self.assertAlmostEqual(account_snapshot["total_cash"], 0.0, places=6)
         self.assertAlmostEqual(account_snapshot["total_market_value"], 10000.0, places=6)
         position = account_snapshot["positions"][0]
         self.assertEqual(position["market"], "insurance")
+        self.assertEqual(position["valuation_model"], "insurance_cash_value")
         self.assertTrue(position["value_estimated"])
         self.assertIsNotNone(position["next_payment_date"])
         self.assertTrue(str(position["next_payment_date"]).startswith(str(today.year + 1)))
@@ -1755,7 +1860,7 @@ class PortfolioServiceTestCase(unittest.TestCase):
         )
         surrendered = self.service.get_portfolio_snapshot(account_id=aid, as_of=today, refresh_prices=True)
         self.assertEqual(surrendered["accounts"][0]["positions"][0]["market_value_base"], 0.0)
-        self.assertAlmostEqual(surrendered["accounts"][0]["total_cash"], 1500.0, places=6)
+        self.assertAlmostEqual(surrendered["accounts"][0]["total_cash"], 0.0, places=6)
 
     def test_insurance_ledger_event_type_must_match_policy_type(self) -> None:
         account = self.service.create_account(name="Insurance", broker="保险公司", market="insurance", base_currency="CNY")

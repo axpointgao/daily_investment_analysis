@@ -47,6 +47,12 @@ from api.v1.schemas.portfolio import (
     PortfolioManualPriceUpsertRequest,
     PortfolioRiskResponse,
     PortfolioSnapshotResponse,
+    PortfolioProductTagUpdateRequest,
+    PortfolioProductTagUpdateResponse,
+    PortfolioTagCreateRequest,
+    PortfolioTagItem,
+    PortfolioTagListResponse,
+    PortfolioTagUpdateRequest,
     PortfolioTradeListResponse,
     PortfolioTradeCreateRequest,
 )
@@ -98,6 +104,105 @@ def _serialize_import_record(item: dict) -> PortfolioImportTradeItem:
     return PortfolioImportTradeItem(**payload)
 
 
+@router.get(
+    "/tags",
+    response_model=PortfolioTagListResponse,
+    responses={500: {"model": ErrorResponse}},
+    summary="List portfolio product tags",
+)
+def list_tags() -> PortfolioTagListResponse:
+    service = PortfolioService()
+    try:
+        return PortfolioTagListResponse(tags=[PortfolioTagItem(**item) for item in service.list_tags()])
+    except Exception as exc:
+        raise _internal_error("List portfolio tags failed", exc)
+
+
+@router.post(
+    "/tags",
+    response_model=PortfolioTagItem,
+    responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Create portfolio product tag",
+)
+def create_tag(request: PortfolioTagCreateRequest) -> PortfolioTagItem:
+    service = PortfolioService()
+    try:
+        return PortfolioTagItem(**service.create_tag(name=request.name, color=request.color))
+    except PortfolioBusyError as exc:
+        raise _conflict_error(error="portfolio_busy", message=str(exc))
+    except PortfolioConflictError as exc:
+        raise _conflict_error(error="conflict", message=str(exc))
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Create portfolio tag failed", exc)
+
+
+@router.patch(
+    "/tags/{tag_id}",
+    response_model=PortfolioTagItem,
+    responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Update portfolio product tag",
+)
+def update_tag(tag_id: int, request: PortfolioTagUpdateRequest) -> PortfolioTagItem:
+    service = PortfolioService()
+    try:
+        data = service.update_tag(tag_id=tag_id, name=request.name, color=request.color)
+        if data is None:
+            raise HTTPException(status_code=404, detail={"error": "not_found", "message": f"Tag not found: {tag_id}"})
+        return PortfolioTagItem(**data)
+    except PortfolioBusyError as exc:
+        raise _conflict_error(error="portfolio_busy", message=str(exc))
+    except PortfolioConflictError as exc:
+        raise _conflict_error(error="conflict", message=str(exc))
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Update portfolio tag failed", exc)
+
+
+@router.delete(
+    "/tags/{tag_id}",
+    response_model=PortfolioDeleteResponse,
+    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Delete portfolio product tag",
+)
+def delete_tag(tag_id: int) -> PortfolioDeleteResponse:
+    service = PortfolioService()
+    try:
+        ok = service.delete_tag(tag_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail={"error": "not_found", "message": f"Tag not found: {tag_id}"})
+        return PortfolioDeleteResponse(deleted=1)
+    except PortfolioBusyError as exc:
+        raise _conflict_error(error="portfolio_busy", message=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _internal_error("Delete portfolio tag failed", exc)
+
+
+@router.put(
+    "/product-tags",
+    response_model=PortfolioProductTagUpdateResponse,
+    responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Assign one global tag to a portfolio product",
+)
+def update_product_tag(request: PortfolioProductTagUpdateRequest) -> PortfolioProductTagUpdateResponse:
+    service = PortfolioService()
+    try:
+        data = service.set_product_tag(product_key=request.product_key, tag_id=request.tag_id)
+        return PortfolioProductTagUpdateResponse(**data)
+    except PortfolioBusyError as exc:
+        raise _conflict_error(error="portfolio_busy", message=str(exc))
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Update product tag failed", exc)
+
+
 @router.post(
     "/accounts",
     response_model=PortfolioAccountItem,
@@ -112,6 +217,7 @@ def create_account(request: PortfolioAccountCreateRequest) -> PortfolioAccountIt
             broker=request.broker,
             market=request.market,
             base_currency=request.base_currency,
+            cash_tracking_mode=request.cash_tracking_mode,
             owner_id=request.owner_id,
         )
         return PortfolioAccountItem(**row)
@@ -153,6 +259,7 @@ def update_account(account_id: int, request: PortfolioAccountUpdateRequest) -> P
             broker=request.broker,
             market=request.market,
             base_currency=request.base_currency,
+            cash_tracking_mode=request.cash_tracking_mode,
             owner_id=request.owner_id,
             is_active=request.is_active,
         )

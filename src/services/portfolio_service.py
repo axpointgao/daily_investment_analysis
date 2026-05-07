@@ -36,9 +36,12 @@ except Exception:  # pragma: no cover - optional dependency path
 
 EPS = 1e-8
 VALID_MARKETS = {"cn", "hk", "us", "fund", "crypto", "bank", "advisory", "insurance"}
+VALID_CASH_TRACKING_MODES = {"managed", "asset_only"}
+ASSET_ONLY_DEFAULT_MARKETS = {"bank", "advisory", "insurance"}
 VALID_COST_METHODS = {"fifo", "avg"}
 VALID_SIDES = {"buy", "sell"}
 VALID_CASH_DIRECTIONS = {"in", "out"}
+PORTFOLIO_SNAPSHOT_SCHEMA_VERSION = 2
 VALID_ADVISORY_PRODUCT_TYPES = {"advisory_combo", "dca_plan"}
 VALID_ADVISORY_EVENT_TYPES = {"buy", "initial_buy", "dca_buy", "follow_buy", "redeem"}
 ADVISORY_BUY_EVENTS = {"buy", "initial_buy", "dca_buy", "follow_buy"}
@@ -144,12 +147,64 @@ class _ConvertedAmount:
     missing_pair: Optional[Tuple[str, str]] = None
 
 
+@dataclass
+class _AnnualizedCashFlow:
+    flow_date: date
+    amount: float
+    currency: str
+
+
 class PortfolioService:
     """Business logic for account CRUD, event writes, and snapshot replay."""
 
     def __init__(self, repo: Optional[PortfolioRepository] = None):
         self.repo = repo or PortfolioRepository()
         self._data_manager: Optional[DataFetcherManager] = None
+
+    # ------------------------------------------------------------------
+    # Product tags
+    # ------------------------------------------------------------------
+    def list_tags(self) -> List[Dict[str, Any]]:
+        return [self._tag_row_to_dict(row) for row in self.repo.list_tags()]
+
+    def create_tag(self, *, name: str, color: str) -> Dict[str, Any]:
+        name_norm = self._normalize_tag_name(name)
+        color_norm = self._normalize_tag_color(color)
+        try:
+            return self._tag_row_to_dict(self.repo.create_tag(name=name_norm, color=color_norm))
+        except Exception as exc:
+            if self._looks_like_unique_conflict(exc):
+                raise PortfolioConflictError("标签名称已存在") from exc
+            raise
+
+    def update_tag(self, *, tag_id: int, name: Optional[str], color: Optional[str]) -> Optional[Dict[str, Any]]:
+        fields: Dict[str, Any] = {}
+        if name is not None:
+            fields["name"] = self._normalize_tag_name(name)
+        if color is not None:
+            fields["color"] = self._normalize_tag_color(color)
+        if not fields:
+            row = self.repo.get_tag(tag_id)
+            return self._tag_row_to_dict(row) if row is not None else None
+        try:
+            row = self.repo.update_tag(tag_id, fields)
+        except Exception as exc:
+            if self._looks_like_unique_conflict(exc):
+                raise PortfolioConflictError("标签名称已存在") from exc
+            raise
+        return self._tag_row_to_dict(row) if row is not None else None
+
+    def delete_tag(self, tag_id: int) -> bool:
+        return self.repo.delete_tag(tag_id)
+
+    def set_product_tag(self, *, product_key: str, tag_id: Optional[int]) -> Dict[str, Any]:
+        key = str(product_key or "").strip()
+        if not key:
+            raise ValueError("product_key is required")
+        if len(key) > 160:
+            raise ValueError("product_key is too long")
+        self.repo.set_product_tag(product_key=key, tag_id=tag_id)
+        return {"product_key": key, "tag_id": tag_id}
 
     def _get_data_manager(self) -> DataFetcherManager:
         if self._data_manager is None:
@@ -166,6 +221,7 @@ class PortfolioService:
         broker: Optional[str],
         market: str,
         base_currency: str,
+        cash_tracking_mode: Optional[str] = None,
         owner_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         name_norm = (name or "").strip()
@@ -173,11 +229,13 @@ class PortfolioService:
             raise ValueError("name is required")
         market_norm = self._normalize_market(market)
         base_currency_norm = self._normalize_currency(base_currency)
+        cash_mode_norm = self._normalize_cash_tracking_mode(cash_tracking_mode, market=market_norm)
         row = self.repo.create_account(
             name=name_norm,
             broker=(broker or "").strip() or None,
             market=market_norm,
             base_currency=base_currency_norm,
+            cash_tracking_mode=cash_mode_norm,
             owner_id=(owner_id or "").strip() or None,
         )
         return self._account_to_dict(row)
@@ -194,6 +252,7 @@ class PortfolioService:
         broker: Optional[str] = None,
         market: Optional[str] = None,
         base_currency: Optional[str] = None,
+        cash_tracking_mode: Optional[str] = None,
         owner_id: Optional[str] = None,
         is_active: Optional[bool] = None,
     ) -> Optional[Dict[str, Any]]:
@@ -209,6 +268,8 @@ class PortfolioService:
             fields["market"] = self._normalize_market(market)
         if base_currency is not None:
             fields["base_currency"] = self._normalize_currency(base_currency)
+        if cash_tracking_mode is not None:
+            fields["cash_tracking_mode"] = self._normalize_cash_tracking_mode(cash_tracking_mode, market=market)
         if owner_id is not None:
             fields["owner_id"] = owner_id.strip() or None
         if is_active is not None:
@@ -1152,6 +1213,11 @@ class PortfolioService:
                 asset_breakdown[key] += float(converted_mv.amount or 0.0)
             asset_breakdown = {key: round(value, 6) for key, value in asset_breakdown.items()}
 
+        self._apply_product_tags(accounts_payload)
+        tag_breakdown = [] if has_missing_fx else self._build_tag_breakdown(
+            accounts_payload=accounts_payload,
+        )
+
         def _aggregate_value(key: str) -> Optional[float]:
             if has_missing_fx:
                 return None
@@ -1176,6 +1242,7 @@ class PortfolioService:
                 for from_currency, to_currency in sorted(missing_fx_pairs)
             ],
             "asset_breakdown": {} if has_missing_fx else asset_breakdown,
+            "tag_breakdown": tag_breakdown,
             "accounts": accounts_payload,
         }
 
@@ -1201,6 +1268,8 @@ class PortfolioService:
                 return None
             if not isinstance(payload, dict):
                 return None
+            if self._snapshot_payload_missing_position_metrics(payload):
+                return None
             account_payloads.append(payload)
 
         return self._aggregate_account_payloads(
@@ -1209,6 +1278,28 @@ class PortfolioService:
             as_of_date=as_of_date,
             cost_method=cost_method,
         )
+
+    @staticmethod
+    def _snapshot_payload_missing_position_metrics(payload: Dict[str, Any]) -> bool:
+        if int(payload.get("snapshot_schema_version") or 0) < PORTFOLIO_SNAPSHOT_SCHEMA_VERSION:
+            return True
+        if "cash_tracking_mode" not in payload:
+            return True
+        positions = payload.get("positions")
+        if not positions:
+            return False
+        for position in positions:
+            if not isinstance(position, dict):
+                return True
+            if (
+                "product_key" not in position
+                or "annualized_return_pct" not in position
+                or "valuation_model" not in position
+                or "cost_display_value" not in position
+                or "price_display_value" not in position
+            ):
+                return True
+        return False
 
     def _aggregate_account_payloads(
         self,
@@ -1309,6 +1400,11 @@ class PortfolioService:
                 asset_breakdown[key] += float(converted_mv.amount or 0.0)
             asset_breakdown = {key: round(value, 6) for key, value in asset_breakdown.items()}
 
+        self._apply_product_tags(accounts_payload)
+        tag_breakdown = [] if has_missing_fx else self._build_tag_breakdown(
+            accounts_payload=accounts_payload,
+        )
+
         def _aggregate_value(key: str) -> Optional[float]:
             if has_missing_fx:
                 return None
@@ -1333,6 +1429,7 @@ class PortfolioService:
                 for from_currency, to_currency in sorted(missing_fx_pairs)
             ],
             "asset_breakdown": {} if has_missing_fx else asset_breakdown,
+            "tag_breakdown": tag_breakdown,
             "accounts": accounts_payload,
         }
 
@@ -1591,6 +1688,9 @@ class PortfolioService:
         taxes_total_base = 0.0
         realized_pnl_base = 0.0
         fx_stale = False
+        position_cashflows: Dict[str, List[_AnnualizedCashFlow]] = defaultdict(list)
+        cash_tracking_mode = self._account_cash_tracking_mode(account)
+        tracks_asset_cash = cash_tracking_mode == "managed"
 
         fifo_lots: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
         avg_state: Dict[Tuple[str, str, str], _AvgState] = defaultdict(_AvgState)
@@ -1659,17 +1759,33 @@ class PortfolioService:
                     item["value_estimated"] = False
                     continue
                 if insurance_event_type in INSURANCE_OUTFLOW_EVENTS:
-                    cash_balances[currency] -= amount
+                    if tracks_asset_cash:
+                        cash_balances[currency] -= amount
                     if insurance_event_type == "premium":
                         item["paid_premium"] += amount
                         if event.period_no is not None:
                             item["paid_periods"] = max(int(item["paid_periods"] or 0), int(event.period_no or 0))
                         else:
                             item["paid_periods"] = int(item["paid_periods"] or 0) + 1
+                        product_key = self._make_product_key(
+                            market="insurance",
+                            symbol=str(item.get("symbol") or ""),
+                            currency=currency,
+                            item=item,
+                        )
+                        position_cashflows[product_key].append(_AnnualizedCashFlow(event_date, -amount, currency))
                     continue
                 if insurance_event_type in INSURANCE_RETURN_EVENTS:
-                    cash_balances[currency] += amount
+                    if tracks_asset_cash:
+                        cash_balances[currency] += amount
                     item["received_amount"] += amount
+                    product_key = self._make_product_key(
+                        market="insurance",
+                        symbol=str(item.get("symbol") or ""),
+                        currency=currency,
+                        item=item,
+                    )
+                    position_cashflows[product_key].append(_AnnualizedCashFlow(event_date, amount, currency))
                     if insurance_event_type in INSURANCE_TERMINAL_EVENTS:
                         item["terminal"] = True
                         item["policy_status"] = "surrendered" if insurance_event_type == "surrender" else "matured"
@@ -1727,7 +1843,15 @@ class PortfolioService:
                     raise ValueError(f"product_type cannot change for advisory product {product_name}")
                 current_value = float(item["value_amount"] or 0.0)
                 if advisory_event_type in ADVISORY_BUY_EVENTS:
-                    cash_balances[currency] -= amount
+                    if tracks_asset_cash:
+                        cash_balances[currency] -= amount
+                    product_key = self._make_product_key(
+                        market="advisory",
+                        symbol=symbol,
+                        currency=currency,
+                        item=item,
+                    )
+                    position_cashflows[product_key].append(_AnnualizedCashFlow(event_date, -amount, currency))
                     item["invested_amount"] = float(item["invested_amount"] or 0.0) + amount
                     item["value_amount"] = current_value + amount
                     item["price_date"] = event_date.isoformat()
@@ -1737,7 +1861,15 @@ class PortfolioService:
                     if event.investment_style:
                         item["investment_style"] = event.investment_style
                     continue
-                cash_balances[currency] += amount
+                if tracks_asset_cash:
+                    cash_balances[currency] += amount
+                product_key = self._make_product_key(
+                    market="advisory",
+                    symbol=symbol,
+                    currency=currency,
+                    item=item,
+                )
+                position_cashflows[product_key].append(_AnnualizedCashFlow(event_date, amount, currency))
                 item["redeemed_amount"] = float(item["redeemed_amount"] or 0.0) + amount
                 item["value_amount"] = max(0.0, current_value - amount)
                 item["price_date"] = event_date.isoformat()
@@ -1771,7 +1903,8 @@ class PortfolioService:
                 if asset_kind == "demand":
                     cash_balances[currency] += signed_amount
                     continue
-                cash_balances[currency] -= signed_amount
+                if tracks_asset_cash:
+                    cash_balances[currency] -= signed_amount
                 if asset_kind == "deposit":
                     lot_id = int(event.linked_entry_id or event.id)
                     key = ("deposit", lot_id) if event.direction == "in" or event.linked_entry_id else (
@@ -1900,6 +2033,13 @@ class PortfolioService:
                             available_quantity=current_value,
                         )
                     if event.direction == "in":
+                        product_key = self._make_product_key(
+                            market="bank",
+                            symbol=str(item.get("symbol") or ""),
+                            currency=currency,
+                            item=item,
+                        )
+                        position_cashflows[product_key].append(_AnnualizedCashFlow(event_date, -amount, currency))
                         item["invested_amount"] = float(item["invested_amount"] or 0.0) + amount
                         item["value_amount"] = current_value + amount
                         item["wealth_units"] = current_units + max(0.0, event_units)
@@ -1931,6 +2071,13 @@ class PortfolioService:
                         if event.income_mode:
                             item["income_mode"] = event.income_mode
                     else:
+                        product_key = self._make_product_key(
+                            market="bank",
+                            symbol=str(item.get("symbol") or ""),
+                            currency=currency,
+                            item=item,
+                        )
+                        position_cashflows[product_key].append(_AnnualizedCashFlow(event_date, amount, currency))
                         item["redeemed_amount"] = float(item["redeemed_amount"] or 0.0) + amount
                         item["value_amount"] = max(0.0, current_value - amount)
                         item["wealth_units"] = max(0.0, current_units - max(0.0, event_units))
@@ -1990,6 +2137,13 @@ class PortfolioService:
                 side = (event.side or "").lower().strip()
                 if side == "buy":
                     cash_balances[key[2]] -= (gross + fee + tax)
+                    product_key = self._make_product_key(
+                        market=key[1],
+                        symbol=key[0],
+                        currency=key[2],
+                        item=None,
+                    )
+                    position_cashflows[product_key].append(_AnnualizedCashFlow(event_date, -(gross + fee + tax), key[2]))
                     if cost_method == "fifo":
                         unit_cost = (gross + fee + tax) / qty
                         fifo_lots[key].append(
@@ -2010,6 +2164,13 @@ class PortfolioService:
                 elif side == "sell":
                     cash_balances[key[2]] += (gross - fee - tax)
                     proceeds_net = gross - fee - tax
+                    product_key = self._make_product_key(
+                        market=key[1],
+                        symbol=key[0],
+                        currency=key[2],
+                        item=None,
+                    )
+                    position_cashflows[product_key].append(_AnnualizedCashFlow(event_date, proceeds_net, key[2]))
                     if cost_method == "fifo":
                         cost_basis = self._consume_fifo_lots(
                             fifo_lots[key],
@@ -2075,6 +2236,13 @@ class PortfolioService:
                     )
                     if qty_held > EPS:
                         cash_balances[key[2]] += qty_held * per_share
+                        product_key = self._make_product_key(
+                            market=key[1],
+                            symbol=key[0],
+                            currency=key[2],
+                            item=None,
+                        )
+                        position_cashflows[product_key].append(_AnnualizedCashFlow(event_date, qty_held * per_share, key[2]))
                 elif action_type == "split_adjustment":
                     split_ratio = float(event.split_ratio or 0.0)
                     if split_ratio <= 0:
@@ -2161,6 +2329,12 @@ class PortfolioService:
                     else 0.0
                 )
                 item["quantity"] = round(units, 8) if units > EPS else 1.0
+                item["product_key"] = self._make_product_key(
+                    market="bank",
+                    symbol=str(item.get("symbol") or ""),
+                    currency=item["currency"],
+                    item=item,
+                )
                 item["total_cost"] = round(invested_amount, 8)
                 item["avg_cost"] = round((invested_amount / units), 8) if units > EPS else round(invested_amount, 8)
                 item["market_value_base"] = round(market_base or 0.0, 8)
@@ -2173,11 +2347,12 @@ class PortfolioService:
                 item["invested_amount"] = round(invested_amount, 8)
                 item["redeemed_amount"] = round(redeemed_amount, 8)
                 item["value_amount"] = round(value_amount, 8)
+                self._apply_position_display_metrics(item, valuation_model="unit_nav")
                 bank_position_rows.append(item)
                 if market_base is not None:
                     market_value_base += market_base
-                if cost_base is not None:
-                    total_cost_base += cost_base
+                if market_base is not None:
+                    total_cost_base += market_base - unrealized_base
                 continue
 
             amount_local = float(item["last_price"] or 0.0)
@@ -2192,9 +2367,16 @@ class PortfolioService:
             market_base = market_conversion.amount
             fx_stale = fx_stale or market_conversion.is_stale
             item["total_cost"] = round(amount_local, 8)
+            item["product_key"] = self._make_product_key(
+                market="bank",
+                symbol=str(item.get("symbol") or ""),
+                currency=item["currency"],
+                item=item,
+            )
             item["avg_cost"] = round(amount_local, 8)
             item["market_value_base"] = round(market_base or 0.0, 8)
             item["last_price"] = round(amount_local, 8)
+            self._apply_position_display_metrics(item, valuation_model="amount_value")
             bank_position_rows.append(item)
             if market_base is not None:
                 market_value_base += market_base
@@ -2237,6 +2419,12 @@ class PortfolioService:
                 else 0.0
             )
             item["quantity"] = 1.0
+            item["product_key"] = self._make_product_key(
+                market="advisory",
+                symbol=str(item.get("symbol") or ""),
+                currency=item["currency"],
+                item=item,
+            )
             item["total_cost"] = round(invested_amount, 8)
             item["avg_cost"] = round(invested_amount, 8)
             item["market_value_base"] = round(market_base or 0.0, 8)
@@ -2248,11 +2436,11 @@ class PortfolioService:
             item["invested_amount"] = round(invested_amount, 8)
             item["redeemed_amount"] = round(redeemed_amount, 8)
             item["value_amount"] = round(value_amount, 8)
+            self._apply_position_display_metrics(item, valuation_model="amount_value")
             advisory_position_rows.append(item)
             if market_base is not None:
                 market_value_base += market_base
-            if cost_base is not None:
-                total_cost_base += cost_base
+                total_cost_base += market_base - unrealized_base
         position_rows.extend(advisory_position_rows)
 
         insurance_position_rows: List[Dict[str, Any]] = []
@@ -2299,6 +2487,12 @@ class PortfolioService:
                 total_periods=item.get("total_periods"),
             )
             item["quantity"] = 1.0
+            item["product_key"] = self._make_product_key(
+                market="insurance",
+                symbol=str(item.get("symbol") or ""),
+                currency=item["currency"],
+                item=item,
+            )
             item["avg_cost"] = round(paid_premium, 8)
             item["total_cost"] = round(paid_premium, 8)
             item["last_price"] = round(estimated_value, 8)
@@ -2310,12 +2504,19 @@ class PortfolioService:
             item["cash_value"] = round(float(cash_value), 8) if cash_value is not None else None
             item["value_date"] = item["value_date"].isoformat() if isinstance(item.get("value_date"), date) else item.get("value_date")
             item["next_payment_date"] = next_payment_date.isoformat() if next_payment_date else None
+            self._apply_position_display_metrics(item, valuation_model="insurance_cash_value")
             insurance_position_rows.append(item)
             if market_base is not None:
                 market_value_base += market_base
-            if cost_base is not None:
-                total_cost_base += cost_base
+                total_cost_base += market_base - unrealized_base
         position_rows.extend(insurance_position_rows)
+
+        self._apply_position_annualized_returns(
+            position_rows=position_rows,
+            position_cashflows=position_cashflows,
+            account_currency=account.base_currency,
+            as_of_date=as_of_date,
+        )
 
         total_cash_base = 0.0
         for currency, amount in cash_balances.items():
@@ -2339,6 +2540,8 @@ class PortfolioService:
             "broker": account.broker,
             "market": account.market,
             "base_currency": account.base_currency,
+            "cash_tracking_mode": cash_tracking_mode,
+            "snapshot_schema_version": PORTFOLIO_SNAPSHOT_SCHEMA_VERSION,
             "as_of": as_of_date.isoformat(),
             "cost_method": cost_method,
             "total_cash": round(total_cash_base, 6),
@@ -2456,31 +2659,247 @@ class PortfolioService:
                 unrealized_pct = unrealized_base / cost_base * 100.0
 
             position_rows.append(
-                {
-                    "symbol": symbol,
-                    "display_name": self._resolve_position_display_name(symbol=symbol, market=market),
-                    "market": market,
-                    "currency": currency,
-                    "quantity": round(qty, 8),
-                    "avg_cost": round(avg_cost, 8),
-                    "total_cost": round(total_cost, 8),
-                    "last_price": round(float(last_price), 8),
-                    "market_value_base": round(market_base, 8),
-                    "unrealized_pnl_base": round(unrealized_base, 8),
-                    "unrealized_pnl_pct": round(unrealized_pct, 8) if unrealized_pct is not None else None,
-                    "valuation_currency": account.base_currency,
-                    "price_source": price_info.source,
-                    "price_provider": price_info.provider,
-                    "price_date": price_info.price_date.isoformat() if price_info.price_date else None,
-                    "price_stale": price_info.is_stale,
-                    "price_available": price_info.is_available,
-                }
+                self._with_display_metrics(
+                    {
+                        "symbol": symbol,
+                        "product_key": self._make_product_key(
+                            market=market,
+                            symbol=symbol,
+                            currency=currency,
+                            item=None,
+                        ),
+                        "display_name": self._resolve_position_display_name(symbol=symbol, market=market),
+                        "market": market,
+                        "currency": currency,
+                        "quantity": round(qty, 8),
+                        "avg_cost": round(avg_cost, 8),
+                        "total_cost": round(total_cost, 8),
+                        "last_price": round(float(last_price), 8),
+                        "market_value_base": round(market_base, 8),
+                        "unrealized_pnl_base": round(unrealized_base, 8),
+                        "unrealized_pnl_pct": round(unrealized_pct, 8) if unrealized_pct is not None else None,
+                        "valuation_currency": account.base_currency,
+                        "price_source": price_info.source,
+                        "price_provider": price_info.provider,
+                        "price_date": price_info.price_date.isoformat() if price_info.price_date else None,
+                        "price_stale": price_info.is_stale,
+                        "price_available": price_info.is_available,
+                    },
+                    valuation_model="unit_price",
+                )
             )
 
             market_value_base += market_base
             total_cost_base += cost_base
 
         return position_rows, lot_rows, market_value_base, total_cost_base, fx_stale
+
+    def _apply_product_tags(self, accounts_payload: List[Dict[str, Any]]) -> None:
+        product_keys = [
+            str(position.get("product_key") or "").strip()
+            for account in accounts_payload
+            for position in account.get("positions", [])
+        ]
+        tag_map = self.repo.get_product_tag_map(product_keys)
+        for account in accounts_payload:
+            for position in account.get("positions", []):
+                product_key = str(position.get("product_key") or "").strip()
+                tag = tag_map.get(product_key)
+                position["tag_id"] = tag.get("tag_id") if tag else None
+                position["tag_name"] = tag.get("tag_name") if tag else None
+                position["tag_color"] = tag.get("tag_color") if tag else None
+
+    @staticmethod
+    def _build_tag_breakdown(*, accounts_payload: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        grouped: Dict[str, Dict[str, Any]] = {}
+        for account in accounts_payload:
+            for position in account.get("positions", []):
+                value = float(position.get("market_value_base") or 0.0)
+                if abs(value) <= EPS:
+                    continue
+                tag_id = position.get("tag_id")
+                if tag_id is None:
+                    key = "__untagged__"
+                    label = "未定义"
+                    color = "hsl(var(--muted-foreground))"
+                else:
+                    key = f"tag:{tag_id}"
+                    label = str(position.get("tag_name") or "未命名标签")
+                    color = str(position.get("tag_color") or "hsl(var(--primary))")
+                item = grouped.setdefault(
+                    key,
+                    {
+                        "key": key,
+                        "tag_id": tag_id,
+                        "tag_name": label,
+                        "tag_color": color,
+                        "amount": 0.0,
+                    },
+                )
+                item["amount"] += value
+        rows = list(grouped.values())
+        rows.sort(key=lambda item: (-abs(float(item["amount"] or 0.0)), str(item["tag_name"])))
+        for item in rows:
+            item["amount"] = round(float(item["amount"] or 0.0), 6)
+        return rows
+
+    def _apply_position_annualized_returns(
+        self,
+        *,
+        position_rows: List[Dict[str, Any]],
+        position_cashflows: Dict[str, List[_AnnualizedCashFlow]],
+        account_currency: str,
+        as_of_date: date,
+    ) -> None:
+        for position in position_rows:
+            product_key = str(position.get("product_key") or "").strip()
+            flows = list(position_cashflows.get(product_key, []))
+            market_value = float(position.get("market_value_base") or 0.0)
+            if market_value > EPS:
+                flows.append(_AnnualizedCashFlow(as_of_date, market_value, account_currency))
+            annualized = self._calculate_annualized_return_pct(
+                flows=flows,
+                account_currency=account_currency,
+                as_of_date=as_of_date,
+            )
+            position["annualized_return_pct"] = annualized
+
+    @staticmethod
+    def _apply_position_display_metrics(position: Dict[str, Any], *, valuation_model: str) -> None:
+        position["valuation_model"] = valuation_model
+        position["cost_display_value"] = round(float(position.get("avg_cost") or position.get("total_cost") or 0.0), 8)
+        position["price_display_value"] = round(float(position.get("last_price") or 0.0), 8)
+
+    @classmethod
+    def _with_display_metrics(cls, position: Dict[str, Any], *, valuation_model: str) -> Dict[str, Any]:
+        cls._apply_position_display_metrics(position, valuation_model=valuation_model)
+        return position
+
+    def _calculate_annualized_return_pct(
+        self,
+        *,
+        flows: List[_AnnualizedCashFlow],
+        account_currency: str,
+        as_of_date: date,
+    ) -> Optional[float]:
+        converted: List[Tuple[date, float]] = []
+        for flow in flows:
+            if abs(flow.amount) <= EPS:
+                continue
+            conversion = self._convert_amount(
+                amount=flow.amount,
+                from_currency=flow.currency,
+                to_currency=account_currency,
+                as_of_date=min(flow.flow_date, as_of_date),
+            )
+            if conversion.amount is None:
+                return None
+            converted.append((flow.flow_date, float(conversion.amount)))
+
+        if len(converted) < 2:
+            return None
+        if not any(amount > EPS for _, amount in converted) or not any(amount < -EPS for _, amount in converted):
+            return None
+
+        first_date = min(flow_date for flow_date, _ in converted)
+        last_date = max(flow_date for flow_date, _ in converted)
+        if (last_date - first_date).days < 1:
+            return None
+
+        def npv(rate: float) -> float:
+            base = 1.0 + rate
+            if base <= 0:
+                return float("inf")
+            total = 0.0
+            for flow_date, amount in converted:
+                years = (flow_date - first_date).days / 365.0
+                total += amount / (base ** years)
+            return total
+
+        low = -0.9999
+        high = 10.0
+        low_value = npv(low)
+        high_value = npv(high)
+        expansion_count = 0
+        while low_value * high_value > 0 and high < 1e12 and expansion_count < 40:
+            high *= 2
+            high_value = npv(high)
+            expansion_count += 1
+        if low_value * high_value > 0:
+            return None
+
+        for _ in range(100):
+            mid = (low + high) / 2
+            mid_value = npv(mid)
+            if abs(mid_value) < 1e-7:
+                return round(mid * 100.0, 8)
+            if low_value * mid_value <= 0:
+                high = mid
+                high_value = mid_value
+            else:
+                low = mid
+                low_value = mid_value
+        return round(((low + high) / 2) * 100.0, 8)
+
+    @classmethod
+    def _make_product_key(
+        cls,
+        *,
+        market: str,
+        symbol: str,
+        currency: str,
+        item: Optional[Dict[str, Any]],
+    ) -> str:
+        market_norm = str(market or "").strip().lower()
+        currency_norm = str(currency or "").strip().upper() or "CNY"
+        symbol_norm = str(symbol or "").strip().upper()
+        item = item or {}
+        if market_norm == "advisory":
+            product_code = str(item.get("product_code") or "").strip().upper()
+            if product_code:
+                return f"advisory:code:{product_code}:{currency_norm}"
+            raw = "|".join(
+                [
+                    str(item.get("platform") or "").strip(),
+                    str(item.get("product_name") or item.get("display_name") or symbol_norm).strip(),
+                    str(item.get("product_type") or "").strip(),
+                    currency_norm,
+                ]
+            )
+            return f"advisory:hash:{cls._stable_digest(raw)}"
+        if market_norm == "bank":
+            product_code = str(item.get("product_code") or "").strip().upper()
+            if product_code:
+                return f"bank:wealth:code:{product_code}:{currency_norm}"
+            raw = "|".join(
+                [
+                    str(item.get("bank_name") or "").strip(),
+                    str(item.get("issuer_name") or "").strip(),
+                    str(item.get("product_name") or item.get("display_name") or symbol_norm).strip(),
+                    str(item.get("registration_code") or "").strip().upper(),
+                    str(item.get("product_public_code") or "").strip().upper(),
+                    str(item.get("linked_entry_id") or "").strip(),
+                    currency_norm,
+                ]
+            )
+            return f"bank:hash:{cls._stable_digest(raw)}"
+        if market_norm == "insurance":
+            raw = "|".join(
+                [
+                    str(item.get("policy_no") or "").strip().upper(),
+                    str(item.get("insurer") or "").strip(),
+                    str(item.get("policy_name") or item.get("display_name") or symbol_norm).strip(),
+                    str(item.get("policy_id") or "").strip(),
+                    currency_norm,
+                ]
+            )
+            return f"insurance:hash:{cls._stable_digest(raw)}"
+        return f"{market_norm}:{symbol_norm}:{currency_norm}"
+
+    @staticmethod
+    def _stable_digest(value: str) -> str:
+        text = str(value or "").strip()
+        return hashlib.sha1(text.encode("utf-8")).hexdigest()[:24]
 
     @lru_cache(maxsize=1024)
     def _resolve_position_display_name(self, *, symbol: str, market: str) -> Optional[str]:
@@ -3237,10 +3656,43 @@ class PortfolioService:
             "broker": row.broker,
             "market": row.market,
             "base_currency": row.base_currency,
+            "cash_tracking_mode": PortfolioService._account_cash_tracking_mode(row),
             "is_active": bool(row.is_active),
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }
+
+    @staticmethod
+    def _tag_row_to_dict(row: Any) -> Dict[str, Any]:
+        return {
+            "id": int(row.id),
+            "name": row.name,
+            "color": row.color,
+            "sort_order": int(row.sort_order or 0),
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+
+    @staticmethod
+    def _normalize_tag_name(value: str) -> str:
+        name = str(value or "").strip()
+        if not name:
+            raise ValueError("标签名称不能为空")
+        if len(name) > 32:
+            raise ValueError("标签名称不能超过 32 个字符")
+        return name
+
+    @staticmethod
+    def _normalize_tag_color(value: str) -> str:
+        color = str(value or "").strip() or "hsl(var(--primary))"
+        if len(color) > 32:
+            raise ValueError("标签颜色不能超过 32 个字符")
+        return color
+
+    @staticmethod
+    def _looks_like_unique_conflict(exc: Exception) -> bool:
+        text = str(exc).lower()
+        return "unique" in text or "constraint" in text or "duplicate" in text
 
     @staticmethod
     def _trade_row_to_dict(row: Any) -> Dict[str, Any]:
@@ -3417,6 +3869,27 @@ class PortfolioService:
         if not currency:
             raise ValueError("currency is required")
         return currency
+
+    @staticmethod
+    def _default_cash_tracking_mode_for_market(market: str) -> str:
+        return "asset_only" if market in ASSET_ONLY_DEFAULT_MARKETS else "managed"
+
+    @classmethod
+    def _normalize_cash_tracking_mode(cls, value: Optional[str], *, market: Optional[str] = None) -> str:
+        mode = (value or "").strip().lower()
+        if not mode:
+            market_norm = cls._normalize_market(market) if market else "cn"
+            return cls._default_cash_tracking_mode_for_market(market_norm)
+        if mode not in VALID_CASH_TRACKING_MODES:
+            raise ValueError("cash_tracking_mode must be managed or asset_only")
+        return mode
+
+    @classmethod
+    def _account_cash_tracking_mode(cls, account: Any) -> str:
+        return cls._normalize_cash_tracking_mode(
+            getattr(account, "cash_tracking_mode", None),
+            market=getattr(account, "market", None) or "cn",
+        )
 
     @staticmethod
     def _normalize_cost_method(value: str) -> str:

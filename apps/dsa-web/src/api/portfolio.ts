@@ -32,6 +32,10 @@ import type {
   PortfolioManualPriceUpsertRequest,
   PortfolioRiskResponse,
   PortfolioSnapshotResponse,
+  PortfolioTagCreateRequest,
+  PortfolioTagItem,
+  PortfolioTagListResponse,
+  PortfolioTagUpdateRequest,
   PortfolioTradeCreateRequest,
   PortfolioTradeListResponse,
 } from '../types/portfolio';
@@ -140,6 +144,40 @@ function buildEventParams(query: EventQuery): Record<string, string | number> {
 }
 
 export const portfolioApi = {
+  async listTags(): Promise<PortfolioTagListResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/tags');
+    return toCamelCase<PortfolioTagListResponse>(response.data);
+  },
+
+  async createTag(payload: PortfolioTagCreateRequest): Promise<PortfolioTagItem> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/tags', {
+      name: payload.name,
+      color: payload.color,
+    });
+    return toCamelCase<PortfolioTagItem>(response.data);
+  },
+
+  async updateTag(tagId: number, payload: PortfolioTagUpdateRequest): Promise<PortfolioTagItem> {
+    const response = await apiClient.patch<Record<string, unknown>>(`/api/v1/portfolio/tags/${tagId}`, {
+      name: payload.name,
+      color: payload.color,
+    });
+    return toCamelCase<PortfolioTagItem>(response.data);
+  },
+
+  async deleteTag(tagId: number): Promise<PortfolioDeleteResponse> {
+    const response = await apiClient.delete<Record<string, unknown>>(`/api/v1/portfolio/tags/${tagId}`);
+    return toCamelCase<PortfolioDeleteResponse>(response.data);
+  },
+
+  async setProductTag(productKey: string, tagId?: number | null): Promise<{ productKey: string; tagId?: number | null }> {
+    const response = await apiClient.put<Record<string, unknown>>('/api/v1/portfolio/product-tags', {
+      product_key: productKey,
+      tag_id: tagId ?? null,
+    });
+    return toCamelCase<{ productKey: string; tagId?: number | null }>(response.data);
+  },
+
   async getAccounts(includeInactive = false): Promise<PortfolioAccountListResponse> {
     const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/accounts', {
       params: { include_inactive: includeInactive },
@@ -153,6 +191,7 @@ export const portfolioApi = {
       broker: payload.broker,
       market: payload.market,
       base_currency: payload.baseCurrency,
+      cash_tracking_mode: payload.cashTrackingMode,
       owner_id: payload.ownerId,
     });
     return toCamelCase<PortfolioAccountItem>(response.data);

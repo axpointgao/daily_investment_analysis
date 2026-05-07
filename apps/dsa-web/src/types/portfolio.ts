@@ -3,6 +3,7 @@ export type PortfolioSide = 'buy' | 'sell';
 export type PortfolioCashDirection = 'in' | 'out';
 export type PortfolioCorporateActionType = 'cash_dividend' | 'split_adjustment';
 export type PortfolioMarket = 'cn' | 'hk' | 'us' | 'fund' | 'crypto' | 'bank' | 'advisory' | 'insurance';
+export type PortfolioCashTrackingMode = 'managed' | 'asset_only';
 export type PortfolioBankAssetKind = 'demand' | 'deposit' | 'wealth';
 export type PortfolioAdvisoryProductType = 'advisory_combo' | 'dca_plan';
 export type PortfolioAdvisoryEventType = 'buy' | 'initial_buy' | 'dca_buy' | 'follow_buy' | 'redeem';
@@ -39,6 +40,7 @@ export interface PortfolioAccountItem {
   broker?: string | null;
   market: PortfolioMarket;
   baseCurrency: string;
+  cashTrackingMode: PortfolioCashTrackingMode;
   isActive: boolean;
   createdAt?: string | null;
   updatedAt?: string | null;
@@ -53,11 +55,16 @@ export interface PortfolioAccountCreateRequest {
   broker?: string;
   market: PortfolioMarket;
   baseCurrency: string;
+  cashTrackingMode?: PortfolioCashTrackingMode;
   ownerId?: string;
 }
 
 export interface PortfolioPositionItem {
   symbol: string;
+  productKey?: string | null;
+  tagId?: number | null;
+  tagName?: string | null;
+  tagColor?: string | null;
   displayName?: string | null;
   market: string;
   currency: string;
@@ -68,6 +75,10 @@ export interface PortfolioPositionItem {
   marketValueBase: number;
   unrealizedPnlBase: number;
   unrealizedPnlPct?: number | null;
+  annualizedReturnPct?: number | null;
+  valuationModel?: string | null;
+  costDisplayValue?: number | null;
+  priceDisplayValue?: number | null;
   valuationCurrency: string;
   priceSource?: 'realtime_quote' | 'history_close' | 'missing' | string;
   priceProvider?: string | null;
@@ -115,6 +126,42 @@ export interface PortfolioPositionItem {
   valueEstimated?: boolean | null;
 }
 
+export interface PortfolioTagItem {
+  id: number;
+  name: string;
+  color: string;
+  sortOrder: number;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface PortfolioTagListResponse {
+  tags: PortfolioTagItem[];
+}
+
+export interface PortfolioTagCreateRequest {
+  name: string;
+  color?: string;
+}
+
+export interface PortfolioTagUpdateRequest {
+  name?: string;
+  color?: string;
+}
+
+export interface PortfolioProductTagUpdateRequest {
+  productKey: string;
+  tagId?: number | null;
+}
+
+export interface PortfolioTagBreakdownItem {
+  key: string;
+  tagId?: number | null;
+  tagName: string;
+  tagColor?: string | null;
+  amount: number;
+}
+
 export interface PortfolioAccountSnapshot {
   accountId: number;
   accountName: string;
@@ -122,6 +169,8 @@ export interface PortfolioAccountSnapshot {
   broker?: string | null;
   market: string;
   baseCurrency: string;
+  cashTrackingMode?: PortfolioCashTrackingMode | string;
+  snapshotSchemaVersion?: number | null;
   asOf: string;
   costMethod: PortfolioCostMethod;
   totalCash: number | null;
@@ -154,6 +203,7 @@ export interface PortfolioSnapshotResponse {
     toCurrency: string;
   }>;
   assetBreakdown: Record<string, number>;
+  tagBreakdown?: PortfolioTagBreakdownItem[];
   accounts: PortfolioAccountSnapshot[];
 }
 

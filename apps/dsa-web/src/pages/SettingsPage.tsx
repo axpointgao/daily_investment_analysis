@@ -2,6 +2,7 @@ import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { useAuth, useSystemConfig } from '../hooks';
 import { createParsedApiError, getParsedApiError, type ParsedApiError } from '../api/error';
+import { portfolioApi } from '../api/portfolio';
 import { systemConfigApi } from '../api/systemConfig';
 import { ApiErrorAlert, Button, ConfirmDialog, EmptyState } from '../components/common';
 import {
@@ -19,6 +20,7 @@ import { WEB_BUILD_INFO } from '../utils/constants';
 import { getCategoryDescriptionZh } from '../utils/systemConfigI18n';
 import type { ConfigValidationIssue, SystemConfigCategory } from '../types/systemConfig';
 import type { SystemConfigItem, TestDataSourceResponse, TestDataSourceSource } from '../types/systemConfig';
+import type { PortfolioTagItem } from '../types/portfolio';
 
 type DesktopWindow = Window & {
   dsaDesktop?: {
@@ -59,6 +61,15 @@ type DataSourceTestState = {
   result?: TestDataSourceResponse;
   error?: ParsedApiError;
 };
+
+const PORTFOLIO_TAG_COLORS = [
+  'hsl(var(--primary))',
+  'hsl(var(--success))',
+  'hsl(var(--warning))',
+  'hsl(var(--color-purple))',
+  'hsl(212 78% 54%)',
+  'hsl(326 62% 58%)',
+];
 
 type AgentConfigGroup = {
   id: string;
@@ -591,6 +602,15 @@ const SettingsPage: React.FC = () => {
     ttfund_skills: { loading: false },
     yingmi_stargate: { loading: false },
   });
+  const [portfolioTags, setPortfolioTags] = useState<PortfolioTagItem[]>([]);
+  const [portfolioTagsLoading, setPortfolioTagsLoading] = useState(false);
+  const [portfolioTagActionLoading, setPortfolioTagActionLoading] = useState<number | 'create' | null>(null);
+  const [portfolioTagsError, setPortfolioTagsError] = useState<ParsedApiError | null>(null);
+  const [portfolioTagsSuccess, setPortfolioTagsSuccess] = useState('');
+  const [portfolioTagForm, setPortfolioTagForm] = useState({
+    name: '',
+    color: PORTFOLIO_TAG_COLORS[0],
+  });
   const desktopImportRef = useRef<HTMLInputElement | null>(null);
   const desktopRuntimeApi = getDesktopRuntimeApi();
   const isDesktopRuntime = Boolean(desktopRuntimeApi);
@@ -633,6 +653,23 @@ const SettingsPage: React.FC = () => {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadPortfolioTags = async () => {
+    setPortfolioTagsLoading(true);
+    try {
+      const response = await portfolioApi.listTags();
+      setPortfolioTags(response.tags || []);
+      setPortfolioTagsError(null);
+    } catch (error: unknown) {
+      setPortfolioTagsError(getParsedApiError(error));
+    } finally {
+      setPortfolioTagsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadPortfolioTags();
+  }, []);
 
   useEffect(() => {
     if (!toast) {
@@ -849,6 +886,63 @@ const SettingsPage: React.FC = () => {
     }
 
     await desktopRuntimeApi.openReleasePage(desktopUpdateState?.releaseUrl);
+  };
+
+  const createPortfolioTag = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const name = portfolioTagForm.name.trim();
+    if (!name) {
+      setPortfolioTagsError(createParsedApiError({
+        title: '标签名称为空',
+        message: '请填写标签名称。',
+        rawMessage: 'Portfolio tag name is empty',
+        category: 'missing_params',
+      }));
+      return;
+    }
+    setPortfolioTagActionLoading('create');
+    setPortfolioTagsSuccess('');
+    try {
+      await portfolioApi.createTag({ name, color: portfolioTagForm.color });
+      setPortfolioTagForm({ name: '', color: PORTFOLIO_TAG_COLORS[0] });
+      await loadPortfolioTags();
+      setPortfolioTagsSuccess('持仓标签已新增。');
+    } catch (error: unknown) {
+      setPortfolioTagsError(getParsedApiError(error));
+    } finally {
+      setPortfolioTagActionLoading(null);
+    }
+  };
+
+  const updatePortfolioTag = async (tag: PortfolioTagItem, fields: { name?: string; color?: string }) => {
+    setPortfolioTagActionLoading(tag.id);
+    setPortfolioTagsSuccess('');
+    try {
+      await portfolioApi.updateTag(tag.id, fields);
+      await loadPortfolioTags();
+      setPortfolioTagsSuccess('持仓标签已更新。');
+    } catch (error: unknown) {
+      setPortfolioTagsError(getParsedApiError(error));
+    } finally {
+      setPortfolioTagActionLoading(null);
+    }
+  };
+
+  const deletePortfolioTag = async (tag: PortfolioTagItem) => {
+    if (!window.confirm(`删除标签「${tag.name}」？已绑定产品会变为未标签。`)) {
+      return;
+    }
+    setPortfolioTagActionLoading(tag.id);
+    setPortfolioTagsSuccess('');
+    try {
+      await portfolioApi.deleteTag(tag.id);
+      await loadPortfolioTags();
+      setPortfolioTagsSuccess('持仓标签已删除，相关产品已归入未标签。');
+    } catch (error: unknown) {
+      setPortfolioTagsError(getParsedApiError(error));
+    } finally {
+      setPortfolioTagActionLoading(null);
+    }
   };
 
   const testDataSource = async (source: TestDataSourceSource) => {
@@ -1079,6 +1173,91 @@ const SettingsPage: React.FC = () => {
                   {!desktopActionError && desktopActionSuccess ? (
                     <SettingsAlert title="操作成功" message={desktopActionSuccess} variant="success" />
                   ) : null}
+                </div>
+              </SettingsSectionCard>
+            ) : null}
+            {activeCategory === 'base' ? (
+              <SettingsSectionCard
+                title="持仓标签"
+                description="维护持仓明细中可选的全局产品标签，用于按标签查看资产分布。"
+              >
+                <div className="space-y-4">
+                  <form className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_120px]" onSubmit={(event) => void createPortfolioTag(event)}>
+                    <input
+                      value={portfolioTagForm.name}
+                      onChange={(event) => setPortfolioTagForm((current) => ({ ...current, name: event.target.value }))}
+                      placeholder="例如 长期核心"
+                      className="input-surface input-focus-glow h-10 w-full rounded-xl border bg-transparent px-3 text-sm outline-none"
+                      maxLength={32}
+                    />
+                    <select
+                      value={portfolioTagForm.color}
+                      onChange={(event) => setPortfolioTagForm((current) => ({ ...current, color: event.target.value }))}
+                      className="input-surface input-focus-glow h-10 w-full appearance-none rounded-xl border bg-transparent px-3 pr-8 text-sm outline-none"
+                    >
+                      {PORTFOLIO_TAG_COLORS.map((color, index) => (
+                        <option key={color} value={color}>颜色 {index + 1}</option>
+                      ))}
+                    </select>
+                    <Button
+                      type="submit"
+                      variant="settings-primary"
+                      size="md"
+                      isLoading={portfolioTagActionLoading === 'create'}
+                    >
+                      新增标签
+                    </Button>
+                  </form>
+                  {portfolioTagsError ? <ApiErrorAlert error={portfolioTagsError} /> : null}
+                  {!portfolioTagsError && portfolioTagsSuccess ? (
+                    <SettingsAlert title="操作成功" message={portfolioTagsSuccess} variant="success" />
+                  ) : null}
+                  {portfolioTagsLoading ? (
+                    <p className="text-xs text-muted-text">正在加载持仓标签...</p>
+                  ) : portfolioTags.length === 0 ? (
+                    <EmptyState
+                      title="暂无持仓标签"
+                      description="新增标签后，可在持仓明细的资产说明行中为产品选择标签。"
+                      className="border-dashed bg-transparent px-4 py-8 shadow-none"
+                    />
+                  ) : (
+                    <div className="space-y-2">
+                      {portfolioTags.map((tag) => (
+                        <div key={tag.id} className="grid gap-2 rounded-xl border settings-border bg-background/30 p-3 md:grid-cols-[minmax(0,1fr)_180px_auto]">
+                          <input
+                            defaultValue={tag.name}
+                            className="input-surface input-focus-glow h-9 w-full rounded-lg border bg-transparent px-3 text-sm outline-none"
+                            maxLength={32}
+                            onBlur={(event) => {
+                              const nextName = event.target.value.trim();
+                              if (nextName && nextName !== tag.name) {
+                                void updatePortfolioTag(tag, { name: nextName });
+                              }
+                            }}
+                          />
+                          <select
+                            value={tag.color}
+                            onChange={(event) => void updatePortfolioTag(tag, { color: event.target.value })}
+                            className="input-surface input-focus-glow h-9 w-full appearance-none rounded-lg border bg-transparent px-3 pr-8 text-sm outline-none"
+                            disabled={portfolioTagActionLoading === tag.id}
+                          >
+                            {PORTFOLIO_TAG_COLORS.map((color, index) => (
+                              <option key={color} value={color}>颜色 {index + 1}</option>
+                            ))}
+                          </select>
+                          <Button
+                            type="button"
+                            variant="danger-subtle"
+                            size="sm"
+                            onClick={() => void deletePortfolioTag(tag)}
+                            disabled={portfolioTagActionLoading === tag.id}
+                          >
+                            删除
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </SettingsSectionCard>
             ) : null}

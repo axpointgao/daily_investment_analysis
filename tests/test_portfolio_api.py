@@ -96,6 +96,7 @@ class PortfolioApiTestCase(unittest.TestCase):
         )
         self.assertEqual(create_resp.status_code, 200)
         account_id = create_resp.json()["id"]
+        self.assertEqual(create_resp.json()["cash_tracking_mode"], "managed")
 
         list_resp = self.client.get("/api/v1/portfolio/accounts")
         self.assertEqual(list_resp.status_code, 200)
@@ -143,6 +144,35 @@ class PortfolioApiTestCase(unittest.TestCase):
         self.assertAlmostEqual(account_snapshot["total_cash"], 0.0, places=6)
         self.assertAlmostEqual(account_snapshot["total_market_value"], 11000.0, places=6)
         self.assertAlmostEqual(account_snapshot["total_equity"], 11000.0, places=6)
+
+    def test_portfolio_tag_crud_and_product_assignment(self) -> None:
+        create_tag = self.client.post(
+            "/api/v1/portfolio/tags",
+            json={"name": "稳健配置", "color": "hsl(var(--primary))"},
+        )
+        self.assertEqual(create_tag.status_code, 200)
+        tag_id = create_tag.json()["id"]
+
+        list_tags = self.client.get("/api/v1/portfolio/tags")
+        self.assertEqual(list_tags.status_code, 200)
+        self.assertEqual(list_tags.json()["tags"][0]["name"], "稳健配置")
+
+        assign = self.client.put(
+            "/api/v1/portfolio/product-tags",
+            json={"product_key": "cn:SH600519:CNY", "tag_id": tag_id},
+        )
+        self.assertEqual(assign.status_code, 200)
+        self.assertEqual(assign.json()["tag_id"], tag_id)
+
+        unassign = self.client.put(
+            "/api/v1/portfolio/product-tags",
+            json={"product_key": "cn:SH600519:CNY", "tag_id": None},
+        )
+        self.assertEqual(unassign.status_code, 200)
+        self.assertIsNone(unassign.json()["tag_id"])
+
+        delete_tag = self.client.delete(f"/api/v1/portfolio/tags/{tag_id}")
+        self.assertEqual(delete_tag.status_code, 200)
 
     def test_snapshot_invalid_cost_method_returns_400(self) -> None:
         resp = self.client.get("/api/v1/portfolio/snapshot", params={"cost_method": "bad"})
@@ -588,6 +618,7 @@ class PortfolioApiTestCase(unittest.TestCase):
         self.assertEqual(snapshot_resp.status_code, 200)
         position = snapshot_resp.json()["accounts"][0]["positions"][0]
         self.assertEqual(position["market"], "advisory")
+        self.assertEqual(snapshot_resp.json()["accounts"][0]["cash_tracking_mode"], "asset_only")
         self.assertEqual(position["price_source"], "advisory_value_update")
         self.assertAlmostEqual(position["market_value_base"], 102000.0, places=6)
 

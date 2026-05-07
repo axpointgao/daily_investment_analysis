@@ -2048,7 +2048,12 @@ textarea {
 }
 
 .portfolio-position-table-wrapper {
-  overflow: hidden;
+  overflow: visible;
+}
+
+.portfolio-position-card.terminal-card,
+.portfolio-position-card {
+  overflow: visible;
 }
 
 .portfolio-position-table {
@@ -2056,33 +2061,29 @@ textarea {
   width: 100%;
 }
 
-.portfolio-position-col-account {
-  width: 9%;
-}
-
 .portfolio-position-col-type {
   width: 7%;
 }
 
 .portfolio-position-col-asset {
-  width: 20%;
+  width: 22%;
 }
 
 .portfolio-position-col-quantity {
-  width: 10%;
+  width: 8%;
 }
 
 .portfolio-position-col-price {
-  width: 9.5%;
+  width: 8.5%;
 }
 
 .portfolio-position-col-money,
 .portfolio-position-col-pnl {
-  width: 12%;
+  width: 13%;
 }
 
 .portfolio-position-col-rate {
-  width: 9%;
+  width: 9.5%;
 }
 
 .portfolio-position-head-cell {
@@ -2116,7 +2117,7 @@ textarea {
 .portfolio-position-account-text,
 .portfolio-position-type-chip,
 .portfolio-position-asset-primary,
-.portfolio-position-asset-secondary,
+.portfolio-position-asset-meta,
 .portfolio-position-price-source {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2125,14 +2126,79 @@ textarea {
 
 .portfolio-position-account-text,
 .portfolio-position-asset-primary,
-.portfolio-position-asset-secondary,
+.portfolio-position-asset-meta,
 .portfolio-position-price-source {
   display: block;
   min-width: 0;
 }
 
+.portfolio-position-asset-secondary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.portfolio-position-asset-meta {
+  line-height: 1.375rem;
+}
+
 .portfolio-position-type-chip {
   max-width: 100%;
+  justify-self: start;
+  line-height: 1.25;
+  text-align: left;
+}
+
+.portfolio-position-type-account-cell {
+  display: grid;
+  gap: 0.125rem;
+  justify-items: start;
+  min-width: 0;
+  text-align: left;
+}
+
+.portfolio-position-tag-chip {
+  display: inline-flex;
+  min-height: 1.375rem;
+  max-width: 100%;
+  cursor: pointer;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 9999px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: hsl(var(--primary));
+  font-size: 0.6875rem;
+  font-weight: 650;
+  line-height: 1.1;
+  white-space: nowrap;
+  transition:
+    color 0.16s ease,
+    transform 0.16s ease;
+}
+
+.portfolio-position-tag-chip:hover:not(:disabled) {
+  color: hsl(var(--primary) / 0.82);
+  transform: translateY(-1px);
+}
+
+.portfolio-position-tag-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.portfolio-position-tag-chip-selected {
+  border-style: solid;
+}
+
+.portfolio-position-tag-chip-empty {
+  color: hsl(var(--muted-foreground));
+}
+
+.portfolio-position-tag-chip svg {
+  flex: 0 0 auto;
 }
 
 .portfolio-position-asset-cell,
@@ -2181,34 +2247,71 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
-@media (max-width: 1024px) {
-  .portfolio-position-col-account {
-    width: 8%;
-  }
+.portfolio-tag-picker-option {
+  display: flex;
+  min-height: 2.5rem;
+  cursor: pointer;
+  align-items: center;
+  gap: 0.625rem;
+  border-radius: 0.75rem;
+  border: 1px solid hsl(var(--border) / 0.58);
+  background: hsl(var(--card) / 0.48);
+  padding: 0.625rem 0.75rem;
+  color: hsl(var(--foreground));
+  font-size: 0.875rem;
+  font-weight: 550;
+  text-align: left;
+  transition:
+    border-color 0.16s ease,
+    background-color 0.16s ease;
+}
 
+.portfolio-tag-picker-option:hover:not(:disabled) {
+  border-color: hsl(var(--primary) / 0.62);
+  background: hsl(var(--primary) / 0.1);
+}
+
+.portfolio-tag-picker-option:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.portfolio-tag-picker-option-active {
+  border-color: hsl(var(--primary) / 0.68);
+  background: hsl(var(--primary) / 0.13);
+}
+
+.portfolio-tag-picker-dot {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: 0 0 auto;
+  border-radius: 9999px;
+}
+
+@media (max-width: 1024px) {
   .portfolio-position-col-type {
     width: 7%;
   }
 
   .portfolio-position-col-asset {
-    width: 18%;
+    width: 22%;
   }
 
   .portfolio-position-col-quantity {
-    width: 9%;
+    width: 7%;
   }
 
   .portfolio-position-col-price {
-    width: 10%;
+    width: 8.5%;
   }
 
   .portfolio-position-col-money,
   .portfolio-position-col-pnl {
-    width: 12.5%;
+    width: 13%;
   }
 
   .portfolio-position-col-rate {
-    width: 10.5%;
+    width: 9.5%;
   }
 
   .portfolio-position-head-cell,
@@ -2218,46 +2321,76 @@ textarea {
 }
 
 @media (max-width: 760px) {
+  .portfolio-position-table-wrapper {
+    overflow: visible;
+  }
+
   .portfolio-position-table {
+    display: block;
     font-size: 0.75rem;
   }
 
-  .portfolio-position-head-cell,
-  .portfolio-position-cell {
-    padding-inline: 0.35rem;
-  }
-
-  .portfolio-position-col-account,
-  .portfolio-position-col-type,
-  .portfolio-position-col-quantity,
-  .portfolio-position-col-price {
-    width: 0;
-  }
-
-  .portfolio-position-table th:nth-child(1),
-  .portfolio-position-table td:nth-child(1),
-  .portfolio-position-table th:nth-child(2),
-  .portfolio-position-table td:nth-child(2),
-  .portfolio-position-table th:nth-child(4),
-  .portfolio-position-table td:nth-child(4),
-  .portfolio-position-table th:nth-child(5),
-  .portfolio-position-table td:nth-child(5),
-  .portfolio-position-table th:nth-child(6),
-  .portfolio-position-table td:nth-child(6) {
+  .portfolio-position-table colgroup,
+  .portfolio-position-table thead {
     display: none;
   }
 
-  .portfolio-position-col-asset {
-    width: 34%;
+  .portfolio-position-table tbody {
+    display: grid;
+    gap: 0.75rem;
   }
 
-  .portfolio-position-col-money,
-  .portfolio-position-col-pnl {
-    width: 24%;
+  .portfolio-position-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid hsl(var(--border) / 0.55);
+    border-radius: 0.75rem;
+    background: hsl(var(--card) / 0.58);
+    box-shadow: none;
   }
 
-  .portfolio-position-col-rate {
-    width: 18%;
+  .portfolio-position-cell {
+    display: grid;
+    min-width: 0;
+    padding: 0;
+    text-align: left;
+    gap: 0.2rem;
+  }
+
+  .portfolio-position-cell::before {
+    content: attr(data-label);
+    color: var(--text-muted-text);
+    font-size: 0.68rem;
+    line-height: 1;
+    font-weight: 500;
+  }
+
+  .portfolio-position-asset-cell {
+    grid-column: 1 / -1;
+  }
+
+  .portfolio-position-number-cell {
+    white-space: normal;
+  }
+
+  .portfolio-position-account-text,
+  .portfolio-position-type-chip,
+  .portfolio-position-asset-primary,
+  .portfolio-position-asset-secondary,
+  .portfolio-position-price-source {
+    white-space: normal;
+  }
+
+  .portfolio-position-asset-primary,
+  .portfolio-position-asset-secondary {
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .portfolio-position-cell.text-right {
+    text-align: left;
   }
 }
 

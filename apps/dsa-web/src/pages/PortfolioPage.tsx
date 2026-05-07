@@ -2,6 +2,7 @@ import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Tag } from 'lucide-react';
 import { portfolioApi } from '../api/portfolio';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
@@ -40,6 +41,7 @@ import type {
   PortfolioPositionItem,
   PortfolioSide,
   PortfolioSnapshotResponse,
+  PortfolioTagItem,
   PortfolioTradeListItem,
 } from '../types/portfolio';
 
@@ -95,6 +97,13 @@ type PortfolioToast = {
   id: number;
   title: string;
   message: string;
+};
+
+type AssetBreakdownView = 'tag' | 'type';
+
+type ActiveTagTarget = {
+  productKey: string;
+  row: FlatPosition;
 };
 
 type InsuranceEventOption = {
@@ -190,6 +199,15 @@ function formatMoney(value: number | undefined | null, currency = 'CNY'): string
   })}`;
 }
 
+function formatPositionListMoney(value: number | undefined | null, currency = 'CNY'): string {
+  if (value == null || Number.isNaN(value)) return '--';
+  const amount = Number(value).toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return currency === 'USD' ? `USD ${amount}` : amount;
+}
+
 function formatMissingFxPairs(snapshot: PortfolioSnapshotResponse | null): string {
   const pairs = snapshot?.missingFxPairs || [];
   if (pairs.length === 0) return '';
@@ -212,6 +230,14 @@ function formatSignedPct(value: number | undefined | null): string {
   return `${sign}${value.toFixed(2)}%`;
 }
 
+function getTagButtonStyle(row: PortfolioPositionItem): React.CSSProperties | undefined {
+  if (!row.tagColor) return undefined;
+  return {
+    color: row.tagColor,
+    borderColor: row.tagColor,
+  };
+}
+
 function hasPositionPrice(row: PortfolioPositionItem): boolean {
   return row.priceAvailable !== false && row.priceSource !== 'missing';
 }
@@ -228,14 +254,24 @@ function isBankWealthNavPosition(row: PortfolioPositionItem): boolean {
 
 function formatPositionPrice(row: PortfolioPositionItem): string {
   if (!hasPositionPrice(row)) return '--';
-  if (row.market === 'advisory') return '-';
-  if (isBankWealthPosition(row) && !isBankWealthNavPosition(row)) return '-';
+  if (row.priceDisplayValue != null) {
+    if (row.valuationModel === 'amount_value' || row.valuationModel === 'insurance_cash_value') {
+      return formatPositionListMoney(row.priceDisplayValue, row.valuationCurrency);
+    }
+    return Number(row.priceDisplayValue).toFixed(4);
+  }
+  if (row.market === 'advisory') return formatPositionListMoney(row.marketValueBase, row.valuationCurrency);
+  if (isBankWealthPosition(row) && !isBankWealthNavPosition(row)) return formatPositionListMoney(row.marketValueBase, row.valuationCurrency);
   return row.lastPrice.toFixed(4);
 }
 
-function formatAssetQuantity(value: number | undefined | null, market?: string): string {
+function formatAssetQuantity(
+  value: number | undefined | null,
+  market?: string,
+  maximumFractionDigitsOverride?: number,
+): string {
   if (value == null || Number.isNaN(value)) return '--';
-  const maximumFractionDigits = market === 'crypto' ? 8 : 4;
+  const maximumFractionDigits = maximumFractionDigitsOverride ?? (market === 'crypto' ? 8 : 4);
   return Number(value).toLocaleString('zh-CN', {
     minimumFractionDigits: 0,
     maximumFractionDigits,
@@ -250,7 +286,26 @@ function parsePositiveFormNumber(value: string): number | null {
 function formatPositionQuantity(row: PortfolioPositionItem): string {
   if (row.market === 'advisory') return '-';
   if (row.market === 'bank' && !isBankWealthNavPosition(row)) return '-';
+  return formatAssetQuantity(row.quantity, row.market, 2);
+}
+
+function formatPositionQuantityTitle(row: PortfolioPositionItem): string {
+  if (row.market === 'advisory') return '无份额概念';
+  if (row.market === 'bank' && !isBankWealthNavPosition(row)) return '无份额概念';
   return formatAssetQuantity(row.quantity, row.market);
+}
+
+function formatPositionCostPrice(row: PortfolioPositionItem): string {
+  if (row.costDisplayValue != null) {
+    if (row.valuationModel === 'amount_value' || row.valuationModel === 'insurance_cash_value') {
+      return formatPositionListMoney(row.costDisplayValue, row.valuationCurrency);
+    }
+    return Number(row.costDisplayValue).toFixed(4);
+  }
+  if (row.market === 'advisory') return formatPositionListMoney(row.totalCost || row.avgCost, row.valuationCurrency);
+  if (isBankWealthPosition(row) && !isBankWealthNavPosition(row)) return formatPositionListMoney(row.totalCost || row.avgCost, row.valuationCurrency);
+  if (row.market === 'bank' && !isBankWealthPosition(row)) return formatPositionListMoney(row.totalCost || row.avgCost, row.valuationCurrency);
+  return row.avgCost.toFixed(4);
 }
 
 function formatTradeQuantity(item: PortfolioTradeListItem): string {
@@ -259,7 +314,7 @@ function formatTradeQuantity(item: PortfolioTradeListItem): string {
 
 function formatPositionMoney(value: number, row: PortfolioPositionItem): string {
   if (!hasPositionPrice(row)) return '--';
-  return formatMoney(value, row.valuationCurrency);
+  return formatPositionListMoney(value, row.valuationCurrency);
 }
 
 function getChinaPnlColorClass(value: number | undefined | null, hasValue: boolean): string {
@@ -852,6 +907,11 @@ const PortfolioPage: React.FC = () => {
   const [fxRefreshing, setFxRefreshing] = useState(false);
   const [fxRefreshFeedback, setFxRefreshFeedback] = useState<FxRefreshFeedback | null>(null);
   const [portfolioToast, setPortfolioToast] = useState<PortfolioToast | null>(null);
+  const [portfolioTags, setPortfolioTags] = useState<PortfolioTagItem[]>([]);
+  const [tagLoadError, setTagLoadError] = useState<ParsedApiError | null>(null);
+  const [activeTagTarget, setActiveTagTarget] = useState<ActiveTagTarget | null>(null);
+  const [tagUpdatingKey, setTagUpdatingKey] = useState<string | null>(null);
+  const [assetBreakdownView, setAssetBreakdownView] = useState<AssetBreakdownView>('tag');
   const [error, setError] = useState<ParsedApiError | null>(null);
   const [writeWarning, setWriteWarning] = useState<string | null>(null);
 
@@ -1141,6 +1201,16 @@ const PortfolioPage: React.FC = () => {
     }
   }, [selectedBroker]);
 
+  const loadPortfolioTags = useCallback(async () => {
+    try {
+      const response = await portfolioApi.listTags();
+      setPortfolioTags(response.tags || []);
+      setTagLoadError(null);
+    } catch (err) {
+      setTagLoadError(getParsedApiError(err));
+    }
+  }, []);
+
   const loadInsurancePolicies = useCallback(async () => {
     if (!writableAccountId || writableAccount?.market !== 'insurance') {
       setInsurancePolicies([]);
@@ -1277,7 +1347,8 @@ const PortfolioPage: React.FC = () => {
   useEffect(() => {
     void loadAccounts();
     void loadBrokers();
-  }, [loadAccounts, loadBrokers]);
+    void loadPortfolioTags();
+  }, [loadAccounts, loadBrokers, loadPortfolioTags]);
 
   useEffect(() => {
     void loadInsurancePolicies();
@@ -1465,6 +1536,14 @@ const PortfolioPage: React.FC = () => {
     .filter(([, value]) => Math.abs(Number(value || 0)) > 0.000001)
     .map(([key, value]) => ({ key, value: Number(value || 0) }));
   const assetBreakdownTotal = assetBreakdownRows.reduce((total, item) => total + Math.abs(item.value), 0);
+  const tagBreakdownRows = (snapshot?.tagBreakdown || [])
+    .filter((item) => item.key !== '__cash__' && Math.abs(Number(item.amount || 0)) > 0.000001)
+    .map((item) => ({
+      ...item,
+      tagName: item.key === '__untagged__' ? '未定义' : item.tagName,
+      amount: Number(item.amount || 0),
+    }));
+  const tagBreakdownTotal = tagBreakdownRows.reduce((total, item) => total + Math.abs(item.amount), 0);
 
   const handleTradeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1497,6 +1576,47 @@ const PortfolioPage: React.FC = () => {
       );
     } catch (err) {
       setError(getParsedApiError(err));
+    }
+  };
+
+  const handleProductTagChange = async (row: FlatPosition, rawTagId: string) => {
+    const productKey = String(row.productKey || '').trim();
+    if (!productKey) {
+      setWriteWarning('当前持仓缺少产品标识，无法设置标签。');
+      return;
+    }
+    const tagId = rawTagId ? Number(rawTagId) : null;
+    const selectedTag = tagId ? portfolioTags.find((item) => item.id === tagId) : undefined;
+    setTagUpdatingKey(productKey);
+    setSnapshot((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        accounts: current.accounts.map((account) => ({
+          ...account,
+          positions: account.positions.map((position) => (
+            position.productKey === productKey
+              ? {
+                ...position,
+                tagId,
+                tagName: selectedTag?.name ?? null,
+                tagColor: selectedTag?.color ?? null,
+              }
+              : position
+          )),
+        })),
+      };
+    });
+    try {
+      await portfolioApi.setProductTag(productKey, tagId);
+      setActiveTagTarget(null);
+      showPortfolioToast('标签已更新', `${getPositionDisplayName(row)} 已${selectedTag ? `标记为 ${selectedTag.name}` : '移除标签'}。`);
+      await loadSnapshot();
+    } catch (err) {
+      setError(getParsedApiError(err));
+      await loadSnapshot();
+    } finally {
+      setTagUpdatingKey(null);
     }
   };
 
@@ -2318,7 +2438,7 @@ const PortfolioPage: React.FC = () => {
       ) : null}
 
       {(showCreateAccount || !hasAccounts) ? (
-        <Card padding="md">
+        <Card padding="md" className="portfolio-position-card">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-foreground">新建账户</h2>
             {hasAccounts ? (
@@ -2461,7 +2581,6 @@ const PortfolioPage: React.FC = () => {
             <div className="portfolio-position-table-wrapper">
               <table className="portfolio-position-table w-full text-sm">
                 <colgroup>
-                  <col className="portfolio-position-col-account" />
                   <col className="portfolio-position-col-type" />
                   <col className="portfolio-position-col-asset" />
                   <col className="portfolio-position-col-quantity" />
@@ -2470,53 +2589,80 @@ const PortfolioPage: React.FC = () => {
                   <col className="portfolio-position-col-money" />
                   <col className="portfolio-position-col-pnl" />
                   <col className="portfolio-position-col-rate" />
+                  <col className="portfolio-position-col-rate" />
                 </colgroup>
                 <thead className="text-xs text-secondary border-b border-white/10">
                   <tr>
-                    <th className="portfolio-position-head-cell text-left">账户</th>
-                    <th className="portfolio-position-head-cell text-left">类型</th>
+                    <th className="portfolio-position-head-cell text-left">类型/账户</th>
                     <th className="portfolio-position-head-cell text-left">资产</th>
                     <th className="portfolio-position-head-cell text-right">数量</th>
-                    <th className="portfolio-position-head-cell text-right">均价</th>
+                    <th className="portfolio-position-head-cell text-right">成本价</th>
                     <th className="portfolio-position-head-cell text-right">现价</th>
                     <th className="portfolio-position-head-cell text-right">市值</th>
                     <th className="portfolio-position-head-cell text-right">未实现盈亏</th>
                     <th className="portfolio-position-head-cell text-right">收益率</th>
+                    <th className="portfolio-position-head-cell text-right">年化</th>
                   </tr>
                 </thead>
                 <tbody>
                   {positionRows.map((row) => {
                     const assetName = getPositionDisplayName(row);
                     const secondaryLine = getPositionSecondaryLine(row, assetNameMaps);
-                    const assetTitle = [assetName, secondaryLine].filter(Boolean).join('\n');
+                    const tagLabel = row.tagName || '+标签';
+                    const assetTitle = [assetName, tagLabel, secondaryLine].filter(Boolean).join('\n');
+                    const assetType = getPositionAssetType(row, assetNameMaps);
                     return (
                     <tr key={`${row.accountId}-${row.symbol}-${row.market}-${row.productName || ''}`} className="portfolio-position-row">
-                      <td className="portfolio-position-cell text-secondary">
-                        <span className="portfolio-position-account-text" title={row.accountName}>{row.accountName}</span>
-                      </td>
-                      <td className="portfolio-position-cell">
-                        <span className="portfolio-position-type-chip inline-flex rounded-md border border-white/10 bg-white/[0.03] px-2 py-1 text-xs font-medium text-foreground" title={getPositionAssetType(row, assetNameMaps)}>
-                          {getPositionAssetType(row, assetNameMaps)}
+                      <td className="portfolio-position-cell portfolio-position-type-account-cell" data-label="类型/账户" title={`${assetType}\n${row.accountName}`}>
+                        <span className="portfolio-position-type-chip inline-flex text-sm font-semibold text-foreground" title={assetType}>
+                          {assetType}
                         </span>
+                        <span className="portfolio-position-account-text text-[11px] text-secondary" title={row.accountName}>{row.accountName}</span>
                       </td>
-                      <td className="portfolio-position-cell portfolio-position-asset-cell text-foreground" title={assetTitle}>
+                      <td className="portfolio-position-cell portfolio-position-asset-cell text-foreground" data-label="资产" title={assetTitle}>
                         <div className={`portfolio-position-asset-primary ${row.market === 'bank' || row.market === 'advisory' ? '' : 'font-mono'}`}>{assetName}</div>
-                        {secondaryLine ? (
-                          <div className="portfolio-position-asset-secondary text-[11px] text-secondary">{secondaryLine}</div>
-                        ) : null}
+                        <div className="portfolio-position-asset-secondary text-[11px] text-secondary">
+                          <button
+                            type="button"
+                            className={`portfolio-position-tag-chip ${row.tagName ? 'portfolio-position-tag-chip-selected' : 'portfolio-position-tag-chip-empty'}`}
+                            style={getTagButtonStyle(row)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              const productKey = String(row.productKey || '').trim();
+                              if (!productKey) {
+                                setWriteWarning('当前持仓缺少产品标识，无法设置标签。');
+                                return;
+                              }
+                              setActiveTagTarget({ productKey, row });
+                            }}
+                            disabled={!row.productKey || tagUpdatingKey === row.productKey}
+                            aria-label={`设置 ${assetName} 的标签`}
+                          >
+                            <Tag className="h-3 w-3" aria-hidden="true" />
+                            <span>{tagUpdatingKey === row.productKey ? '保存中' : tagLabel}</span>
+                          </button>
+                          {secondaryLine ? <span className="portfolio-position-asset-meta">{secondaryLine}</span> : null}
+                        </div>
                       </td>
-                      <td className="portfolio-position-cell portfolio-position-number-cell text-right">{formatPositionQuantity(row)}</td>
-                      <td className="portfolio-position-cell portfolio-position-number-cell text-right">
-                        {(row.market === 'bank' && !isBankWealthNavPosition(row)) || row.market === 'advisory' ? '-' : row.avgCost.toFixed(4)}
+                      <td
+                        className="portfolio-position-cell portfolio-position-number-cell text-right"
+                        data-label="数量"
+                        title={formatPositionQuantityTitle(row)}
+                      >
+                        {formatPositionQuantity(row)}
                       </td>
-                      <td className="portfolio-position-cell portfolio-position-number-cell text-right">
+                      <td className="portfolio-position-cell portfolio-position-number-cell text-right" data-label="成本价">
+                        {formatPositionCostPrice(row)}
+                      </td>
+                      <td className="portfolio-position-cell portfolio-position-number-cell text-right" data-label="现价">
                         <div>{formatPositionPrice(row)}</div>
                         <div className={`portfolio-position-price-source text-[11px] ${hasPositionPrice(row) ? 'text-secondary' : 'text-warning'}`} title={getPositionPriceLabel(row)}>
                           {getPositionPriceLabel(row)}
                         </div>
                       </td>
-                      <td className="portfolio-position-cell portfolio-position-number-cell text-right">{formatPositionMoney(row.marketValueBase, row)}</td>
+                      <td className="portfolio-position-cell portfolio-position-number-cell text-right" data-label="市值">{formatPositionMoney(row.marketValueBase, row)}</td>
                       <td
+                        data-label="未实现盈亏"
                         className={`portfolio-position-cell portfolio-position-number-cell text-right ${getChinaPnlColorClass(
                           row.unrealizedPnlBase,
                           (row.market !== 'bank' || isBankWealthPosition(row)) && hasPositionPrice(row),
@@ -2525,6 +2671,7 @@ const PortfolioPage: React.FC = () => {
                         {row.market === 'bank' && !isBankWealthPosition(row) ? '-' : formatPositionMoney(row.unrealizedPnlBase, row)}
                       </td>
                       <td
+                        data-label="收益率"
                         className={`portfolio-position-cell portfolio-position-number-cell text-right ${getChinaPnlColorClass(
                           row.unrealizedPnlPct,
                           (row.market !== 'bank' || isBankWealthPosition(row))
@@ -2534,6 +2681,15 @@ const PortfolioPage: React.FC = () => {
                         )}`}
                       >
                         {row.market === 'bank' && !isBankWealthPosition(row) ? '-' : formatSignedPct(row.unrealizedPnlPct)}
+                      </td>
+                      <td
+                        data-label="年化"
+                        className={`portfolio-position-cell portfolio-position-number-cell text-right ${getChinaPnlColorClass(
+                          row.annualizedReturnPct,
+                          row.annualizedReturnPct !== null && row.annualizedReturnPct !== undefined,
+                        )}`}
+                      >
+                        {formatSignedPct(row.annualizedReturnPct)}
                       </td>
                     </tr>
                     );
@@ -2547,9 +2703,56 @@ const PortfolioPage: React.FC = () => {
 
       <section className="grid grid-cols-1 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] gap-3">
         <Card padding="md" className="flex flex-col">
-          <h3 className="text-sm font-semibold text-foreground">资产分布</h3>
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-foreground">资产分布</h3>
+            <div className="inline-flex rounded-lg border border-white/10 bg-white/[0.03] p-0.5 text-xs">
+              <button
+                type="button"
+                className={`rounded-md px-2.5 py-1 transition-colors ${assetBreakdownView === 'tag' ? 'bg-primary/15 text-primary' : 'text-secondary hover:text-foreground'}`}
+                onClick={() => setAssetBreakdownView('tag')}
+              >
+                资产属性
+              </button>
+              <button
+                type="button"
+                className={`rounded-md px-2.5 py-1 transition-colors ${assetBreakdownView === 'type' ? 'bg-primary/15 text-primary' : 'text-secondary hover:text-foreground'}`}
+                onClick={() => setAssetBreakdownView('type')}
+              >
+                资产类型
+              </button>
+            </div>
+          </div>
+          {tagLoadError ? (
+            <InlineAlert
+              variant="warning"
+              title="标签加载失败"
+              message={tagLoadError.message}
+              className="mt-3 rounded-xl px-3 py-2 text-xs shadow-none"
+            />
+          ) : null}
           <div className="mt-3 space-y-2 text-xs text-secondary">
-            {assetBreakdownRows.length > 0 ? assetBreakdownRows.map((item, index) => {
+            {assetBreakdownView === 'tag' ? (
+              tagBreakdownRows.length > 0 ? tagBreakdownRows.map((item, index) => {
+                const pct = tagBreakdownTotal > 0 ? Math.abs(item.amount) / tagBreakdownTotal * 100 : null;
+                return (
+                  <div key={item.key} className="portfolio-asset-breakdown-row">
+                    <span className="portfolio-asset-breakdown-name">
+                      <span
+                        className="portfolio-asset-breakdown-dot"
+                        style={{ background: item.tagColor || PORTFOLIO_ASSET_COLORS[index % PORTFOLIO_ASSET_COLORS.length] }}
+                      />
+                      {item.tagName}
+                    </span>
+                    <span className="portfolio-asset-breakdown-value">
+                      {snapshot?.fxMissing ? '不可计算' : formatMoney(item.amount, snapshot?.currency || 'CNY')}
+                    </span>
+                    <span className="portfolio-asset-breakdown-pct">
+                      {snapshot?.fxMissing ? '--' : formatPct(pct)}
+                    </span>
+                  </div>
+                );
+              }) : <div>暂无资产属性分布数据</div>
+            ) : assetBreakdownRows.length > 0 ? assetBreakdownRows.map((item, index) => {
               const pct = assetBreakdownTotal > 0 ? Math.abs(item.value) / assetBreakdownTotal * 100 : null;
               return (
                 <div key={item.key} className="portfolio-asset-breakdown-row">
@@ -3816,6 +4019,66 @@ const PortfolioPage: React.FC = () => {
           }
         }}
       />
+      {activeTagTarget ? (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-background/62 px-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="portfolio-tag-picker-title"
+          onClick={() => setActiveTagTarget(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-border/70 bg-card px-5 py-4 text-foreground shadow-soft-card-strong"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 id="portfolio-tag-picker-title" className="text-sm font-semibold text-foreground">
+                  选择持仓标签
+                </h3>
+                <p className="mt-1 truncate text-xs text-secondary">
+                  {getPositionDisplayName(activeTagTarget.row)}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn-secondary shrink-0 !px-2.5 !py-1 !text-xs"
+                onClick={() => setActiveTagTarget(null)}
+              >
+                取消
+              </button>
+            </div>
+            <div className="mt-4 grid gap-2">
+              <button
+                type="button"
+                className={`portfolio-tag-picker-option ${activeTagTarget.row.tagId == null ? 'portfolio-tag-picker-option-active' : ''}`}
+                onClick={() => void handleProductTagChange(activeTagTarget.row, '')}
+                disabled={tagUpdatingKey === activeTagTarget.productKey}
+              >
+                <span className="portfolio-tag-picker-dot border border-border/70 bg-transparent" />
+                <span>无标签</span>
+              </button>
+              {portfolioTags.map((tag) => (
+                <button
+                  key={tag.id}
+                  type="button"
+                  className={`portfolio-tag-picker-option ${activeTagTarget.row.tagId === tag.id ? 'portfolio-tag-picker-option-active' : ''}`}
+                  onClick={() => void handleProductTagChange(activeTagTarget.row, String(tag.id))}
+                  disabled={tagUpdatingKey === activeTagTarget.productKey}
+                >
+                  <span className="portfolio-tag-picker-dot" style={{ background: tag.color }} />
+                  <span>{tag.name}</span>
+                </button>
+              ))}
+              {portfolioTags.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-border/70 px-3 py-4 text-center text-xs text-secondary">
+                  先在设置中添加标签。
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
       {bankWealthSearchLoading || bankWealthCandidateModalOpen ? (
         <div
           className="fixed inset-0 z-[80] flex items-center justify-center bg-background/62 px-4 backdrop-blur-sm"
