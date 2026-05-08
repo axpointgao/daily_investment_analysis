@@ -536,6 +536,8 @@ crontab -e
 > Note: Scheduled mode reloads the saved `STOCK_LIST` before each run. If you also pass `--stocks`, it will not pin future scheduled executions to the startup snapshot; use a normal one-off run when you want to analyze a temporary stock list.
 >
 > When the built-in scheduler is started via `python main.py --schedule`, `python main.py --serve --schedule`, or an equivalent local mode, saving a new `SCHEDULE_TIME` from the WebUI will rebind the daily job on the next scheduler poll without restarting the process. The previous trigger time is removed instead of being kept alongside the new one.
+>
+> In Docker Compose deployments, the `analyzer` service is controlled by a supervisor that reads the mounted `.env`: it starts the scheduler only when `SCHEDULE_ENABLED=true`, stops it when the value changes to `false`, and restarts it when startup-time schedule settings such as `SCHEDULE_TIME` or `SCHEDULE_RUN_IMMEDIATELY` change. The Docker supervisor runs immediately on startup only when `SCHEDULE_RUN_IMMEDIATELY=true` is explicitly saved; when it is unset or `false`, it waits for the scheduled time. The `server` service only serves Web/API traffic and does not run scheduled analysis.
 
 ---
 

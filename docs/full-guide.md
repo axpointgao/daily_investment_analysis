@@ -618,6 +618,8 @@ python main.py --schedule --no-run-immediately
 > 说明：定时模式每次触发前都会重新读取当前保存的 `STOCK_LIST`。如果同时传入 `--stocks`，该参数不会锁定后续计划执行的股票列表；需要临时只跑指定股票时，请使用非定时的单次运行命令。
 >
 > 从 `python main.py --schedule`、`python main.py --serve --schedule` 或等价内置调度模式启动后，WebUI 保存新的 `SCHEDULE_TIME` 会在下一轮调度检查内自动重绑 daily job，无需重启进程；旧的执行时间不会继续保留。
+>
+> Docker Compose 的 `analyzer` 服务由 supervisor 读取挂载的 `.env` 控制：`SCHEDULE_ENABLED=true` 时才启动内置 scheduler，改为 `false` 后会自动停止 scheduler；修改 `SCHEDULE_TIME` / `SCHEDULE_RUN_IMMEDIATELY` 后会自动重启 scheduler 以应用启动期配置。Docker supervisor 仅在 `SCHEDULE_RUN_IMMEDIATELY=true` 明确写入时启动后立即执行；未设置或为 `false` 时会等待定时点。`server` 服务只提供 Web/API，不直接执行定时分析。
 
 #### 环境变量方式
 

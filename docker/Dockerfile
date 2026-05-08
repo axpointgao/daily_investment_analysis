@@ -46,12 +46,14 @@ COPY api/ ./api/
 COPY data_provider/ ./data_provider/
 COPY bot/ ./bot/
 COPY patch/ ./patch/
+COPY docker/analyzer-entrypoint.sh ./docker/analyzer-entrypoint.sh
 COPY src/ ./src/
 COPY strategies/ ./strategies/
 COPY --from=web-builder /app/static ./static/
 
 # 创建数据目录
 RUN mkdir -p /app/data /app/logs /app/reports
+RUN chmod +x /app/docker/analyzer-entrypoint.sh
 
 # 设置环境变量默认值
 ENV PYTHONUNBUFFERED=1
