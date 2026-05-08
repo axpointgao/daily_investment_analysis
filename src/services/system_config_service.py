@@ -578,6 +578,8 @@ class SystemConfigService:
             return self._test_ttfund_skills(config_map=config_map, timeout=timeout)
         if source_norm == "yingmi_stargate":
             return self._test_yingmi_stargate(config_map=config_map, timeout=timeout)
+        if source_norm == "iwencai":
+            return self._test_iwencai(config_map=config_map, timeout=timeout)
         if source_norm == "crypto_quote":
             return self._test_crypto_quote(timeout=timeout)
         raise ValueError("Unsupported data source")
@@ -1904,6 +1906,44 @@ class SystemConfigService:
                 "base_url": base_url,
                 "operation_count": payload.get("operation_count"),
                 "sample_operations": payload.get("sample_operations") or [],
+            },
+        )
+
+    def _test_iwencai(self, *, config_map: Dict[str, str], timeout: float) -> Dict[str, Any]:
+        source = "iwencai"
+        api_key = (config_map.get("IWENCAI_API_KEY") or "").strip()
+        base_url = (config_map.get("IWENCAI_BASE_URL") or "https://openapi.iwencai.com").strip().rstrip("/")
+        if not api_key:
+            return self._build_data_source_result(
+                success=False,
+                source=source,
+                message="未连接",
+                error="请先在 Agent 设置中填写 IWENCAI_API_KEY。",
+            )
+        try:
+            from src.services.iwencai_wealth_client import IwencaiWealthClient
+
+            client = IwencaiWealthClient(api_key=api_key, base_url=base_url, timeout=timeout)
+            started_at = time.perf_counter()
+            products = client.search_products("现金管理", limit=1)
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+        except Exception as exc:
+            return self._build_data_source_result(
+                success=False,
+                source=source,
+                message="未连接",
+                error=str(exc),
+            )
+
+        return self._build_data_source_result(
+            success=True,
+            source=source,
+            message="已连接",
+            latency_ms=latency_ms,
+            details={
+                "base_url": base_url,
+                "query": "现金管理",
+                "rows": len(products),
             },
         )
 

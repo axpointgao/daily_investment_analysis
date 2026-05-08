@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { SettingsField } from '../src/components/settings/SettingsField';
 
 describe('SettingsField description fallback', () => {
-  it('uses schema.description when i18n map has no description for key', () => {
+  it('does not show English schema.description when i18n map has no description for key', () => {
     const html = renderToStaticMarkup(
       <SettingsField
         item={{
@@ -32,6 +32,38 @@ describe('SettingsField description fallback', () => {
       />
     );
 
-    expect(html).toContain('schema fallback description');
+    expect(html).not.toContain('schema fallback description');
+  });
+
+  it('uses Chinese schema.description when i18n map has no description for key', () => {
+    const html = renderToStaticMarkup(
+      <SettingsField
+        item={{
+          key: 'UNMAPPED_FALLBACK_FIELD',
+          value: '1',
+          rawValueExists: true,
+          isMasked: false,
+          schema: {
+            key: 'UNMAPPED_FALLBACK_FIELD',
+            title: '未映射字段',
+            description: '中文兜底说明',
+            category: 'system',
+            dataType: 'string',
+            uiControl: 'text',
+            isSensitive: false,
+            isRequired: false,
+            isEditable: true,
+            defaultValue: null,
+            options: [],
+            validation: {},
+            displayOrder: 9999,
+          },
+        }}
+        value="1"
+        onChange={() => undefined}
+      />
+    );
+
+    expect(html).toContain('中文兜底说明');
   });
 });

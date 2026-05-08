@@ -117,6 +117,11 @@ const AGENT_DATA_SOURCE_TESTS: Array<{ source: TestDataSourceSource; label: stri
     label: '盈米 StarGate',
     description: '验证首页基金专业诊断、诊基专业分析、持仓组合诊断、投顾策略和财富规划能力。',
   },
+  {
+    source: 'iwencai',
+    label: '问财 API',
+    description: '验证银行理财产品搜索和净值查询能力。',
+  },
 ];
 
 const AGENT_CONFIG_GROUPS: AgentConfigGroup[] = [
@@ -601,6 +606,7 @@ const SettingsPage: React.FC = () => {
     crypto_quote: { loading: false },
     ttfund_skills: { loading: false },
     yingmi_stargate: { loading: false },
+    iwencai: { loading: false },
   });
   const [portfolioTags, setPortfolioTags] = useState<PortfolioTagItem[]>([]);
   const [portfolioTagsLoading, setPortfolioTagsLoading] = useState(false);

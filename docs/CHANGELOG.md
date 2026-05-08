@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 - [新功能] 持仓明细新增现金流 XIRR 年化收益率、全局产品标签和按标签优先展示的资产分布视图。
+- [改进] 设置页补齐系统配置项中文标题和辅助说明，未映射字段不再回退展示英文 schema 描述。
+- [改进] Agent 设置页新增问财 API 连通性测试卡片，用于验证银行理财产品搜索配置是否可用。
 - [改进] Web 持仓页资产分布将标签视图命名为资产属性，未设置标签归入未定义，并从资产属性视图中过滤现金。
 - [修复] Docker Compose 的 analyzer 服务改为由 `.env`/Web 设置中的 `SCHEDULE_ENABLED` 控制启停，并在调度启动期配置变化时自动重启 scheduler；`SCHEDULE_RUN_IMMEDIATELY` 仅在明确为 `true` 时立即执行，避免未启用调度或未勾选立即执行时重启容器仍自动分析和通知。
 - [改进] 持仓账户新增现金跟踪口径，银行、投顾和保险默认不再因产品买入或缴费自动生成负现金，并为持仓明细补充估值模型和展示值字段。
