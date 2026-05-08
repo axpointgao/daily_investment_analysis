@@ -2208,6 +2208,27 @@ textarea {
   flex: 0 0 auto;
 }
 
+.portfolio-field-link {
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: hsl(var(--primary));
+  font-size: inherit;
+  font-weight: 600;
+  line-height: 1;
+  transition: color 0.16s ease;
+}
+
+.portfolio-field-link:hover:not(:disabled) {
+  color: hsl(var(--primary) / 0.82);
+}
+
+.portfolio-field-link:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 .portfolio-position-asset-cell,
 .portfolio-position-number-cell {
   min-width: 0;

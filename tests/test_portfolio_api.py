@@ -626,6 +626,23 @@ class PortfolioApiTestCase(unittest.TestCase):
         self.assertEqual(delete_resp.status_code, 200)
         self.assertEqual(delete_resp.json()["deleted"], 1)
 
+    def test_advisory_products_nav_endpoint_uses_requested_date(self) -> None:
+        with patch(
+            "api.v1.endpoints.portfolio.PortfolioService._fetch_advisory_nav",
+            return_value=MagicMock(price=1.2345, price_date=date(2024, 4, 20)),
+        ) as fetch_nav:
+            resp = self.client.post(
+                "/api/v1/portfolio/advisory-products/nav",
+                json={"strategy_code": "ZH013136", "nav_date": "2024-04-20"},
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertAlmostEqual(resp.json()["unit_nav"], 1.2345, places=6)
+        self.assertEqual(resp.json()["nav_date"], "2024-04-20")
+        fetch_nav.assert_called_once()
+        self.assertEqual(fetch_nav.call_args.kwargs["strategy_code"], "ZH013136")
+        self.assertEqual(fetch_nav.call_args.kwargs["as_of_date"], date(2024, 4, 20))
+
     def test_insurance_policy_and_ledger_api_flow(self) -> None:
         create_resp = self.client.post(
             "/api/v1/portfolio/accounts",

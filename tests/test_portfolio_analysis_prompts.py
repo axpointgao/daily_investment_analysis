@@ -189,6 +189,89 @@ class PortfolioAnalysisPromptTestCase(unittest.TestCase):
         )
 
         self.assertIn(get_portfolio_analysis_default_prompt("insurance_basic"), prompt)
+        self.assertIn("现金价值/已交保费比例", prompt)
+        self.assertIn("不要做购买建议", prompt)
+
+    def test_compact_payload_includes_insurance_asset_summary(self) -> None:
+        snapshot = {
+            "as_of": "2026-05-05",
+            "currency": "CNY",
+            "cost_method": "fifo",
+            "account_count": 1,
+            "total_equity": 90000.0,
+            "total_market_value": 90000.0,
+            "total_cash": 0.0,
+            "asset_breakdown": {"insurance": 90000.0},
+            "accounts": [
+                {
+                    "account_id": 7,
+                    "account_name": "保险账户",
+                    "market": "insurance",
+                    "base_currency": "CNY",
+                    "total_equity": 90000.0,
+                    "positions": [
+                        {
+                            "symbol": "INS:1",
+                            "display_name": "测试年金险",
+                            "market": "insurance",
+                            "currency": "CNY",
+                            "quantity": 1.0,
+                            "avg_cost": 100000.0,
+                            "total_cost": 100000.0,
+                            "last_price": 90000.0,
+                            "market_value_base": 90000.0,
+                            "unrealized_pnl_base": -10000.0,
+                            "unrealized_pnl_pct": -10.0,
+                            "price_available": True,
+                            "price_source": "insurance_value_update",
+                            "price_date": "2026-04-20",
+                            "price_stale": True,
+                            "policy_name": "测试年金险",
+                            "insurer": "测试保险",
+                            "insurance_kind": "annuity",
+                            "design_type": "participating",
+                            "policy_status": "active",
+                            "payment_mode": "annual",
+                            "premium_per_period": 20000.0,
+                            "first_payment_date": "2024-04-20",
+                            "total_periods": 5,
+                            "paid_periods": 2,
+                            "paid_premium": 100000.0,
+                            "received_amount": 5000.0,
+                            "cash_value": 90000.0,
+                            "value_date": "2026-04-20",
+                            "next_payment_date": "2027-04-20",
+                            "value_estimated": False,
+                        }
+                    ],
+                }
+            ],
+        }
+        risk = {"concentration": {}, "sector_concentration": {}, "drawdown": {}, "stop_loss": {}}
+        payload = self._build_service()._build_compact_payload(
+            snapshot=snapshot,
+            risk=risk,
+            account_id=7,
+            snapshot_signature="sig",
+        )
+
+        summary = payload["保险资产摘要"]
+        self.assertEqual(summary["policyCount"], 1)
+        self.assertEqual(summary["activePolicyCount"], 1)
+        self.assertEqual(summary["paidPremiumTotal"], 100000.0)
+        self.assertEqual(summary["cashValueTotal"], 90000.0)
+        self.assertEqual(summary["receivedAmountTotal"], 5000.0)
+        self.assertEqual(summary["cashValueToPaidPremiumPct"], 90.0)
+        self.assertEqual(summary["staleValueCount"], 1)
+        self.assertEqual(summary["nextPaymentDate"], "2027-04-20")
+        self.assertEqual(summary["byInsuranceKind"][0]["key"], "annuity")
+
+        position = payload["主要持仓"][0]
+        self.assertEqual(position["insuranceKind"], "annuity")
+        self.assertEqual(position["designType"], "participating")
+        self.assertEqual(position["paidPremium"], 100000.0)
+        self.assertEqual(position["cashValue"], 90000.0)
+        self.assertEqual(position["nextPaymentDate"], "2027-04-20")
 
     def test_analyze_records_portfolio_analysis_call_type(self) -> None:
         snapshot = {

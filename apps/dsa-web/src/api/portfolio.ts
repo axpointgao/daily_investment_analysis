@@ -6,6 +6,8 @@ import type {
   PortfolioAccountListResponse,
   PortfolioAdvisoryLedgerCreateRequest,
   PortfolioAdvisoryLedgerListResponse,
+  PortfolioAdvisoryNavResponse,
+  PortfolioAdvisoryProductSearchResponse,
   PortfolioAnalysisRequest,
   PortfolioAnalysisResponse,
   PortfolioBankLedgerCreateRequest,
@@ -323,6 +325,23 @@ export const portfolioApi = {
     return toCamelCase<PortfolioBankWealthNavResponse>(response.data);
   },
 
+  async searchAdvisoryProducts(keyword: string, productType: string): Promise<PortfolioAdvisoryProductSearchResponse> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/advisory-products/search', {
+      keyword,
+      product_type: productType,
+      limit: 10,
+    });
+    return toCamelCase<PortfolioAdvisoryProductSearchResponse>(response.data);
+  },
+
+  async getAdvisoryNav(strategyCode: string, navDate?: string): Promise<PortfolioAdvisoryNavResponse> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/advisory-products/nav', {
+      strategy_code: strategyCode,
+      nav_date: navDate,
+    });
+    return toCamelCase<PortfolioAdvisoryNavResponse>(response.data);
+  },
+
   async deleteBankLedger(entryId: number): Promise<PortfolioDeleteResponse> {
     const response = await apiClient.delete<Record<string, unknown>>(`/api/v1/portfolio/bank-ledger/${entryId}`);
     return toCamelCase<PortfolioDeleteResponse>(response.data);
@@ -341,6 +360,14 @@ export const portfolioApi = {
       currency: payload.currency,
       risk_level: payload.riskLevel,
       investment_style: payload.investmentStyle,
+      quantity: payload.quantity,
+      nav: payload.nav,
+      nav_date: payload.navDate,
+      external_strategy_code: payload.externalStrategyCode,
+      data_provider: payload.dataProvider,
+      valuation_model: payload.valuationModel,
+      manager_name: payload.managerName,
+      recommended_holding_duration: payload.recommendedHoldingDuration,
     });
     return toCamelCase<PortfolioEventCreatedResponse>(response.data);
   },

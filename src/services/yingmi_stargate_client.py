@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import time
+from datetime import date
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import quote
 
@@ -138,6 +139,20 @@ class YingmiStargateClient:
 
     def get_strategy_composition(self, strategy_codes: Iterable[str]) -> Dict[str, Any]:
         return self.call_operation("BatchGetStrategiesComposition", {"strategyCodes": list(strategy_codes)})
+
+    def get_portfolio_nav_history(
+        self,
+        po_code: str,
+        *,
+        start: Optional[date] = None,
+        end: Optional[date] = None,
+    ) -> Dict[str, Any]:
+        params: Dict[str, Any] = {"poCode": po_code}
+        if start is not None:
+            params["start"] = start.isoformat()
+        if end is not None:
+            params["end"] = end.isoformat()
+        return self.call_operation("GetPortfolioNavHistory", params)
 
     def _find_operation(self, operation_id: str) -> Dict[str, Any]:
         docs = self._get_docs()

@@ -736,13 +736,19 @@ class PortfolioAdvisoryLedger(Base):
     product_name = Column(String(128), nullable=False)
     product_code = Column(String(64), index=True)
     product_type = Column(String(24), nullable=False, default='advisory_combo')  # advisory_combo/dca_plan
+    external_strategy_code = Column(String(64), index=True)
+    data_provider = Column(String(32))
+    valuation_model = Column(String(24), nullable=False, default='amount_value')
     direction = Column(String(16), nullable=False)  # buy/initial_buy/dca_buy/follow_buy/redeem
     amount = Column(Float, nullable=False)
     quantity = Column(Float, nullable=False)
     nav = Column(Float, nullable=False)
+    nav_date = Column(Date)
     currency = Column(String(8), nullable=False, default='CNY')
     risk_level = Column(String(16))
     investment_style = Column(String(32))
+    manager_name = Column(String(64))
+    recommended_holding_duration = Column(String(32))
     created_at = Column(DateTime, default=datetime.now, index=True)
 
     __table_args__ = (
@@ -1065,6 +1071,12 @@ class DatabaseManager:
                 existing_columns = {column["name"] for column in inspector.get_columns("portfolio_advisory_ledger")}
                 additions = {
                     "product_type": "VARCHAR(24) DEFAULT 'advisory_combo'",
+                    "external_strategy_code": "VARCHAR(64)",
+                    "data_provider": "VARCHAR(32)",
+                    "valuation_model": "VARCHAR(24) DEFAULT 'amount_value'",
+                    "nav_date": "DATE",
+                    "manager_name": "VARCHAR(64)",
+                    "recommended_holding_duration": "VARCHAR(32)",
                 }
                 for column_name, column_type in additions.items():
                     if column_name in existing_columns:

@@ -14,6 +14,7 @@ import type {
   PortfolioAccountItem,
   PortfolioAdvisoryEventType,
   PortfolioAdvisoryLedgerListItem,
+  PortfolioAdvisoryProductItem,
   PortfolioAdvisoryProductType,
   PortfolioAnalysisResponse,
   PortfolioBankAssetKind,
@@ -71,7 +72,7 @@ type AdvisoryFormEventType = PortfolioAdvisoryEventType | 'append_buy';
 
 type AdvisoryLedgerPayloadDraft =
   | { error: string }
-  | { amount: number; product?: BankPositionOption };
+  | { amount: number; product?: BankPositionOption; nav?: number; quantity?: number; navDate?: string };
 
 type PendingDelete =
   | { eventType: 'trade'; id: number; message: string }
@@ -650,8 +651,21 @@ function normalizeBankInvestmentNature(value?: string | null): '' | PortfolioBan
   return '';
 }
 
+function calculateAdvisoryQuantity(amountText: string, navText: string): string {
+  const amount = Number(amountText);
+  const nav = Number(navText);
+  if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(nav) || nav <= 0) {
+    return '';
+  }
+  return String(amount / nav);
+}
+
 function getBankWealthCandidateKey(product: PortfolioBankWealthProductItem, index: number): string {
   return `${product.productCode || ''}|${product.productPublicCode || ''}|${product.productName}|${index}`;
+}
+
+function getAdvisoryCandidateKey(product: PortfolioAdvisoryProductItem, index: number): string {
+  return `${product.strategyCode || ''}|${product.productName}|${index}`;
 }
 
 function getCodeCandidates(symbol: string): string[] {
@@ -1010,6 +1024,11 @@ const PortfolioPage: React.FC = () => {
   const [bankWealthCandidateModalOpen, setBankWealthCandidateModalOpen] = useState(false);
   const [selectedBankWealthCandidateKey, setSelectedBankWealthCandidateKey] = useState('');
   const [bankWealthMatchedProduct, setBankWealthMatchedProduct] = useState<PortfolioBankWealthProductItem | null>(null);
+  const [advisorySearchResults, setAdvisorySearchResults] = useState<PortfolioAdvisoryProductItem[]>([]);
+  const [advisorySearchLoading, setAdvisorySearchLoading] = useState(false);
+  const [advisoryNavLoading, setAdvisoryNavLoading] = useState(false);
+  const [advisoryCandidateModalOpen, setAdvisoryCandidateModalOpen] = useState(false);
+  const [selectedAdvisoryCandidateKey, setSelectedAdvisoryCandidateKey] = useState('');
   const [bankNavForm, setBankNavForm] = useState({
     selectedProduct: '',
     priceDate: getTodayIso(),
@@ -1026,6 +1045,13 @@ const PortfolioPage: React.FC = () => {
     amount: '',
     riskLevel: '',
     investmentStyle: '',
+    nav: '',
+    navDate: '',
+    quantity: '',
+    externalStrategyCode: '',
+    dataProvider: '',
+    managerName: '',
+    recommendedHoldingDuration: '',
   });
   const [advisoryNavForm, setAdvisoryNavForm] = useState({
     selectedProduct: '',
@@ -1502,6 +1528,10 @@ const PortfolioPage: React.FC = () => {
   const advisoryProductSelectPlaceholder = advisoryForm.productType === 'dca_plan'
     ? '选择定投计划'
     : '选择投顾组合';
+  const advisoryFormHasUnitNav = advisoryForm.productType === 'advisory_combo'
+    && Boolean(advisoryForm.externalStrategyCode)
+    && Number(advisoryForm.nav) > 0
+    && Number(advisoryForm.quantity) > 0;
   const selectedInsurancePolicy = insurancePolicies.find((item) => String(item.id) === insuranceLedgerForm.policyId);
   const insuranceLedgerEventOptions = useMemo(
     () => getInsuranceEventOptions(selectedInsurancePolicy),
@@ -1522,14 +1552,30 @@ const PortfolioPage: React.FC = () => {
       if (amount == null) {
         return { error: advisoryForm.eventType === 'redeem' ? '请填写赎回/止盈到账金额。' : '请填写投入金额。' };
       }
-      return { amount, product: selectedAdvisoryOption };
+      const nav = parsePositiveFormNumber(advisoryForm.nav);
+      const quantity = parsePositiveFormNumber(advisoryForm.quantity);
+      return {
+        amount,
+        product: selectedAdvisoryOption,
+        nav: nav || undefined,
+        quantity: quantity || undefined,
+        navDate: advisoryForm.navDate || undefined,
+      };
     }
 
     const amount = parsePositiveFormNumber(advisoryForm.amount);
     if (amount == null) {
       return { error: '请填写投入金额。' };
     }
-    return { amount, product: undefined };
+    const nav = parsePositiveFormNumber(advisoryForm.nav);
+    const quantity = parsePositiveFormNumber(advisoryForm.quantity);
+    return {
+      amount,
+      product: undefined,
+      nav: nav || undefined,
+      quantity: quantity || undefined,
+      navDate: advisoryForm.navDate || undefined,
+    };
   };
 
   const assetBreakdownRows = Object.entries(snapshot?.assetBreakdown || {})
@@ -1861,6 +1907,154 @@ const PortfolioPage: React.FC = () => {
     await applyBankWealthProduct(selectedProduct);
   };
 
+  const applyAdvisoryNav = async (strategyCode: string, navDate = advisoryForm.eventDate) => {
+    if (!strategyCode || advisoryForm.productType !== 'advisory_combo' || !navDate) {
+      return;
+    }
+    try {
+      setAdvisoryNavLoading(true);
+      const nav = await portfolioApi.getAdvisoryNav(strategyCode, navDate);
+      if (nav.unitNav && nav.unitNav > 0) {
+        setAdvisoryForm((prev) => ({
+          ...prev,
+          nav: String(nav.unitNav),
+          navDate: nav.navDate || navDate,
+          quantity: calculateAdvisoryQuantity(prev.amount, String(nav.unitNav)),
+        }));
+      } else {
+        setAdvisoryForm((prev) => ({ ...prev, nav: '', navDate: '', quantity: '' }));
+        setWriteWarning('已选中投顾产品，但盈米未返回流水日期附近的历史净值；本次将按金额型投顾记录。');
+      }
+    } catch (err) {
+      setAdvisoryForm((prev) => ({ ...prev, nav: '', navDate: '', quantity: '' }));
+      setWriteWarning(getParsedApiError(err).message || '投顾历史净值查询失败；本次将按金额型投顾记录。');
+    } finally {
+      setAdvisoryNavLoading(false);
+    }
+  };
+
+  const applyAdvisoryProduct = async (product: PortfolioAdvisoryProductItem) => {
+    const productType = advisoryForm.productType;
+    setAdvisoryForm((prev) => ({
+      ...prev,
+      productName: product.productName || prev.productName,
+      productCode: prev.productCode,
+      riskLevel: product.riskLevel || prev.riskLevel,
+      investmentStyle: prev.investmentStyle,
+      externalStrategyCode: product.strategyCode || '',
+      dataProvider: product.source || 'yingmi_stargate',
+      managerName: product.managerName || '',
+      recommendedHoldingDuration: product.recommendedHoldingDuration || '',
+      nav: '',
+      navDate: '',
+      quantity: '',
+    }));
+    try {
+      if (productType === 'advisory_combo') {
+        await applyAdvisoryNav(product.strategyCode);
+      }
+    } finally {
+      setAdvisoryCandidateModalOpen(false);
+    }
+  };
+
+  const applyExistingAdvisoryProduct = async (option: BankPositionOption | undefined) => {
+    setAdvisoryForm((prev) => ({
+      ...prev,
+      selectedProduct: option?.optionValue || '',
+      productCode: option?.productCode || '',
+      productName: option?.productName || option?.displayName || '',
+      productType: option?.productType === 'dca_plan' ? 'dca_plan' : 'advisory_combo',
+      platform: option?.platform || prev.platform,
+      riskLevel: option?.riskLevel || prev.riskLevel,
+      investmentStyle: option?.investmentStyle || prev.investmentStyle,
+      externalStrategyCode: option?.externalStrategyCode || '',
+      dataProvider: option?.dataProvider || '',
+      managerName: option?.managerName || '',
+      recommendedHoldingDuration: option?.recommendedHoldingDuration || '',
+      nav: '',
+      navDate: '',
+      quantity: '',
+    }));
+    if (
+      option?.productType !== 'dca_plan'
+      && option?.externalStrategyCode
+      && option?.valuationModelDetail === 'unit_nav'
+    ) {
+      await applyAdvisoryNav(option.externalStrategyCode);
+    }
+  };
+
+  const handleAdvisoryProductSearch = async () => {
+    const keyword = advisoryForm.productName.trim();
+    if (!keyword) {
+      setWriteWarning('请先输入投顾产品名称。');
+      return;
+    }
+    try {
+      setWriteWarning(null);
+      setAdvisorySearchLoading(true);
+      setAdvisoryNavLoading(false);
+      setAdvisoryCandidateModalOpen(false);
+      setSelectedAdvisoryCandidateKey('');
+      setAdvisorySearchResults([]);
+      setAdvisoryForm((prev) => ({
+        ...prev,
+        externalStrategyCode: '',
+        dataProvider: '',
+        nav: '',
+        navDate: '',
+        quantity: '',
+        managerName: '',
+        recommendedHoldingDuration: '',
+      }));
+      const response = await withTimeout(
+        portfolioApi.searchAdvisoryProducts(keyword, advisoryForm.productType),
+        BANK_WEALTH_SEARCH_TIMEOUT_MS,
+      );
+      const products = response.products || [];
+      setAdvisorySearchResults(products);
+      if (!products.length) {
+        setWriteWarning('盈米没有返回匹配的投顾产品，可继续手动填写后保存。');
+        return;
+      }
+      setSelectedAdvisoryCandidateKey(getAdvisoryCandidateKey(products[0], 0));
+      setAdvisoryCandidateModalOpen(true);
+    } catch (err) {
+      setAdvisorySearchResults([]);
+      setAdvisoryCandidateModalOpen(false);
+      setSelectedAdvisoryCandidateKey('');
+      setAdvisoryForm((prev) => ({
+        ...prev,
+        externalStrategyCode: '',
+        dataProvider: '',
+        nav: '',
+        navDate: '',
+        quantity: '',
+      }));
+      const parsed = getParsedApiError(err);
+      setWriteWarning(
+        err instanceof Error && err.message === 'timeout'
+          ? '投顾产品查询超时，可继续手动填写后保存。'
+          : parsed.message || '投顾产品查询失败，可继续手动填写后保存。',
+      );
+    } finally {
+      setAdvisorySearchLoading(false);
+      setAdvisoryNavLoading(false);
+    }
+  };
+
+  const handleConfirmAdvisoryCandidate = async () => {
+    const selectedProduct = advisorySearchResults.find(
+      (item, index) => getAdvisoryCandidateKey(item, index) === selectedAdvisoryCandidateKey,
+    ) || advisorySearchResults[0];
+    if (!selectedProduct) {
+      setAdvisoryCandidateModalOpen(false);
+      return;
+    }
+    await applyAdvisoryProduct(selectedProduct);
+  };
+
   const handleExistingBankWealthNavLookup = async () => {
     if (!selectedWealthOption) {
       setWriteWarning(getBankProductRequiredMessage(bankForm.assetKind, bankForm.wealthAction));
@@ -1980,6 +2174,14 @@ const PortfolioPage: React.FC = () => {
         currency: writableAccount.baseCurrency || 'CNY',
         riskLevel: selectedProduct?.riskLevel || advisoryForm.riskLevel || undefined,
         investmentStyle: selectedProduct?.investmentStyle || advisoryForm.investmentStyle || undefined,
+        quantity: advisoryFormHasUnitNav ? payload.quantity : undefined,
+        nav: advisoryFormHasUnitNav ? payload.nav : undefined,
+        navDate: advisoryFormHasUnitNav ? payload.navDate : undefined,
+        externalStrategyCode: advisoryForm.externalStrategyCode || undefined,
+        dataProvider: advisoryForm.dataProvider || undefined,
+        valuationModel: advisoryFormHasUnitNav ? 'unit_nav' : 'amount_value',
+        managerName: advisoryForm.managerName || undefined,
+        recommendedHoldingDuration: advisoryForm.recommendedHoldingDuration || undefined,
       });
       await refreshPortfolioData(eventPage, { refreshPrices: true });
       setAdvisoryForm((prev) => ({
@@ -1988,6 +2190,9 @@ const PortfolioPage: React.FC = () => {
         productName: advisoryEventRequiresExistingProduct ? prev.productName : '',
         productCode: advisoryEventRequiresExistingProduct ? prev.productCode : '',
         selectedProduct: advisoryEventRequiresExistingProduct ? prev.selectedProduct : '',
+        nav: '',
+        navDate: '',
+        quantity: '',
       }));
       showPortfolioToast(
         advisoryForm.eventType === 'redeem' ? '投顾赎回已记录' : '投顾投入已记录',
@@ -3387,7 +3592,14 @@ const PortfolioPage: React.FC = () => {
                 <div className={PORTFOLIO_FORM_GRID_CLASS}>
                   <PortfolioField label="流水日期">
                     <input className={PORTFOLIO_INPUT_CLASS} type="date" value={advisoryForm.eventDate}
-                      onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
+                      onChange={(e) => {
+                        const nextDate = e.target.value;
+                        const strategyCode = advisoryForm.externalStrategyCode;
+                        setAdvisoryForm((prev) => ({ ...prev, eventDate: nextDate, nav: '', navDate: '', quantity: '' }));
+                        if (strategyCode && advisoryForm.productType === 'advisory_combo') {
+                          void applyAdvisoryNav(strategyCode, nextDate);
+                        }
+                      }} required />
                   </PortfolioField>
                   <PortfolioField label="产品类型">
                     <select className={PORTFOLIO_SELECT_CLASS} value={advisoryForm.productType}
@@ -3399,6 +3611,13 @@ const PortfolioPage: React.FC = () => {
                         productCode: '',
                         productName: '',
                         amount: '',
+                        nav: '',
+                        navDate: '',
+                        quantity: '',
+                        externalStrategyCode: '',
+                        dataProvider: '',
+                        managerName: '',
+                        recommendedHoldingDuration: '',
                       }))}>
                       <option value="advisory_combo">投顾组合</option>
                       <option value="dca_plan">定投计划</option>
@@ -3411,6 +3630,9 @@ const PortfolioPage: React.FC = () => {
                         selectedProduct: '',
                         eventType: e.target.value as AdvisoryFormEventType,
                         amount: '',
+                        nav: '',
+                        navDate: '',
+                        quantity: '',
                       }))}>
                       {advisoryForm.productType === 'advisory_combo' ? (
                         <>
@@ -3431,7 +3653,11 @@ const PortfolioPage: React.FC = () => {
                     <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01"
                       placeholder={advisoryForm.eventType === 'redeem' ? '赎回/止盈到账金额' : '投入金额'}
                       value={advisoryForm.amount}
-                      onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, amount: e.target.value }))} required />
+                      onChange={(e) => setAdvisoryForm((prev) => ({
+                        ...prev,
+                        amount: e.target.value,
+                        quantity: calculateAdvisoryQuantity(e.target.value, prev.nav),
+                      }))} required />
                   </PortfolioField>
                 </div>
                 {advisoryEventRequiresExistingProduct ? (
@@ -3440,16 +3666,7 @@ const PortfolioPage: React.FC = () => {
                       <select className={PORTFOLIO_SELECT_CLASS} value={advisoryForm.selectedProduct}
                         onChange={(e) => {
                           const option = advisoryFormProductOptions.find((item) => item.optionValue === e.target.value);
-                          setAdvisoryForm((prev) => ({
-                            ...prev,
-                            selectedProduct: option?.optionValue || '',
-                            productCode: option?.productCode || '',
-                            productName: option?.productName || option?.displayName || '',
-                            productType: option?.productType === 'dca_plan' ? 'dca_plan' : 'advisory_combo',
-                            platform: option?.platform || prev.platform,
-                            riskLevel: option?.riskLevel || prev.riskLevel,
-                            investmentStyle: option?.investmentStyle || prev.investmentStyle,
-                          }));
+                          void applyExistingAdvisoryProduct(option);
                         }} required>
                         <option value="">{advisoryProductSelectPlaceholder}</option>
                         {advisoryFormProductOptions.map((item) => (
@@ -3475,7 +3692,15 @@ const PortfolioPage: React.FC = () => {
                       <input className={PORTFOLIO_INPUT_CLASS} placeholder="可选" value={advisoryForm.productCode}
                         onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, productCode: e.target.value.toUpperCase() }))} />
                     </PortfolioField>
-                    <PortfolioField label="产品名称" className={PORTFOLIO_FORM_SPAN_2_CLASS}>
+                    <PortfolioField
+                      label="产品名称"
+                      className={PORTFOLIO_FORM_SPAN_2_CLASS}
+                      action={(
+                        <button type="button" className="portfolio-field-link" onClick={handleAdvisoryProductSearch} disabled={advisorySearchLoading}>
+                          {advisorySearchLoading ? '查询中' : '查询产品'}
+                        </button>
+                      )}
+                    >
                       <input className={PORTFOLIO_INPUT_CLASS} placeholder="投顾产品名称" value={advisoryForm.productName}
                         onChange={(e) => setAdvisoryForm((prev) => ({ ...prev, productName: e.target.value }))} required />
                     </PortfolioField>
@@ -3495,8 +3720,26 @@ const PortfolioPage: React.FC = () => {
                   </div>
                 ) : null}
                 <div className={PORTFOLIO_FORM_GRID_CLASS}>
+                  {advisoryForm.productType === 'advisory_combo' && (advisoryNavLoading || Number(advisoryForm.nav) > 0) ? (
+                    <>
+                      <PortfolioField label={advisoryForm.navDate ? `单位净值 ${advisoryForm.navDate}` : '单位净值'}>
+                        <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001"
+                          placeholder={advisoryNavLoading ? '历史净值查询中' : '流水日期单位净值'}
+                          value={advisoryForm.nav}
+                          onChange={(e) => setAdvisoryForm((prev) => ({
+                            ...prev,
+                            nav: e.target.value,
+                            quantity: calculateAdvisoryQuantity(prev.amount, e.target.value),
+                          }))}
+                          disabled={advisoryNavLoading} />
+                      </PortfolioField>
+                      <PortfolioField label="确定份额">
+                        <input className={PORTFOLIO_INPUT_CLASS} value={advisoryForm.quantity} readOnly />
+                      </PortfolioField>
+                    </>
+                  ) : null}
                   <div>
-                    <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId}>
+                    <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId || advisoryNavLoading}>
                       {advisoryForm.eventType === 'redeem' ? '提交投顾赎回' : '提交投顾投入'}
                     </button>
                   </div>
@@ -4157,6 +4400,95 @@ const PortfolioPage: React.FC = () => {
                     disabled={bankWealthNavLoading || !selectedBankWealthCandidateKey}
                   >
                     {bankWealthNavLoading ? '查询中...' : '确定'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
+      {advisorySearchLoading || advisoryCandidateModalOpen ? (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-background/62 px-4 backdrop-blur-sm"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="advisory-search-title"
+        >
+          <div className="w-full max-w-xl rounded-2xl border border-border/70 bg-card px-5 py-4 text-foreground shadow-soft-card-strong">
+            {advisorySearchLoading ? (
+              <div className="text-center">
+                <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary/25 border-t-primary" />
+                <h3 id="advisory-search-title" className="mt-3 text-sm font-semibold text-foreground">
+                  正在查询投顾产品
+                </h3>
+                <p className="mt-1 text-xs leading-5 text-secondary">
+                  正在通过盈米匹配产品信息，请稍候。
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 id="advisory-search-title" className="text-sm font-semibold text-foreground">
+                      选择投顾产品
+                    </h3>
+                    <p className="mt-1 text-xs leading-5 text-secondary">
+                      确认后将填入产品信息；投顾组合会继续按流水日期查询历史净值。
+                    </p>
+                  </div>
+                  {advisoryNavLoading ? (
+                    <span className="shrink-0 text-xs text-secondary">历史净值查询中...</span>
+                  ) : null}
+                </div>
+                <div className="mt-4 max-h-[360px] space-y-2 overflow-y-auto pr-1">
+                  {advisorySearchResults.map((product, index) => {
+                    const candidateKey = getAdvisoryCandidateKey(product, index);
+                    const selected = selectedAdvisoryCandidateKey === candidateKey;
+                    return (
+                      <button
+                        key={candidateKey}
+                        type="button"
+                        className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                          selected
+                            ? 'border-primary bg-primary/8 text-foreground'
+                            : 'border-border/70 bg-muted/30 text-secondary hover:border-primary/50 hover:text-foreground'
+                        }`}
+                        onClick={() => setSelectedAdvisoryCandidateKey(candidateKey)}
+                        disabled={advisoryNavLoading}
+                      >
+                        <span className="block truncate text-sm font-medium">{product.productName}</span>
+                        <span className="mt-1 block text-xs leading-5">
+                          {[
+                            product.strategyCode,
+                            product.managerName,
+                            product.riskLevel,
+                            product.annualizedReturn ? `年化 ${product.annualizedReturn}` : '',
+                            product.latestNav != null ? `最新净值 ${product.latestNav}` : '',
+                          ].filter(Boolean).join(' · ') || '暂无更多信息'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-4 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className="btn-secondary h-9 w-24 !px-3 !py-1.5 text-sm"
+                    onClick={() => {
+                      setAdvisoryCandidateModalOpen(false);
+                      setSelectedAdvisoryCandidateKey('');
+                    }}
+                    disabled={advisoryNavLoading}
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary h-9 w-24 !px-3 !py-1.5 text-sm"
+                    onClick={() => void handleConfirmAdvisoryCandidate()}
+                    disabled={advisoryNavLoading || !selectedAdvisoryCandidateKey}
+                  >
+                    {advisoryNavLoading ? '查询中...' : '确定'}
                   </button>
                 </div>
               </>

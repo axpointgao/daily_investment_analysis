@@ -39,7 +39,8 @@ PORTFOLIO_ANALYSIS_DEFAULT_PROMPTS: Dict[str, str] = {
     "all_standard": (
         "以家庭总资产视角生成一份资产分析报告。先判断大类资产配置、现金/负债、账户和币种分布、"
         "集中度、流动性和收益风险画像；再把基金/投顾等适用资产的盈米专业诊断作为专项输入整合进报告。"
-        "盈米只负责其适用的基金/投顾部分，其他资产基于本地持仓快照和风险指标判断。保险只按资产属性做基础判断。"
+        "盈米只负责其适用的基金/投顾部分，其他资产基于本地持仓快照和风险指标判断。保险只按现金价值、"
+        "已交保费、已领取金额、缴费压力和流动性做资产属性判断，不做保障责任或购买建议。"
     ),
     "all_quick": (
         "以家庭总资产视角分析当前全部账户。重点判断资产配置是否均衡、现金与银行资产是否足够、"
@@ -49,11 +50,12 @@ PORTFOLIO_ANALYSIS_DEFAULT_PROMPTS: Dict[str, str] = {
     "all_deep": (
         "以家庭总资产体检视角做深度诊断。先分析资产配置、账户分布、币种暴露、现金流动性和集中度，"
         "再结合专业投顾诊断中的基金/投顾组合风险、资产配置、相关性或回测信息。对未被专业数据覆盖的资产，"
-        "只基于本地持仓快照判断，并明确说明数据覆盖不足。"
+        "只基于本地持仓快照判断，并明确说明数据覆盖不足。保险资产只能基于已录入现金价值、缴费和领取流水判断。"
     ),
     "all_wealth_report": (
         "生成适合留档的家庭财富报告。报告应覆盖总资产结构、账户和币种分布、主要风险来源、流动性、"
-        "基金/投顾专业诊断摘要、保险基础资产情况和后续观察事项。语气正式、克制，不承诺收益，不给直接交易指令。"
+        "基金/投顾专业诊断摘要、保险资产价值与缴费压力情况和后续观察事项。语气正式、克制，"
+        "不承诺收益，不给直接交易指令。"
     ),
     "stock": (
         "只分析股票账户。重点关注单一持仓集中度、市场和币种暴露、股票行业集中度、盈亏结构和回撤风险。"
@@ -72,8 +74,10 @@ PORTFOLIO_ANALYSIS_DEFAULT_PROMPTS: Dict[str, str] = {
         "不要用股票或基金的收益波动框架硬套银行资产。"
     ),
     "insurance_basic": (
-        "只分析保险账户的资产属性。重点关注已交保费、当前现金价值、返还/年金/分红流水、未来缴费压力和流动性。"
-        "不要评价疾病、身故、医疗等保障责任是否充足；如数据不足，明确说明保险专项分析能力暂未接入。"
+        "只分析保险账户的资产属性，参考寿险/年金险产品分析框架做保单资产体检。重点关注已交保费、"
+        "当前现金价值、现金价值/已交保费比例、返还/年金/分红流水、未来缴费压力、下次缴费日、长期持有"
+        "和退保流动性风险。分红险、万能险、投连险等非保证收益只能提示不确定性。不要做购买建议，不要解释"
+        "具体条款责任、理赔责任或疾病/医疗/意外保障是否充足；没有现金价值更新时必须说明估值可靠性不足。"
     ),
 }
 
@@ -258,6 +262,7 @@ class PortfolioAnalysisService:
             "按账户汇总": self._build_account_breakdown(snapshot),
             "按市场汇总": self._build_breakdown(positions, "market"),
             "按币种汇总": self._build_breakdown(positions, "currency"),
+            "保险资产摘要": self._build_insurance_summary(positions),
             "持仓数量": len(positions),
             "缺价持仓数量": sum(1 for item in positions if item.get("priceAvailable") is False),
             "现金是否为负": total_cash < 0,
@@ -303,6 +308,35 @@ class PortfolioAnalysisService:
                     to_currency=report_currency,
                     as_of_date=as_of_date,
                 )
+                insurance_fields = self._extract_insurance_position_fields(pos)
+                if insurance_fields:
+                    paid_premium_account = float(pos.get("paid_premium") or 0.0)
+                    received_amount_account = float(pos.get("received_amount") or 0.0)
+                    paid_premium_report = self._convert_position_amount(
+                        paid_premium_account,
+                        from_currency=account_currency,
+                        to_currency=report_currency,
+                        as_of_date=as_of_date,
+                    )
+                    received_amount_report = self._convert_position_amount(
+                        received_amount_account,
+                        from_currency=account_currency,
+                        to_currency=report_currency,
+                        as_of_date=as_of_date,
+                    )
+                    insurance_fields.update(
+                        {
+                            "paidPremiumReport": (
+                                round(paid_premium_report, 6) if paid_premium_report is not None else None
+                            ),
+                            "receivedAmountReport": (
+                                round(received_amount_report, 6) if received_amount_report is not None else None
+                            ),
+                            "currentValueReport": (
+                                round(market_value_report, 6) if market_value_report is not None else None
+                            ),
+                        }
+                    )
                 rows.append(
                     {
                         "accountId": account.get("account_id"),
@@ -326,10 +360,118 @@ class PortfolioAnalysisService:
                         "unrealizedPnlPct": pos.get("unrealized_pnl_pct"),
                         "priceAvailable": pos.get("price_available"),
                         "priceSource": pos.get("price_source"),
+                        "priceDate": pos.get("price_date"),
+                        "priceStale": pos.get("price_stale"),
+                        **insurance_fields,
                     }
                 )
         rows.sort(key=lambda item: float(item.get("市值_报告币种") or 0.0), reverse=True)
         return rows
+
+    def _extract_insurance_position_fields(self, pos: Dict[str, Any]) -> Dict[str, Any]:
+        if str(pos.get("market") or "").strip().lower() != "insurance":
+            return {}
+        return {
+            "policyName": pos.get("policy_name") or pos.get("display_name"),
+            "insurer": pos.get("insurer"),
+            "insuranceKind": pos.get("insurance_kind"),
+            "designType": pos.get("design_type"),
+            "policyStatus": pos.get("policy_status"),
+            "paymentMode": pos.get("payment_mode"),
+            "premiumPerPeriod": pos.get("premium_per_period"),
+            "firstPaymentDate": pos.get("first_payment_date"),
+            "totalPeriods": pos.get("total_periods"),
+            "paidPeriods": pos.get("paid_periods"),
+            "paidPremium": pos.get("paid_premium"),
+            "receivedAmount": pos.get("received_amount"),
+            "cashValue": pos.get("cash_value"),
+            "valueDate": pos.get("value_date"),
+            "nextPaymentDate": pos.get("next_payment_date"),
+            "valueEstimated": pos.get("value_estimated"),
+        }
+
+    def _build_insurance_summary(self, positions: List[Dict[str, Any]]) -> Dict[str, Any]:
+        insurance_positions = [
+            item for item in positions
+            if str(item.get("market") or "").strip().lower() == "insurance"
+        ]
+        if not insurance_positions:
+            return {
+                "policyCount": 0,
+                "activePolicyCount": 0,
+                "paidPremiumTotal": 0.0,
+                "cashValueTotal": 0.0,
+                "currentValueTotal": 0.0,
+                "receivedAmountTotal": 0.0,
+                "estimatedValueCount": 0,
+                "missingCashValueCount": 0,
+                "staleValueCount": 0,
+                "nextPaymentDate": None,
+                "byInsuranceKind": [],
+                "byDesignType": [],
+            }
+
+        terminal_statuses = {"surrendered", "matured", "expired", "cancelled"}
+        active_count = 0
+        paid_premium_total = 0.0
+        cash_value_total = 0.0
+        received_amount_total = 0.0
+        estimated_count = 0
+        missing_cash_value_count = 0
+        stale_count = 0
+        next_payment_dates: List[str] = []
+        kind_totals: Dict[str, float] = {}
+        design_totals: Dict[str, float] = {}
+
+        for item in insurance_positions:
+            status = str(item.get("policyStatus") or "").strip().lower()
+            if status not in terminal_statuses:
+                active_count += 1
+
+            paid_premium = float(item.get("paidPremiumReport") or item.get("paidPremium") or 0.0)
+            received_amount = float(item.get("receivedAmountReport") or item.get("receivedAmount") or 0.0)
+            market_value = float(item.get("市值_报告币种") or 0.0)
+            paid_premium_total += paid_premium
+            received_amount_total += received_amount
+            cash_value_total += market_value
+
+            if item.get("valueEstimated") is True:
+                estimated_count += 1
+            if item.get("cashValue") is None:
+                missing_cash_value_count += 1
+            if item.get("priceSource") == "insurance_value_update" and item.get("priceAvailable") is not False:
+                if bool(item.get("priceStale") or item.get("price_stale")):
+                    stale_count += 1
+
+            next_payment = str(item.get("nextPaymentDate") or "").strip()
+            if next_payment:
+                next_payment_dates.append(next_payment)
+
+            kind = str(item.get("insuranceKind") or "未定义").strip() or "未定义"
+            design = str(item.get("designType") or "未定义").strip() or "未定义"
+            kind_totals[kind] = kind_totals.get(kind, 0.0) + market_value
+            design_totals[design] = design_totals.get(design, 0.0) + market_value
+
+        cash_value_ratio = (
+            round(cash_value_total / paid_premium_total * 100.0, 4)
+            if abs(paid_premium_total) > 1e-8
+            else None
+        )
+        return {
+            "policyCount": len(insurance_positions),
+            "activePolicyCount": active_count,
+            "paidPremiumTotal": round(paid_premium_total, 6),
+            "cashValueTotal": round(cash_value_total, 6),
+            "currentValueTotal": round(cash_value_total, 6),
+            "receivedAmountTotal": round(received_amount_total, 6),
+            "cashValueToPaidPremiumPct": cash_value_ratio,
+            "estimatedValueCount": estimated_count,
+            "missingCashValueCount": missing_cash_value_count,
+            "staleValueCount": stale_count,
+            "nextPaymentDate": min(next_payment_dates) if next_payment_dates else None,
+            "byInsuranceKind": self._format_breakdown(kind_totals),
+            "byDesignType": self._format_breakdown(design_totals),
+        }
 
     def _parse_snapshot_date(self, value: Any) -> date:
         try:

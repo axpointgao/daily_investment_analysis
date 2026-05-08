@@ -17,6 +17,11 @@ from api.v1.schemas.portfolio import (
     PortfolioAccountUpdateRequest,
     PortfolioAdvisoryLedgerCreateRequest,
     PortfolioAdvisoryLedgerListResponse,
+    PortfolioAdvisoryNavRequest,
+    PortfolioAdvisoryNavResponse,
+    PortfolioAdvisoryProductItem,
+    PortfolioAdvisoryProductSearchRequest,
+    PortfolioAdvisoryProductSearchResponse,
     PortfolioAnalysisRequest,
     PortfolioAnalysisResponse,
     PortfolioBankLedgerCreateRequest,
@@ -66,6 +71,7 @@ from src.services.portfolio_service import (
     PortfolioOversellError,
     PortfolioService,
 )
+from src.services.yingmi_stargate_client import YingmiStargateClient, YingmiStargateError
 
 logger = logging.getLogger(__name__)
 
@@ -547,6 +553,117 @@ def get_bank_wealth_nav(request: PortfolioBankWealthNavRequest) -> PortfolioBank
         raise _internal_error("Fetch bank wealth NAV failed", exc)
 
 
+def _yingmi_rows(payload: object) -> list[dict]:
+    rows: list[dict] = []
+    stack = [payload]
+    while stack:
+        item = stack.pop(0)
+        if isinstance(item, list):
+            rows.extend(candidate for candidate in item if isinstance(candidate, dict))
+            continue
+        if not isinstance(item, dict):
+            continue
+        nested = False
+        for key in ("rows", "data", "items", "list"):
+            value = item.get(key)
+            if isinstance(value, list) or isinstance(value, dict):
+                stack.append(value)
+                nested = True
+        if not nested:
+            rows.append(item)
+    return rows
+
+
+def _field(row: dict, *names: str) -> object:
+    for name in names:
+        value = row.get(name)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+@router.post(
+    "/advisory-products/search",
+    response_model=PortfolioAdvisoryProductSearchResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Search advisory products via Yingmi StarGate",
+)
+def search_advisory_products(
+    request: PortfolioAdvisoryProductSearchRequest,
+) -> PortfolioAdvisoryProductSearchResponse:
+    try:
+        client = YingmiStargateClient(timeout=12.0)
+        search_payload = client.search_strategies(request.keyword, page_num=1, page_size=request.limit)
+        search_rows = _yingmi_rows(search_payload)
+        codes: list[str] = []
+        for row in search_rows:
+            code = str(_field(row, "策略代码", "strategyCode", "strategy_code") or "").strip().upper()
+            if code and code not in codes:
+                codes.append(code)
+        details_by_code: dict[str, dict] = {}
+        if codes:
+            detail_payload = client.get_strategy_details(codes, page_num=1, page_size=max(len(codes), 1))
+            for row in _yingmi_rows(detail_payload):
+                code = str(_field(row, "策略代码", "strategyCode", "strategy_code") or "").strip().upper()
+                if code:
+                    details_by_code[code] = row
+        products: list[PortfolioAdvisoryProductItem] = []
+        for row in search_rows:
+            code = str(_field(row, "策略代码", "strategyCode", "strategy_code") or "").strip().upper()
+            if not code:
+                continue
+            detail = details_by_code.get(code, {})
+            source = {**row, **detail}
+            latest_nav = _field(source, "策略净值", "nav", "latestNav")
+            try:
+                latest_nav_float = float(latest_nav) if latest_nav is not None else None
+            except (TypeError, ValueError):
+                latest_nav_float = None
+            products.append(
+                PortfolioAdvisoryProductItem(
+                    strategy_code=code,
+                    product_name=str(_field(source, "策略名称", "strategyName", "name") or ""),
+                    product_type=request.product_type,
+                    risk_level=str(_field(source, "策略风险等级", "risk5LevelName", "riskLevel") or "") or None,
+                    manager_name=str(_field(source, "管理人名称", "managerName") or "") or None,
+                    established_date=str(_field(source, "策略成立时间", "establishedDate") or "") or None,
+                    latest_nav=latest_nav_float,
+                    latest_nav_date=str(_field(source, "最新净值日期", "latestNavDate") or "") or None,
+                    daily_return=str(_field(source, "日收益率", "dailyReturn") or "") or None,
+                    weekly_return=str(_field(source, "周收益率", "weeklyReturn") or "") or None,
+                    monthly_return=str(_field(source, "月收益率", "monthlyReturn") or "") or None,
+                    yearly_return=str(_field(source, "年收益率", "yearlyReturn") or "") or None,
+                    annualized_return=str(_field(source, "年化收益率", "annualizedReturn") or "") or None,
+                    max_drawdown=str(_field(source, "最大回撤", "maxDrawdown") or "") or None,
+                )
+            )
+        return PortfolioAdvisoryProductSearchResponse(products=products)
+    except YingmiStargateError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Search advisory products failed", exc)
+
+
+@router.post(
+    "/advisory-products/nav",
+    response_model=PortfolioAdvisoryNavResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Fetch advisory strategy NAV via Yingmi StarGate",
+)
+def get_advisory_nav(request: PortfolioAdvisoryNavRequest) -> PortfolioAdvisoryNavResponse:
+    try:
+        as_of = request.nav_date or date.today()
+        price = PortfolioService._fetch_advisory_nav(strategy_code=request.strategy_code, as_of_date=as_of)
+        if price is None:
+            return PortfolioAdvisoryNavResponse(unit_nav=None, nav_date=None)
+        return PortfolioAdvisoryNavResponse(
+            unit_nav=price.price,
+            nav_date=price.price_date.isoformat() if price.price_date else None,
+        )
+    except Exception as exc:
+        raise _internal_error("Fetch advisory NAV failed", exc)
+
+
 @router.get(
     "/bank-ledger",
     response_model=PortfolioBankLedgerListResponse,
@@ -623,6 +740,14 @@ def create_advisory_ledger(request: PortfolioAdvisoryLedgerCreateRequest) -> Por
             currency=request.currency,
             risk_level=request.risk_level,
             investment_style=request.investment_style,
+            quantity=request.quantity,
+            nav=request.nav,
+            nav_date=request.nav_date,
+            external_strategy_code=request.external_strategy_code,
+            data_provider=request.data_provider,
+            valuation_model=request.valuation_model,
+            manager_name=request.manager_name,
+            recommended_holding_duration=request.recommended_holding_duration,
         )
         return PortfolioEventCreatedResponse(**data)
     except PortfolioBusyError as exc:

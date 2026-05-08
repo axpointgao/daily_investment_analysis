@@ -729,9 +729,15 @@ class PortfolioRepository:
         amount: float,
         quantity: float,
         nav: float,
+        nav_date: Optional[date] = None,
         currency: str,
         risk_level: Optional[str] = None,
         investment_style: Optional[str] = None,
+        external_strategy_code: Optional[str] = None,
+        data_provider: Optional[str] = None,
+        valuation_model: Optional[str] = None,
+        manager_name: Optional[str] = None,
+        recommended_holding_duration: Optional[str] = None,
     ) -> PortfolioAdvisoryLedger:
         with self.portfolio_write_session() as session:
             row = PortfolioAdvisoryLedger(
@@ -745,9 +751,15 @@ class PortfolioRepository:
                 amount=amount,
                 quantity=quantity,
                 nav=nav,
+                nav_date=nav_date,
                 currency=currency,
                 risk_level=risk_level,
                 investment_style=investment_style,
+                external_strategy_code=external_strategy_code,
+                data_provider=data_provider,
+                valuation_model=valuation_model or "amount_value",
+                manager_name=manager_name,
+                recommended_holding_duration=recommended_holding_duration,
             )
             session.add(row)
             self._invalidate_account_cache_in_session(

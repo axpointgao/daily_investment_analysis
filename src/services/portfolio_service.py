@@ -49,6 +49,7 @@ ADVISORY_PRODUCT_TYPE_LABELS = {
     "advisory_combo": "投顾组合",
     "dca_plan": "定投计划",
 }
+VALID_ADVISORY_VALUATION_MODELS = {"amount_value", "unit_nav"}
 VALID_INSURANCE_KINDS = {"annuity", "whole_life", "endowment", "universal", "unit_linked", "other"}
 VALID_INSURANCE_DESIGN_TYPES = {"ordinary", "participating", "universal", "unit_linked", "other"}
 VALID_INSURANCE_STATUSES = {"active", "paid_up", "surrendered", "matured", "expired", "cancelled"}
@@ -635,6 +636,14 @@ class PortfolioService:
         currency: Optional[str] = None,
         risk_level: Optional[str] = None,
         investment_style: Optional[str] = None,
+        quantity: Optional[float] = None,
+        nav: Optional[float] = None,
+        nav_date: Optional[date] = None,
+        external_strategy_code: Optional[str] = None,
+        data_provider: Optional[str] = None,
+        valuation_model: Optional[str] = None,
+        manager_name: Optional[str] = None,
+        recommended_holding_duration: Optional[str] = None,
     ) -> Dict[str, Any]:
         account = self._require_active_account(account_id)
         if account.market != "advisory":
@@ -654,6 +663,32 @@ class PortfolioService:
         currency_norm = self._normalize_currency(currency or account.base_currency)
         risk_level_norm = (risk_level or "").strip() or None
         investment_style_norm = (investment_style or "").strip() or None
+        external_strategy_code_norm = (external_strategy_code or "").strip().upper() or None
+        data_provider_norm = (data_provider or "").strip() or None
+        valuation_model_norm = (valuation_model or "").strip() or "amount_value"
+        if valuation_model_norm not in VALID_ADVISORY_VALUATION_MODELS:
+            raise ValueError("valuation_model is invalid")
+        if product_type_norm == "dca_plan":
+            valuation_model_norm = "amount_value"
+            quantity = None
+            nav = None
+            nav_date = None
+        if valuation_model_norm == "unit_nav":
+            if product_type_norm != "advisory_combo":
+                raise ValueError("unit_nav valuation only supports advisory_combo")
+            if nav is None or nav <= 0:
+                raise ValueError("nav must be > 0 for unit_nav advisory products")
+            if quantity is None:
+                quantity = float(amount) / float(nav)
+            if quantity <= 0:
+                raise ValueError("quantity must be > 0 for unit_nav advisory products")
+            nav_date = nav_date or event_date
+        else:
+            quantity = 1.0
+            nav = float(amount)
+            nav_date = None
+        manager_name_norm = (manager_name or "").strip() or None
+        recommended_holding_duration_norm = (recommended_holding_duration or "").strip() or None
         self._validate_advisory_product_type_consistency(
             account_id=account_id,
             platform=platform_norm,
@@ -672,11 +707,17 @@ class PortfolioService:
             product_type=product_type_norm,
             direction=event_type_norm,
             amount=float(amount),
-            quantity=1.0,
-            nav=float(amount),
+            quantity=float(quantity),
+            nav=float(nav),
+            nav_date=nav_date,
             currency=currency_norm,
             risk_level=risk_level_norm,
             investment_style=investment_style_norm,
+            external_strategy_code=external_strategy_code_norm,
+            data_provider=data_provider_norm,
+            valuation_model=valuation_model_norm,
+            manager_name=manager_name_norm,
+            recommended_holding_duration=recommended_holding_duration_norm,
         )
         return {"id": int(row.id)}
 
@@ -1806,6 +1847,12 @@ class PortfolioService:
                 product_name = str(event.product_name or "").strip()
                 symbol = self._make_advisory_symbol(product_code or f"{platform}:{product_name}")
                 key = (symbol, currency)
+                row_valuation_model = str(getattr(event, "valuation_model", "") or "amount_value").strip()
+                if product_type == "dca_plan":
+                    row_valuation_model = "amount_value"
+                if row_valuation_model not in VALID_ADVISORY_VALUATION_MODELS:
+                    row_valuation_model = "amount_value"
+                external_strategy_code = str(getattr(event, "external_strategy_code", "") or "").strip().upper()
                 item = advisory_assets.setdefault(
                     key,
                     {
@@ -1820,10 +1867,19 @@ class PortfolioService:
                         "product_type_label": ADVISORY_PRODUCT_TYPE_LABELS.get(product_type, "投顾组合"),
                         "risk_level": event.risk_level,
                         "investment_style": event.investment_style,
+                        "data_provider": getattr(event, "data_provider", None),
+                        "valuation_model_detail": row_valuation_model,
+                        "external_strategy_code": external_strategy_code or None,
+                        "manager_name": getattr(event, "manager_name", None),
+                        "recommended_holding_duration": getattr(event, "recommended_holding_duration", None),
+                        "nav_date": getattr(event, "nav_date", None).isoformat()
+                        if getattr(event, "nav_date", None)
+                        else None,
                         "invested_amount": 0.0,
                         "redeemed_amount": 0.0,
                         "value_amount": 0.0,
-                        "quantity": 1.0,
+                        "advisory_units": 0.0,
+                        "quantity": 0.0,
                         "avg_cost": 0.0,
                         "total_cost": 0.0,
                         "last_price": 0.0,
@@ -1841,6 +1897,24 @@ class PortfolioService:
                 )
                 if item.get("product_type") != product_type:
                     raise ValueError(f"product_type cannot change for advisory product {product_name}")
+                current_units = float(item.get("advisory_units") or item.get("quantity") or 0.0)
+                unit_nav = float(getattr(event, "nav", None) or 0.0)
+                event_units = float(getattr(event, "quantity", None) or 0.0)
+                is_unit_nav_event = row_valuation_model == "unit_nav" and unit_nav > EPS
+                if row_valuation_model == "unit_nav":
+                    item["valuation_model_detail"] = "unit_nav"
+                    if external_strategy_code:
+                        item["external_strategy_code"] = external_strategy_code
+                    if getattr(event, "data_provider", None):
+                        item["data_provider"] = event.data_provider
+                    if getattr(event, "nav_date", None):
+                        item["nav_date"] = event.nav_date.isoformat()
+                    if event_units <= EPS and unit_nav > EPS:
+                        event_units = amount / unit_nav
+                if getattr(event, "manager_name", None):
+                    item["manager_name"] = event.manager_name
+                if getattr(event, "recommended_holding_duration", None):
+                    item["recommended_holding_duration"] = event.recommended_holding_duration
                 current_value = float(item["value_amount"] or 0.0)
                 if advisory_event_type in ADVISORY_BUY_EVENTS:
                     if tracks_asset_cash:
@@ -1853,7 +1927,16 @@ class PortfolioService:
                     )
                     position_cashflows[product_key].append(_AnnualizedCashFlow(event_date, -amount, currency))
                     item["invested_amount"] = float(item["invested_amount"] or 0.0) + amount
-                    item["value_amount"] = current_value + amount
+                    if is_unit_nav_event:
+                        item["advisory_units"] = current_units + event_units
+                        item["quantity"] = item["advisory_units"]
+                        item["last_price"] = unit_nav
+                        item["value_amount"] = float(item["advisory_units"] or 0.0) * unit_nav
+                        item["price_source"] = "advisory_nav"
+                        item["price_provider"] = getattr(event, "data_provider", None) or "yingmi_stargate"
+                        item["value_estimated"] = False
+                    else:
+                        item["value_amount"] = current_value + amount
                     item["price_date"] = event_date.isoformat()
                     item["price_stale"] = event_date < as_of_date
                     if event.risk_level:
@@ -1870,8 +1953,25 @@ class PortfolioService:
                     item=item,
                 )
                 position_cashflows[product_key].append(_AnnualizedCashFlow(event_date, amount, currency))
+                if is_unit_nav_event and current_units > EPS:
+                    current_value = current_units * unit_nav
+                    item["last_price"] = unit_nav
+                    item["price_source"] = "advisory_nav"
+                    item["price_provider"] = getattr(event, "data_provider", None) or "yingmi_stargate"
+                    item["value_estimated"] = False
+                if advisory_event_type == "redeem" and amount - current_value > EPS:
+                    raise PortfolioOversellError(
+                        symbol=symbol,
+                        trade_date=event_date,
+                        requested_quantity=amount,
+                        available_quantity=current_value,
+                    )
                 item["redeemed_amount"] = float(item["redeemed_amount"] or 0.0) + amount
                 item["value_amount"] = max(0.0, current_value - amount)
+                if is_unit_nav_event:
+                    redeem_units = event_units if event_units > EPS else amount / unit_nav
+                    item["advisory_units"] = max(0.0, current_units - redeem_units)
+                    item["quantity"] = item["advisory_units"]
                 item["price_date"] = event_date.isoformat()
                 item["price_stale"] = event_date < as_of_date
                 continue
@@ -1887,6 +1987,9 @@ class PortfolioService:
                 item["last_price"] = value_amount
                 item["price_source"] = "advisory_value_update"
                 item["price_provider"] = "manual_price"
+                units = float(item.get("advisory_units") or item.get("quantity") or 0.0)
+                if str(item.get("valuation_model_detail") or "") == "unit_nav" and units > EPS:
+                    item["last_price"] = value_amount / units
                 item["price_date"] = event_date.isoformat()
                 item["price_stale"] = event_date < as_of_date
                 item["price_available"] = True
@@ -2388,8 +2491,35 @@ class PortfolioService:
             invested_amount = float(item.get("invested_amount") or 0.0)
             redeemed_amount = float(item.get("redeemed_amount") or 0.0)
             value_amount = max(0.0, float(item.get("value_amount") or 0.0))
-            if value_amount <= EPS and invested_amount <= EPS and redeemed_amount <= EPS:
+            units = float(item.get("advisory_units") or item.get("quantity") or 0.0)
+            is_unit_nav_advisory = (
+                item.get("product_type") == "advisory_combo"
+                and item.get("valuation_model_detail") == "unit_nav"
+                and bool(item.get("external_strategy_code"))
+                and units > EPS
+            )
+            if value_amount <= EPS and invested_amount <= EPS and redeemed_amount <= EPS and units <= EPS:
                 continue
+            if refresh_prices and is_unit_nav_advisory:
+                latest_price = self._fetch_advisory_nav(
+                    strategy_code=str(item.get("external_strategy_code") or ""),
+                    as_of_date=as_of_date,
+                )
+                if (
+                    latest_price is not None
+                    and latest_price.price > EPS
+                    and self._should_apply_advisory_nav(current_item=item, latest_price=latest_price)
+                ):
+                    value_amount = units * latest_price.price
+                    item["value_amount"] = value_amount
+                    item["last_price"] = latest_price.price
+                    item["price_source"] = "advisory_nav"
+                    item["price_provider"] = latest_price.provider
+                    item["price_date"] = latest_price.price_date.isoformat() if latest_price.price_date else None
+                    item["nav_date"] = item["price_date"]
+                    item["price_stale"] = latest_price.is_stale
+                    item["price_available"] = latest_price.is_available
+                    item["value_estimated"] = False
             market_local = value_amount
             market_conversion = self._convert_amount(
                 amount=market_local,
@@ -2418,7 +2548,7 @@ class PortfolioService:
                 if market_base is not None and cost_base is not None and redeemed_base is not None
                 else 0.0
             )
-            item["quantity"] = 1.0
+            item["quantity"] = round(units, 8) if is_unit_nav_advisory else 1.0
             item["product_key"] = self._make_product_key(
                 market="advisory",
                 symbol=str(item.get("symbol") or ""),
@@ -2426,17 +2556,24 @@ class PortfolioService:
                 item=item,
             )
             item["total_cost"] = round(invested_amount, 8)
-            item["avg_cost"] = round(invested_amount, 8)
+            item["avg_cost"] = round((invested_amount / units), 8) if is_unit_nav_advisory and units > EPS else round(invested_amount, 8)
             item["market_value_base"] = round(market_base or 0.0, 8)
             item["unrealized_pnl_base"] = round(unrealized_base, 8)
             item["unrealized_pnl_pct"] = (
                 round((unrealized_base / cost_base) * 100, 8) if cost_base and market_base is not None else None
             )
-            item["last_price"] = round(value_amount, 8)
+            if is_unit_nav_advisory:
+                if float(item.get("last_price") or 0.0) <= EPS and units > EPS:
+                    item["last_price"] = round(value_amount / units, 8)
+            else:
+                item["last_price"] = round(value_amount, 8)
             item["invested_amount"] = round(invested_amount, 8)
             item["redeemed_amount"] = round(redeemed_amount, 8)
             item["value_amount"] = round(value_amount, 8)
-            self._apply_position_display_metrics(item, valuation_model="amount_value")
+            self._apply_position_display_metrics(
+                item,
+                valuation_model="unit_nav" if is_unit_nav_advisory else "amount_value",
+            )
             advisory_position_rows.append(item)
             if market_base is not None:
                 market_value_base += market_base
@@ -3115,6 +3252,92 @@ class PortfolioService:
         )
 
     @staticmethod
+    def _fetch_advisory_nav(*, strategy_code: str, as_of_date: date) -> Optional[_ResolvedPositionPrice]:
+        code = str(strategy_code or "").strip().upper()
+        if not code:
+            return None
+        try:
+            from src.services.yingmi_stargate_client import YingmiStargateClient, YingmiStargateError
+
+            if not YingmiStargateClient.is_configured():
+                return None
+            client = YingmiStargateClient(timeout=8.0)
+            nav_rows = client.get_portfolio_nav_history(
+                code,
+                start=as_of_date - timedelta(days=14),
+                end=as_of_date,
+            )
+        except YingmiStargateError:
+            return None
+        except Exception:
+            return None
+        nav, nav_date = PortfolioService._extract_advisory_nav_payload(nav_rows, as_of_date=as_of_date)
+        if nav is None or nav <= 0 or nav_date is None:
+            return None
+        return _ResolvedPositionPrice(
+            price=float(nav),
+            source="advisory_nav",
+            price_date=nav_date,
+            is_stale=nav_date < as_of_date,
+            is_available=True,
+            provider="yingmi_stargate",
+        )
+
+    @staticmethod
+    def _extract_advisory_nav_payload(payload: Any, *, as_of_date: date) -> Tuple[Optional[float], Optional[date]]:
+        rows: List[Any] = []
+        stack: List[Any] = [payload]
+        while stack:
+            item = stack.pop(0)
+            if isinstance(item, list):
+                rows.extend(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            nested = False
+            for key in ("data", "rows", "items", "navList", "nav_list", "list"):
+                value = item.get(key)
+                if isinstance(value, (list, dict)):
+                    stack.append(value)
+                    nested = True
+            if not nested:
+                rows.append(item)
+        best_nav: Optional[float] = None
+        best_date: Optional[date] = None
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            nav_date = PortfolioService._parse_iso_date(
+                row.get("navDate")
+                or row.get("nav_date")
+                or row.get("date")
+                or row.get("tradingDate")
+                or row.get("trading_date")
+                or row.get("priceDate")
+                or row.get("price_date")
+            )
+            if nav_date is None or nav_date > as_of_date:
+                continue
+            try:
+                nav = float(
+                    row.get("nav")
+                    or row.get("unitNav")
+                    or row.get("unit_nav")
+                    or row.get("netValue")
+                    or row.get("net_value")
+                    or row.get("portfolioNav")
+                    or 0.0
+                )
+            except (TypeError, ValueError):
+                continue
+            if nav <= 0:
+                continue
+            if best_date is None or nav_date > best_date:
+                best_nav = nav
+                best_date = nav_date
+        return best_nav, best_date
+
+    @staticmethod
     def _extract_fund_nav_payload(payload: Any) -> Tuple[Optional[float], Optional[date]]:
         stack = [payload]
         while stack:
@@ -3788,9 +4011,14 @@ class PortfolioService:
             "amount": float(row.amount or 0.0),
             "quantity": float(row.quantity or 0.0) if row.quantity is not None else None,
             "nav": float(row.nav or 0.0) if row.nav is not None else None,
+            "nav_date": row.nav_date.isoformat() if getattr(row, "nav_date", None) else None,
             "currency": row.currency,
             "risk_level": row.risk_level,
             "investment_style": row.investment_style,
+            "data_provider": getattr(row, "data_provider", None),
+            "valuation_model": getattr(row, "valuation_model", None),
+            "manager_name": getattr(row, "manager_name", None),
+            "recommended_holding_duration": getattr(row, "recommended_holding_duration", None),
             "created_at": row.created_at.isoformat() if row.created_at else None,
         }
 
@@ -4114,16 +4342,39 @@ class PortfolioService:
         return current_item.get("price_source") != "bank_value_update"
 
     @staticmethod
+    def _should_apply_advisory_nav(
+        *,
+        current_item: Dict[str, Any],
+        latest_price: _ResolvedPositionPrice,
+    ) -> bool:
+        current_date = PortfolioService._parse_iso_date(current_item.get("price_date"))
+        latest_date = latest_price.price_date
+        if current_date is None or latest_date is None:
+            return True
+        if latest_date > current_date:
+            return True
+        if latest_date < current_date:
+            return False
+        return current_item.get("price_source") != "advisory_value_update"
+
+    @staticmethod
     def _parse_iso_date(value: Any) -> Optional[date]:
         if isinstance(value, date):
             return value
         text = str(value or "").strip()
         if not text:
             return None
-        try:
-            return datetime.strptime(text[:10], "%Y-%m-%d").date()
-        except ValueError:
-            return None
+        candidates = (
+            (text[:10].replace("/", "-"), "%Y-%m-%d"),
+            (text[:10], "%Y/%m/%d"),
+            (text[:8], "%Y%m%d"),
+        )
+        for candidate, fmt in candidates:
+            try:
+                return datetime.strptime(candidate, fmt).date()
+            except ValueError:
+                continue
+        return None
 
     @staticmethod
     def _default_currency_for_market(market: str) -> str:

@@ -1769,6 +1769,117 @@ class PortfolioServiceTestCase(unittest.TestCase):
                 currency="CNY",
             )
 
+    def test_advisory_combo_unit_nav_uses_historical_nav_refresh(self) -> None:
+        account = self.service.create_account(name="Advisory", broker="且慢", market="advisory", base_currency="CNY")
+        aid = account["id"]
+        self.service.record_advisory_ledger(
+            account_id=aid,
+            event_date=date(2024, 4, 20),
+            platform="且慢",
+            product_name="我要稳稳的幸福",
+            product_code=None,
+            product_type="advisory_combo",
+            event_type="buy",
+            amount=100000,
+            currency="CNY",
+            quantity=80000,
+            nav=1.25,
+            nav_date=date(2024, 4, 20),
+            external_strategy_code="ZH013136",
+            data_provider="yingmi_stargate",
+            valuation_model="unit_nav",
+        )
+
+        with patch.object(
+            PortfolioService,
+            "_fetch_advisory_nav",
+            return_value=_ResolvedPositionPrice(
+                price=1.3,
+                source="advisory_nav",
+                price_date=date(2024, 4, 30),
+                is_stale=False,
+                is_available=True,
+                provider="yingmi_stargate",
+            ),
+        ) as fetch_nav:
+            snapshot = self.service.get_portfolio_snapshot(
+                account_id=aid,
+                as_of=date(2024, 4, 30),
+                refresh_prices=True,
+            )
+
+        fetch_nav.assert_called_once()
+        self.assertEqual(fetch_nav.call_args.kwargs["strategy_code"], "ZH013136")
+        self.assertEqual(fetch_nav.call_args.kwargs["as_of_date"], date(2024, 4, 30))
+        position = snapshot["accounts"][0]["positions"][0]
+        self.assertEqual(position["valuation_model"], "unit_nav")
+        self.assertEqual(position["valuation_model_detail"], "unit_nav")
+        self.assertEqual(position["external_strategy_code"], "ZH013136")
+        self.assertAlmostEqual(position["quantity"], 80000.0, places=6)
+        self.assertAlmostEqual(position["last_price"], 1.3, places=6)
+        self.assertAlmostEqual(position["market_value_base"], 104000.0, places=6)
+        self.assertEqual(position["price_source"], "advisory_nav")
+        self.assertEqual(position["price_date"], "2024-04-30")
+
+    def test_advisory_dca_keeps_yingmi_metadata_without_nav_refresh(self) -> None:
+        account = self.service.create_account(name="Advisory", broker="且慢", market="advisory", base_currency="CNY")
+        aid = account["id"]
+        self.service.record_advisory_ledger(
+            account_id=aid,
+            event_date=date(2024, 4, 20),
+            platform="且慢",
+            product_name="长赢指数投资计划-150份",
+            product_code=None,
+            product_type="dca_plan",
+            event_type="initial_buy",
+            amount=200000,
+            currency="CNY",
+            quantity=1000,
+            nav=2.0,
+            nav_date=date(2024, 4, 20),
+            external_strategy_code="LONG_WIN",
+            data_provider="yingmi_stargate",
+            valuation_model="unit_nav",
+            manager_name="且慢",
+            recommended_holding_duration="长期",
+        )
+
+        with patch.object(PortfolioService, "_fetch_advisory_nav") as fetch_nav:
+            snapshot = self.service.get_portfolio_snapshot(
+                account_id=aid,
+                as_of=date(2024, 4, 30),
+                refresh_prices=True,
+            )
+
+        fetch_nav.assert_not_called()
+        position = snapshot["accounts"][0]["positions"][0]
+        self.assertEqual(position["product_type"], "dca_plan")
+        self.assertEqual(position["valuation_model"], "amount_value")
+        self.assertEqual(position["valuation_model_detail"], "amount_value")
+        self.assertEqual(position["external_strategy_code"], "LONG_WIN")
+        self.assertEqual(position["manager_name"], "且慢")
+        self.assertEqual(position["recommended_holding_duration"], "长期")
+        self.assertAlmostEqual(position["market_value_base"], 200000.0, places=6)
+
+    def test_extract_advisory_nav_payload_uses_latest_not_after_as_of(self) -> None:
+        payload = {
+            "data": {
+                "rows": [
+                    {"navDate": "2024-04-18", "nav": "1.2"},
+                    {"navDate": "2024-04-20", "unitNav": "1.25"},
+                    {"navDate": "2024-04-21", "nav": "1.3"},
+                ]
+            }
+        }
+
+        nav, nav_date = PortfolioService._extract_advisory_nav_payload(
+            payload,
+            as_of_date=date(2024, 4, 20),
+        )
+
+        self.assertEqual(nav_date, date(2024, 4, 20))
+        self.assertAlmostEqual(nav or 0.0, 1.25, places=6)
+
     def test_advisory_orphan_value_update_does_not_create_position(self) -> None:
         account = self.service.create_account(name="Advisory", broker="且慢", market="advisory", base_currency="CNY")
         aid = account["id"]

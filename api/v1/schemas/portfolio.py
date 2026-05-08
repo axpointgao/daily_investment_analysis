@@ -213,6 +213,46 @@ class PortfolioBankWealthNavResponse(BaseModel):
     source: str = "iwencai"
 
 
+class PortfolioAdvisoryProductSearchRequest(BaseModel):
+    keyword: str = Field(..., min_length=1, max_length=128)
+    product_type: PortfolioAdvisoryProductType = "advisory_combo"
+    limit: int = Field(10, ge=1, le=20)
+
+
+class PortfolioAdvisoryProductItem(BaseModel):
+    strategy_code: str
+    product_name: str
+    product_type: PortfolioAdvisoryProductType = "advisory_combo"
+    risk_level: Optional[str] = None
+    manager_name: Optional[str] = None
+    established_date: Optional[str] = None
+    recommended_holding_duration: Optional[str] = None
+    latest_nav: Optional[float] = None
+    latest_nav_date: Optional[str] = None
+    daily_return: Optional[str] = None
+    weekly_return: Optional[str] = None
+    monthly_return: Optional[str] = None
+    yearly_return: Optional[str] = None
+    annualized_return: Optional[str] = None
+    max_drawdown: Optional[str] = None
+    source: str = "yingmi_stargate"
+
+
+class PortfolioAdvisoryProductSearchResponse(BaseModel):
+    products: List[PortfolioAdvisoryProductItem] = Field(default_factory=list)
+
+
+class PortfolioAdvisoryNavRequest(BaseModel):
+    strategy_code: str = Field(..., min_length=1, max_length=64)
+    nav_date: Optional[date] = None
+
+
+class PortfolioAdvisoryNavResponse(BaseModel):
+    unit_nav: Optional[float] = None
+    nav_date: Optional[str] = None
+    source: str = "yingmi_stargate"
+
+
 class PortfolioAdvisoryLedgerCreateRequest(BaseModel):
     account_id: int
     event_date: date
@@ -225,6 +265,14 @@ class PortfolioAdvisoryLedgerCreateRequest(BaseModel):
     currency: Optional[str] = Field(None, min_length=3, max_length=8)
     risk_level: Optional[str] = Field(None, max_length=16)
     investment_style: Optional[str] = Field(None, max_length=32)
+    quantity: Optional[float] = Field(None, gt=0)
+    nav: Optional[float] = Field(None, gt=0)
+    nav_date: Optional[date] = None
+    external_strategy_code: Optional[str] = Field(None, max_length=64)
+    data_provider: Optional[str] = Field(None, max_length=32)
+    valuation_model: Optional[str] = Field(None, max_length=24)
+    manager_name: Optional[str] = Field(None, max_length=64)
+    recommended_holding_duration: Optional[str] = Field(None, max_length=32)
 
 
 class PortfolioAdvisoryLedgerListItem(BaseModel):
@@ -240,9 +288,14 @@ class PortfolioAdvisoryLedgerListItem(BaseModel):
     amount: float
     quantity: Optional[float] = None
     nav: Optional[float] = None
+    nav_date: Optional[str] = None
     currency: str
     risk_level: Optional[str] = None
     investment_style: Optional[str] = None
+    data_provider: Optional[str] = None
+    valuation_model: Optional[str] = None
+    manager_name: Optional[str] = None
+    recommended_holding_duration: Optional[str] = None
     created_at: Optional[str] = None
 
 
@@ -493,6 +546,12 @@ class PortfolioPositionItem(BaseModel):
     product_type: Optional[str] = None
     product_type_label: Optional[str] = None
     investment_style: Optional[str] = None
+    data_provider: Optional[str] = None
+    valuation_model_detail: Optional[str] = None
+    external_strategy_code: Optional[str] = None
+    manager_name: Optional[str] = None
+    recommended_holding_duration: Optional[str] = None
+    nav_date: Optional[str] = None
     invested_amount: Optional[float] = None
     redeemed_amount: Optional[float] = None
     value_amount: Optional[float] = None

@@ -102,6 +102,12 @@ export interface PortfolioPositionItem {
   productType?: PortfolioAdvisoryProductType | string | null;
   productTypeLabel?: string | null;
   investmentStyle?: string | null;
+  dataProvider?: string | null;
+  valuationModelDetail?: string | null;
+  externalStrategyCode?: string | null;
+  managerName?: string | null;
+  recommendedHoldingDuration?: string | null;
+  navDate?: string | null;
   investedAmount?: number | null;
   redeemedAmount?: number | null;
   valueAmount?: number | null;
@@ -400,6 +406,35 @@ export interface PortfolioBankWealthNavResponse {
   source: string;
 }
 
+export interface PortfolioAdvisoryProductItem {
+  strategyCode: string;
+  productName: string;
+  productType: PortfolioAdvisoryProductType;
+  riskLevel?: string | null;
+  managerName?: string | null;
+  establishedDate?: string | null;
+  recommendedHoldingDuration?: string | null;
+  latestNav?: number | null;
+  latestNavDate?: string | null;
+  dailyReturn?: string | null;
+  weeklyReturn?: string | null;
+  monthlyReturn?: string | null;
+  yearlyReturn?: string | null;
+  annualizedReturn?: string | null;
+  maxDrawdown?: string | null;
+  source: string;
+}
+
+export interface PortfolioAdvisoryProductSearchResponse {
+  products: PortfolioAdvisoryProductItem[];
+}
+
+export interface PortfolioAdvisoryNavResponse {
+  unitNav?: number | null;
+  navDate?: string | null;
+  source: string;
+}
+
 export interface PortfolioDeleteResponse {
   deleted: number;
 }
@@ -492,6 +527,14 @@ export interface PortfolioAdvisoryLedgerCreateRequest {
   currency?: string;
   riskLevel?: string;
   investmentStyle?: string;
+  quantity?: number;
+  nav?: number;
+  navDate?: string;
+  externalStrategyCode?: string;
+  dataProvider?: string;
+  valuationModel?: string;
+  managerName?: string;
+  recommendedHoldingDuration?: string;
 }
 
 export interface PortfolioAdvisoryLedgerListItem {
@@ -507,9 +550,14 @@ export interface PortfolioAdvisoryLedgerListItem {
   amount: number;
   quantity?: number | null;
   nav?: number | null;
+  navDate?: string | null;
   currency: string;
   riskLevel?: string | null;
   investmentStyle?: string | null;
+  dataProvider?: string | null;
+  valuationModel?: string | null;
+  managerName?: string | null;
+  recommendedHoldingDuration?: string | null;
   createdAt?: string | null;
 }
 
