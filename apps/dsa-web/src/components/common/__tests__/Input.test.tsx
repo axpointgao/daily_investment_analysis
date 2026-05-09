@@ -37,7 +37,7 @@ describe('Input', () => {
     const { container } = render(<Input label="API Key" iconType="key" />);
 
     expect(container.querySelector('svg')).not.toBeNull();
-    expect(screen.getByLabelText('API Key')).toHaveClass('pl-10');
+    expect(screen.getByLabelText('API Key')).toHaveClass('pl-8');
   });
 
   it('toggles password visibility in uncontrolled mode', () => {
@@ -69,12 +69,12 @@ describe('Input', () => {
     expect(onPasswordVisibleChange).toHaveBeenCalledWith(false);
   });
 
-  it('supports the login appearance without affecting password toggle behavior', () => {
+  it('ignores the legacy login appearance without affecting password toggle behavior', () => {
     render(<Input label="登录密码" type="password" allowTogglePassword appearance="login" />);
 
     const input = screen.getByLabelText('登录密码');
-    expect(input).toHaveAttribute('data-appearance', 'login');
-    expect(input).toHaveClass('input-appearance-login');
+    expect(input).not.toHaveAttribute('data-appearance');
+    expect(input).not.toHaveClass('input-appearance-login');
     expect(input).toHaveAttribute('type', 'password');
 
     fireEvent.click(screen.getByRole('button', { name: '显示内容' }));

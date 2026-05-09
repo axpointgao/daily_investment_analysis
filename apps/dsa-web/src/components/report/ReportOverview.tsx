@@ -76,11 +76,11 @@ const getPriceChangeStyle = (changePct: number | undefined): React.CSSProperties
   }
 
   if (changePct > 0) {
-    return { color: 'var(--home-price-up)' };
+    return { color: 'var(--foreground)' };
   }
 
   if (changePct < 0) {
-    return { color: 'var(--home-price-down)' };
+    return { color: 'var(--destructive)' };
   }
 
   return undefined;
@@ -108,9 +108,6 @@ const getBoardStatusVariant = (status: BoardStatus): 'success' | 'danger' => {
   return 'danger';
 };
 
-/**
- * 报告概览区组件 - 终端风格
- */
 export const ReportOverview: React.FC<ReportOverviewProps> = ({
   meta,
   summary,
@@ -130,7 +127,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
         {/* 左侧：股票信息与结论 */}
         <div className="lg:col-span-2 space-y-5">
           {/* 股票头部 */}
-          <Card variant="gradient" padding="md" className="home-report-hero">
+          <Card variant="gradient" padding="md" className="">
             <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-3">
@@ -140,10 +137,10 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                   <Badge variant="info" className="shadow-none">股票</Badge>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                  <span className="home-accent-chip px-2 py-0.5 font-mono text-xs">
+                  <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs px-2 py-0.5 font-mono text-xs">
                     {meta.stockCode}
                   </span>
-                  <span className="text-xs text-muted-text flex items-center gap-1">
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
@@ -152,7 +149,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-xs text-muted-text">收盘价</p>
+                <p className="text-xs text-muted-foreground">收盘价</p>
                 <p className="mt-1 text-xl font-bold font-mono text-foreground" style={getPriceChangeStyle(meta.changePct)}>
                   {meta.currentPrice != null ? meta.currentPrice.toFixed(2) : '--'}
                 </p>
@@ -163,8 +160,8 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
             </div>
 
             {/* 关键结论 */}
-            <div className="home-divider border-t pt-5">
-              <span className="label-uppercase">{text.keyInsights}</span>
+            <div className="border-border border-t pt-5">
+              <span className="text-xs font-medium uppercase text-muted-foreground">{text.keyInsights}</span>
               <p className="mt-2 w-full whitespace-pre-wrap text-left text-[15px] leading-7 text-foreground">
                 {summary.analysisSummary || text.noAnalysisSummary}
               </p>
@@ -178,18 +175,17 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
               variant="bordered"
               padding="sm"
               hoverable
-              className="home-panel-card home-insight-card"
-              style={{ ['--home-insight-tone' as string]: 'var(--home-strategy-buy)' }}
+              className=" "
             >
               <div className="flex items-start gap-3">
-                <div className="home-insight-icon w-8 h-8 rounded-lg bg-success/10 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border bg-muted">
+                  <svg className="h-4 w-4 text-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                   </svg>
                 </div>
                 <div className="space-y-1.5">
-                  <h4 className="home-insight-title text-[11px] font-medium uppercase tracking-[0.16em]">{text.actionAdvice}</h4>
-                  <p className="home-insight-body text-sm leading-6">
+                  <h4 className="text-xs font-medium uppercase text-muted-foreground">{text.actionAdvice}</h4>
+                  <p className="text-sm leading-6">
                     {summary.operationAdvice || text.noAdvice}
                   </p>
                 </div>
@@ -201,18 +197,17 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
               variant="bordered"
               padding="sm"
               hoverable
-              className="home-panel-card home-insight-card"
-              style={{ ['--home-insight-tone' as string]: 'var(--home-strategy-take)' }}
+              className=" "
             >
               <div className="flex items-start gap-3">
-                <div className="home-insight-icon w-8 h-8 rounded-lg bg-warning/10 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border bg-muted">
+                  <svg className="h-4 w-4 text-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                   </svg>
                 </div>
                 <div className="space-y-1.5">
-                  <h4 className="home-insight-title text-[11px] font-medium uppercase tracking-[0.16em]">{text.trendPrediction}</h4>
-                  <p className="home-insight-body text-sm leading-6">
+                  <h4 className="text-xs font-medium uppercase text-muted-foreground">{text.trendPrediction}</h4>
+                  <p className="text-sm leading-6">
                     {summary.trendPrediction || text.noPrediction}
                   </p>
                 </div>
@@ -221,9 +216,9 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
           </div>
 
           {relatedBoards.length > 0 && (
-            <Card variant="bordered" padding="sm" className="home-panel-card text-left">
+            <Card variant="bordered" padding="sm" className=" text-left">
               <div className="mb-3 flex items-baseline gap-2">
-                <span className="label-uppercase">{text.boardLinkage}</span>
+                <span className="text-xs font-medium uppercase text-muted-foreground">{text.boardLinkage}</span>
                 <h3 className="mt-0.5 text-base font-semibold text-foreground">{text.relatedBoards}</h3>
               </div>
 
@@ -234,20 +229,20 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                   return (
                     <div
                       key={`${boardName}-${board.code || index}`}
-                      className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-subtle bg-surface/40 px-2.5 py-1.5 text-sm"
+                      className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-border bg-card/40 px-2.5 py-1.5 text-sm"
                     >
-                      <span className="home-accent-chip px-2 py-0.5 text-xs font-medium">
+                      <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs px-2 py-0.5 text-xs font-medium">
                         {boardName}
                       </span>
                       {board.type && (
-                        <span className="home-board-pill rounded-full px-2 py-0.5 text-xs">
+                        <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs text-muted-foreground rounded-full px-2 py-0.5 text-xs">
                           {board.type}
                         </span>
                       )}
                       {signal && (
                         <Badge
                           variant={getBoardStatusVariant(signal.status)}
-                          className="home-board-status-badge shadow-none"
+                          className="shadow-none"
                         >
                           {getBoardStatusLabel(signal.status, text)}
                         </Badge>
@@ -270,7 +265,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
 
         {/* 右侧：情绪指标 - 填满格子高度，消除与 STRATEGY POINTS 之间的空隙 */}
         <div className="flex flex-col self-stretch min-h-full">
-          <Card variant="bordered" padding="md" className="home-panel-card home-rail-card !overflow-visible flex-1 flex flex-col min-h-0">
+          <Card variant="bordered" padding="md" className="  !overflow-visible flex-1 flex flex-col min-h-0">
             <div className="text-center flex-1 flex flex-col justify-center">
               <h3 className="mb-5 text-sm font-medium tracking-wide text-foreground">{text.marketSentiment}</h3>
               <ScoreGauge score={summary.sentimentScore ?? 50} size="lg" language={reportLanguage} />

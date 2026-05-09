@@ -4,9 +4,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { SidebarNav } from '../SidebarNav';
 
 const mockLogout = vi.fn().mockResolvedValue(undefined);
-const mockThemeToggle = vi.fn(({ collapsed }: { collapsed?: boolean }) => (
-  <button type="button">{collapsed ? '切换主题(折叠)' : '切换主题'}</button>
-));
+const mockThemeToggle = vi.fn((props?: { collapsed?: boolean }) => {
+  void props;
+  return null;
+});
 
 const completionBadgeState = { stock: true, fund: false };
 
@@ -58,17 +59,15 @@ describe('SidebarNav', () => {
     expect(screen.getByLabelText('诊基有新消息')).toBeInTheDocument();
   });
 
-  it('renders the collapsed theme toggle variant when the sidebar is collapsed', () => {
+  it('does not render a theme toggle in fixed light mode', () => {
     render(
       <MemoryRouter initialEntries={['/']}>
         <SidebarNav collapsed />
       </MemoryRouter>,
     );
 
-    expect(mockThemeToggle).toHaveBeenCalledWith(
-      expect.objectContaining({ variant: 'nav', collapsed: true }),
-    );
-    expect(screen.getByRole('button', { name: '切换主题(折叠)' })).toBeInTheDocument();
+    expect(mockThemeToggle).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /切换主题/ })).not.toBeInTheDocument();
   });
 
   it('opens the logout confirmation and confirms logout', async () => {

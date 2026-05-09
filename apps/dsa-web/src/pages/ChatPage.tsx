@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Clock3, MessageSquareText, Plus, Trash2 } from 'lucide-react';
 import { cn } from '../utils/cn';
 import { agentApi } from '../api/agent';
 import { ApiErrorAlert, Badge, Button, ConfirmDialog, EmptyState, InlineAlert, ScrollArea, Tooltip } from '../components/common';
@@ -501,7 +502,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
     return (
       <button
         onClick={() => toggleThinking(msg.id)}
-        className="flex items-center gap-2 text-xs text-muted-text hover:text-secondary-text transition-colors mb-2 w-full text-left"
+        className="flex items-center gap-2 text-xs text-muted-foreground hover:text-muted-foreground transition-colors mb-2 w-full text-left"
       >
         <svg
           className={`w-3 h-3 transition-transform flex-shrink-0 ${isExpanded ? 'rotate-90' : ''}`}
@@ -518,7 +519,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
         </svg>
         <span className="flex items-center gap-1.5">
           <span className="opacity-60">思考过程</span>
-          <span className="text-muted-text/50">·</span>
+          <span className="text-muted-foreground/50">·</span>
           <span className="opacity-50">{summary}</span>
         </span>
       </button>
@@ -563,98 +564,87 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
 
   const sidebarContent = (
     <>
-      <div className="flex items-center justify-between border-b border-white/5 bg-white/2 p-3.5">
-        <h2 className="text-sm font-semibold text-cyan uppercase tracking-[0.2em] flex items-center gap-2">
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+      <div className="flex items-center justify-between border-b border-border bg-muted/40 p-3.5">
+        <h2 className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <MessageSquareText className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
           历史对话
         </h2>
         <button
           onClick={handleStartNewChat}
-          className="rounded-lg p-1.5 text-muted-text transition-all hover:bg-white/10 hover:text-foreground"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
           aria-label="开启新对话"
         >
-          <svg
-            className="w-4 h-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 4v16m8-8H4"
-            />
-          </svg>
+          <Plus className="h-4 w-4" aria-hidden="true" />
         </button>
       </div>
-      <ScrollArea testId="chat-session-list-scroll" viewportClassName="p-3">
+      <ScrollArea testId="chat-session-list-scroll" viewportClassName="px-3 py-3 pr-5">
         {sessionsLoading ? (
           <DashboardStateBlock
             loading
             compact
             title="加载对话中..."
-            className="rounded-2xl border border-dashed border-border/50 bg-surface/30"
+            className="rounded-xl border border-dashed border-border/50 bg-card/30"
           />
         ) : sessions.length === 0 ? (
           <DashboardStateBlock
             compact
             title="暂无历史对话"
             description="开始提问后，这里会保留会话记录。"
-            className="rounded-2xl border border-dashed border-border/50 bg-surface/30"
+            className="rounded-xl border border-dashed border-border/50 bg-card/30"
           />
         ) : (
           <div className="space-y-2">
             {sessions.map((s) => (
-              <div key={s.session_id} className="session-item-row">
+              <div
+                key={s.session_id}
+                className={cn(
+                  'group/session relative overflow-hidden rounded-xl bg-card text-card-foreground ring-1 ring-foreground/10 transition-colors',
+                  'hover:bg-muted/40 hover:ring-foreground/15 focus-within:ring-ring/45',
+                  s.session_id === sessionId && 'bg-muted ring-ring/45'
+                )}
+              >
                 <button
                   type="button"
                   onClick={() => handleSwitchSession(s.session_id)}
-                  className={`session-item ${s.session_id === sessionId ? 'active' : ''}`}
+                  className="grid w-full min-w-0 grid-cols-[0.5rem_minmax(0,1fr)] gap-3 rounded-xl py-3 pl-3 pr-10 text-left outline-none"
                   aria-label={`切换到对话 ${s.title}`}
                   aria-current={s.session_id === sessionId ? 'page' : undefined}
                 >
-                  <div className="indicator" />
-                  <div className="content">
-                    <span className="title">{s.title}</span>
-                    <div className="mt-0.5 flex items-center gap-2">
-                      <span className="meta">
+                  <span
+                    className={cn(
+                      'mt-1 h-2 w-2 shrink-0 rounded-full bg-border',
+                      s.session_id === sessionId && 'bg-primary'
+                    )}
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 overflow-hidden">
+                    <span className="block max-w-full truncate text-sm font-medium leading-5 text-foreground">
+                      {s.title}
+                    </span>
+                    <span className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
+                      <Badge variant="default" size="sm" className="h-5 px-2 text-[11px] font-normal">
                         {s.message_count} 条对话
-                      </span>
+                      </Badge>
                       {s.last_active && (
-                        <>
-                          <span className="separator" />
-                          <span className="meta">
+                        <span className="inline-flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
+                          <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          <span className="truncate">
                             {new Date(s.last_active).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })}
                           </span>
-                        </>
+                        </span>
                       )}
-                    </div>
-                  </div>
+                    </span>
+                  </span>
                 </button>
                 <button
                   type="button"
-                  className="delete-btn"
+                  className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 group-hover/session:opacity-100"
                   onClick={() => {
                     setDeleteConfirmId(s.session_id);
                   }}
                   aria-label={`删除对话 ${s.title}`}
                 >
-                  <svg
-                    className="w-3.5 h-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
               </div>
             ))}
@@ -670,7 +660,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
       className="flex h-[calc(100vh-5rem)] w-full min-w-0 gap-4 overflow-hidden sm:h-[calc(100vh-5.5rem)] lg:h-[calc(100vh-2rem)]"
     >
       {/* Desktop sidebar */}
-      <div className="hidden h-full w-64 flex-shrink-0 flex-col overflow-hidden rounded-[1.25rem] border border-white/8 bg-card/82 shadow-soft-card md:flex">
+      <div className="hidden h-full w-64 flex-shrink-0 flex-col overflow-hidden rounded-xl border bg-card md:flex">
         {sidebarContent}
       </div>
 
@@ -682,7 +672,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
         >
           <div className="page-drawer-overlay absolute inset-0" />
           <div
-            className="absolute left-0 top-0 bottom-0 w-72 flex flex-col glass-card overflow-hidden border-r border-white/10 bg-card/90 shadow-2xl"
+            className="absolute bottom-0 left-0 top-0 flex w-72 flex-col overflow-hidden border-r bg-card"
             onClick={(e) => e.stopPropagation()}
           >
             {sidebarContent}
@@ -709,7 +699,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
             <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="md:hidden p-1.5 -ml-1 rounded-lg hover:bg-hover transition-colors text-secondary-text hover:text-foreground"
+                className="md:hidden p-1.5 -ml-1 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
                 aria-label="历史对话"
               >
                 <svg
@@ -727,7 +717,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
                 </svg>
               </button>
               <svg
-                className="w-6 h-6 text-cyan"
+                className="w-6 h-6 text-primary"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -746,7 +736,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
                 <Tooltip content="导出会话为 Markdown 文件">
                   <span className="inline-flex">
                     <Button
-                      variant="action-primary"
+                      variant="primary"
                       size="sm"
                       onClick={() => downloadSession(messages)}
                       aria-label="导出会话为 Markdown 文件"
@@ -771,7 +761,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
                 <Tooltip content="发送到已配置的通知机器人/邮箱">
                   <span className="inline-flex">
                     <Button
-                      variant="action-primary"
+                      variant="primary"
                       size="sm"
                       disabled={sending}
                       onClick={async () => {
@@ -836,7 +826,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
               </div>
             )}
           </div>
-          <p className="text-secondary-text text-sm">
+          <p className="text-muted-foreground text-sm">
             {pageDescription}
           </p>
           {sendToast ? (
@@ -849,7 +839,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
           ) : null}
         </header>
 
-        <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden border border-white/6 bg-card/78 glass-card">
+        <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
           {/* Messages */}
           <ScrollArea
             className="relative z-10 flex-1"
@@ -987,16 +977,16 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
 
             {loading && (
               <div className="flex gap-4">
-                <div className="w-8 h-8 rounded-full bg-elevated text-foreground flex items-center justify-center flex-shrink-0 text-xs font-bold">
+                <div className="w-8 h-8 rounded-full bg-card text-foreground flex items-center justify-center flex-shrink-0 text-xs font-bold">
                   AI
                 </div>
-                <div className="min-w-[200px] max-w-[min(100%,48rem)] overflow-hidden rounded-2xl rounded-tl-sm border border-white/6 bg-card/72 px-5 py-4">
-                  <div className="flex items-center gap-2.5 text-sm text-secondary-text">
+                <div className="min-w-[200px] max-w-[min(100%,48rem)] overflow-hidden rounded-xl rounded-tl-sm border border-border bg-card/72 px-5 py-4">
+                  <div className="flex items-center gap-2.5 text-sm text-muted-foreground">
                     <div className="relative w-4 h-4 flex-shrink-0">
-                      <div className="absolute inset-0 rounded-full border-2 border-cyan/20" />
-                      <div className="absolute inset-0 rounded-full border-2 border-cyan border-t-transparent animate-spin" />
+                      <div className="absolute inset-0 rounded-full border-2 border-primary/20" />
+                      <div className="absolute inset-0 rounded-full border-2 border-primary border-t-transparent animate-spin" />
                     </div>
-                    <span className="text-secondary-text">
+                    <span className="text-muted-foreground">
                       {getCurrentStage(progressSteps)}
                     </span>
                   </div>
@@ -1011,7 +1001,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
             <div className="pointer-events-none absolute bottom-[5.75rem] right-4 z-20 md:bottom-24 md:right-6">
               <button
                 type="button"
-                className="pointer-events-auto chat-copy-btn shadow-soft-card"
+                className="pointer-events-auto chat-copy-btn shadow-none"
                 onClick={() => {
                   requestScrollToBottom('smooth');
                   scrollToBottom('smooth');
@@ -1037,7 +1027,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
           )}
 
           {/* Input area */}
-          <div className="border-t border-white/6 bg-card/88 p-4 md:p-6 relative z-20">
+          <div className="border-t border-border bg-card/88 p-4 md:p-6 relative z-20">
             <div className="space-y-3">
               {chatError ? <ApiErrorAlert error={chatError} /> : null}
               {isFollowUpContextLoading ? (
@@ -1050,7 +1040,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
               ) : null}
             {skills.length > 0 && (
               <div className="flex flex-wrap items-start gap-x-5 gap-y-2">
-                <span className="text-xs text-muted-text font-medium uppercase tracking-wider flex-shrink-0 mt-1">
+                <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider flex-shrink-0 mt-1">
                   策略
                 </span>
                 <label className="flex items-center gap-1.5 text-sm cursor-pointer group mt-0.5">
@@ -1063,7 +1053,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
                     className="chat-skill-checkbox"
                   />
                   <span
-                    className={`transition-colors text-sm ${selectedSkillIds.length === 0 ? 'text-foreground font-medium' : 'text-secondary-text group-hover:text-foreground'}`}
+                    className={`transition-colors text-sm ${selectedSkillIds.length === 0 ? 'text-foreground font-medium' : 'text-muted-foreground group-hover:text-foreground'}`}
                   >
                     通用分析
                   </span>
@@ -1088,7 +1078,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
                         className="chat-skill-checkbox"
                       />
                       <span
-                        className={`transition-colors text-sm ${checked ? 'text-foreground font-medium' : 'text-secondary-text group-hover:text-foreground'}`}
+                        className={`transition-colors text-sm ${checked ? 'text-foreground font-medium' : 'text-muted-foreground group-hover:text-foreground'}`}
                       >
                         {s.name}
                       </span>
@@ -1112,7 +1102,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
                   placeholder={inputPlaceholder}
                   disabled={loading}
                   rows={1}
-                  className="input-surface input-focus-glow flex-1 min-h-[44px] max-h-[200px] rounded-xl border bg-transparent px-4 py-2.5 text-sm transition-all focus:outline-none resize-none disabled:cursor-not-allowed disabled:opacity-60"
+                  className="flex-1 min-h-[44px] max-h-[200px] rounded-xl border bg-transparent px-4 py-2.5 text-sm transition-all focus:outline-none resize-none disabled:cursor-not-allowed disabled:opacity-60"
                   style={{ height: 'auto' }}
                   onInput={(e) => {
                     const t = e.target as HTMLTextAreaElement;
@@ -1125,7 +1115,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
                   onClick={() => handleSend()}
                   disabled={!input.trim() || loading}
                   isLoading={loading}
-                  className="btn-primary flex-shrink-0"
+                  className="inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground flex-shrink-0"
                 >
                   发送
                 </Button>

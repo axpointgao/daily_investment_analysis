@@ -22,8 +22,8 @@ const formatValue = (value: unknown): string => {
 
 const valueColor = (value?: number): React.CSSProperties | undefined => {
   if (value === undefined || value === null) return undefined;
-  if (value > 0) return { color: 'var(--home-price-up)' };
-  if (value < 0) return { color: 'var(--home-price-down)' };
+  if (value > 0) return { color: 'var(--foreground)' };
+  if (value < 0) return { color: 'var(--destructive)' };
   return undefined;
 };
 
@@ -41,7 +41,7 @@ const ANNUAL_VOLATILITY_TIP = '衡量基金上下波动的剧烈程度。数值�
 const MetricHelp: React.FC<{ content: string }> = ({ content }) => (
   <Tooltip content={content}>
     <span
-      className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-text transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       role="button"
       tabIndex={0}
       aria-label="指标说明"
@@ -58,27 +58,27 @@ const MetricCard: React.FC<{ label: string; value: string; muted?: string; tone?
   tone,
   tooltip,
 }) => (
-  <Card variant="bordered" padding="sm" className="home-panel-card">
-    <span className="label-uppercase inline-flex items-center gap-1.5">
+  <Card variant="bordered" padding="sm" className="">
+    <span className="text-xs font-medium uppercase text-muted-foreground inline-flex items-center gap-1.5">
       {label}
       {tooltip ? <MetricHelp content={tooltip} /> : null}
     </span>
     <p className="mt-2 text-xl font-semibold text-foreground font-mono" style={tone}>
       {value}
     </p>
-    {muted ? <p className="mt-1 text-xs text-muted-text">{muted}</p> : null}
+    {muted ? <p className="mt-1 text-xs text-muted-foreground">{muted}</p> : null}
   </Card>
 );
 
 const SectionList: React.FC<{ title: string; items?: string[] }> = ({ title, items = [] }) => {
   if (!items.length) return null;
   return (
-    <Card variant="bordered" padding="sm" className="home-panel-card">
-      <span className="label-uppercase">{title}</span>
-      <ul className="mt-3 space-y-2 text-sm leading-6 text-secondary-text">
+    <Card variant="bordered" padding="sm" className="">
+      <span className="text-xs font-medium uppercase text-muted-foreground">{title}</span>
+      <ul className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
         {items.map((item, index) => (
           <li key={`${title}-${index}`} className="flex gap-2">
-            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan/70" />
+            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary/70" />
             <span>{item}</span>
           </li>
         ))}
@@ -91,12 +91,12 @@ const PerformanceTable: React.FC<{ items?: FundPerformanceItem[] }> = ({ items =
   const rows = items.filter((item) => item.period).slice(0, 8);
   if (!rows.length) return null;
   return (
-    <Card variant="bordered" padding="sm" className="home-panel-card overflow-hidden">
-      <span className="label-uppercase">阶段收益</span>
+    <Card variant="bordered" padding="sm" className=" overflow-hidden">
+      <span className="text-xs font-medium uppercase text-muted-foreground">阶段收益</span>
       <div className="mt-3 overflow-x-auto">
         <table className="min-w-full text-left text-xs">
-          <thead className="text-muted-text">
-            <tr className="border-b border-subtle">
+          <thead className="text-muted-foreground">
+            <tr className="border-b border-border">
               <th className="py-2 pr-4 font-medium">区间</th>
               <th className="py-2 pr-4 font-medium">收益</th>
               <th className="py-2 pr-4 font-medium">同类均值</th>
@@ -106,7 +106,7 @@ const PerformanceTable: React.FC<{ items?: FundPerformanceItem[] }> = ({ items =
           </thead>
           <tbody>
             {rows.map((item, index) => (
-              <tr key={`${item.period}-${index}`} className="border-b border-subtle/60 last:border-0">
+              <tr key={`${item.period}-${index}`} className="border-b border-border/60 last:border-0">
                 <td className="py-2 pr-4 text-foreground">{formatFundPeriodLabel(item.period)}</td>
                 <td className="py-2 pr-4 font-mono" style={valueColor(item.returnPct)}>
                   {formatPercent(item.returnPct)}
@@ -141,7 +141,7 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
     <div className="space-y-5 pb-8 animate-fade-in">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-stretch">
         <div className="lg:col-span-2 space-y-5">
-          <Card variant="gradient" padding="md" className="home-report-hero">
+          <Card variant="gradient" padding="md" className="">
             <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-3">
@@ -151,19 +151,19 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
                   <Badge variant="info" className="shadow-none">场外基金</Badge>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                  <span className="home-accent-chip px-2 py-0.5 font-mono text-xs">
+                  <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs px-2 py-0.5 font-mono text-xs">
                     {meta.fundCode}
                   </span>
                   {meta.fundType ? (
-                    <span className="home-board-pill rounded-full px-2 py-0.5 text-xs">
+                    <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs text-muted-foreground rounded-full px-2 py-0.5 text-xs">
                       {meta.fundType}
                     </span>
                   ) : null}
-                  <span className="text-xs text-muted-text">{formatDateTime(meta.createdAt)}</span>
+                  <span className="text-xs text-muted-foreground">{formatDateTime(meta.createdAt)}</span>
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-xs text-muted-text">最新净值</p>
+                <p className="text-xs text-muted-foreground">最新净值</p>
                 <p className="mt-1 text-xl font-bold font-mono text-foreground">
                   {meta.latestNav !== undefined ? meta.latestNav.toFixed(4) : '--'}
                 </p>
@@ -173,8 +173,8 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
               </div>
             </div>
 
-            <div className="home-divider border-t pt-5">
-              <span className="label-uppercase">关键结论</span>
+            <div className="border-border border-t pt-5">
+              <span className="text-xs font-medium uppercase text-muted-foreground">关键结论</span>
               <p className="mt-2 w-full whitespace-pre-wrap text-left text-[15px] leading-7 text-foreground">
                 {summary.analysisSummary || '暂无分析结论。'}
               </p>
@@ -186,16 +186,15 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
               variant="bordered"
               padding="sm"
               hoverable
-              className="home-panel-card home-insight-card"
-              style={{ ['--home-insight-tone' as string]: 'var(--home-strategy-buy)' }}
+              className=" "
             >
               <div className="space-y-1.5">
-                <h4 className="home-insight-title text-[11px] font-medium uppercase tracking-[0.16em]">配置建议</h4>
-                <p className="home-insight-body text-sm leading-6">
+                <h4 className="text-xs font-medium uppercase text-muted-foreground">配置建议</h4>
+                <p className="text-sm leading-6">
                   {summary.allocationRating || '谨慎观察'}
                 </p>
                 {summary.holdingAdvice ? (
-                  <p className="text-xs leading-5 text-secondary-text">{summary.holdingAdvice}</p>
+                  <p className="text-xs leading-5 text-muted-foreground">{summary.holdingAdvice}</p>
                 ) : null}
               </div>
             </Card>
@@ -203,12 +202,11 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
               variant="bordered"
               padding="sm"
               hoverable
-              className="home-panel-card home-insight-card"
-              style={{ ['--home-insight-tone' as string]: 'var(--home-strategy-stop)' }}
+              className=" "
             >
               <div className="space-y-1.5">
-                <h4 className="home-insight-title text-[11px] font-medium uppercase tracking-[0.16em]">风险说明</h4>
-                <p className="home-insight-body text-sm leading-6">
+                <h4 className="text-xs font-medium uppercase text-muted-foreground">风险说明</h4>
+                <p className="text-sm leading-6">
                   {summary.riskSummary || '暂无风险摘要。'}
                 </p>
               </div>
@@ -216,11 +214,11 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
           </div>
         </div>
 
-        <Card variant="bordered" padding="md" className="home-panel-card flex flex-col items-center justify-center">
-          <span className="label-uppercase mb-3 text-secondary-text">适配评分</span>
+        <Card variant="bordered" padding="md" className=" flex flex-col items-center justify-center">
+          <span className="text-xs font-medium uppercase text-muted-foreground mb-3 text-muted-foreground">适配评分</span>
           <ScoreGauge score={summary.suitabilityScore ?? 50} size="lg" showLabel={false} />
           {summary.suitableFor ? (
-            <p className="mt-4 text-center text-sm leading-6 text-secondary-text">{summary.suitableFor}</p>
+            <p className="mt-4 text-center text-sm leading-6 text-muted-foreground">{summary.suitableFor}</p>
           ) : null}
         </Card>
       </div>
@@ -233,7 +231,7 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
       </div>
 
       {risk.reason ? (
-        <Card variant="bordered" padding="sm" className="home-panel-card border-warning/30 bg-warning/5 text-sm text-warning">
+        <Card variant="bordered" padding="sm" className=" border-amber-500/30 bg-amber-500/5 text-sm text-amber-600">
           {risk.reason}
         </Card>
       ) : null}
@@ -241,23 +239,23 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
       <PerformanceTable items={metrics?.performance} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card variant="bordered" padding="sm" className="home-panel-card">
-          <span className="label-uppercase">基金资料</span>
+        <Card variant="bordered" padding="sm" className="">
+          <span className="text-xs font-medium uppercase text-muted-foreground">基金资料</span>
           <div className="mt-3 grid grid-cols-1 gap-2 text-sm">
-            <p><span className="text-muted-text">基金公司：</span>{formatValue(profile.fundCompany)}</p>
-            <p><span className="text-muted-text">基金经理：</span>{managerNames || formatValue(profile.managerNames)}</p>
-            <p><span className="text-muted-text">成立日期：</span>{formatValue(profile.establishDate)}</p>
-            <p><span className="text-muted-text">基金规模：</span>{formatValue(profile.latestScale)}</p>
-            <p><span className="text-muted-text">业绩基准：</span>{formatValue(profile.benchmark)}</p>
+            <p><span className="text-muted-foreground">基金公司：</span>{formatValue(profile.fundCompany)}</p>
+            <p><span className="text-muted-foreground">基金经理：</span>{managerNames || formatValue(profile.managerNames)}</p>
+            <p><span className="text-muted-foreground">成立日期：</span>{formatValue(profile.establishDate)}</p>
+            <p><span className="text-muted-foreground">基金规模：</span>{formatValue(profile.latestScale)}</p>
+            <p><span className="text-muted-foreground">业绩基准：</span>{formatValue(profile.benchmark)}</p>
           </div>
         </Card>
-        <Card variant="bordered" padding="sm" className="home-panel-card">
-          <span className="label-uppercase">风险收益</span>
+        <Card variant="bordered" padding="sm" className="">
+          <span className="text-xs font-medium uppercase text-muted-foreground">风险收益</span>
           <div className="mt-3 grid grid-cols-1 gap-2 text-sm">
-            <p><span className="text-muted-text">区间：</span>{formatValue(risk.startDate)} 至 {formatValue(risk.endDate)}</p>
-            <p><span className="text-muted-text">当前回撤：</span>{formatPercent(risk.currentDrawdownPct)}</p>
-            <p><span className="text-muted-text">Sharpe：</span>{formatValue(risk.sharpe)}</p>
-            <p><span className="text-muted-text">Calmar：</span>{formatValue(risk.calmar)}</p>
+            <p><span className="text-muted-foreground">区间：</span>{formatValue(risk.startDate)} 至 {formatValue(risk.endDate)}</p>
+            <p><span className="text-muted-foreground">当前回撤：</span>{formatPercent(risk.currentDrawdownPct)}</p>
+            <p><span className="text-muted-foreground">Sharpe：</span>{formatValue(risk.sharpe)}</p>
+            <p><span className="text-muted-foreground">Calmar：</span>{formatValue(risk.calmar)}</p>
           </div>
         </Card>
       </div>

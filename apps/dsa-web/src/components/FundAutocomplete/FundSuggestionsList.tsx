@@ -48,14 +48,14 @@ export function FundSuggestionsList({
           onMouseEnter={() => onMouseEnter(index)}
         >
           <div className="flex min-w-0 items-center gap-3">
-            <Badge variant="default" size="sm" className="min-w-[3rem] justify-center border-cyan/25 bg-cyan/10 text-cyan shadow-none">
+            <Badge variant="default" size="sm" className="min-w-[3rem] justify-center border-primary/25 bg-primary/10 text-primary shadow-none">
               基金
             </Badge>
             <div className="flex min-w-0 flex-col">
               <span className="truncate text-sm font-medium text-primary-text">
                 {suggestion.fundName}
               </span>
-              <span className="truncate text-sm text-secondary-text">
+              <span className="truncate text-sm text-muted-foreground">
                 {suggestion.fundCode}{suggestion.fundType ? ` · ${suggestion.fundType}` : ''}
               </span>
             </div>
@@ -69,10 +69,10 @@ export function FundSuggestionsList({
 
 function MatchTypeBadge({ matchType }: { matchType: string }) {
   const configMap = {
-    exact: { label: '精确', className: 'border-cyan/25 bg-cyan/10 text-cyan' },
-    prefix: { label: '前缀', className: 'border-purple/25 bg-purple/10 text-purple' },
-    contains: { label: '包含', className: 'border-warning/25 bg-warning/10 text-warning' },
-    fuzzy: { label: '模糊', className: 'border-border/55 bg-elevated/75 text-muted-text' },
+    exact: { label: '精确', className: 'border-primary/25 bg-primary/10 text-primary' },
+    prefix: { label: '前缀', className: 'border-muted/25 bg-muted/10 text-muted-foreground' },
+    contains: { label: '包含', className: 'border-amber-500/25 bg-amber-500/10 text-amber-600' },
+    fuzzy: { label: '模糊', className: 'border-border/55 bg-card/75 text-muted-foreground' },
   };
   const config = configMap[matchType as keyof typeof configMap] || configMap.fuzzy;
 

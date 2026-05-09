@@ -15,7 +15,7 @@ import { SuggestionsList } from './SuggestionsList';
 import { cn } from '../../utils/cn';
 
 const AUTOCOMPLETE_INPUT_CLASS =
-  'input-surface input-focus-glow h-11 w-full rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+  'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50';
 
 export interface StockAutocompleteProps {
   /** Input value */
@@ -268,7 +268,7 @@ function StockAutocompleteInner({
       {/* Loading indicator */}
       {loading && (
         <div className="absolute right-3 top-1/2 -translate-y-1/2">
-          <div className="w-4 h-4 border-2 border-cyan/20 border-t-cyan rounded-full animate-spin" />
+          <div className="w-4 h-4 border-2 border-primary/20 border-t-cyan rounded-full animate-spin" />
         </div>
       )}
 

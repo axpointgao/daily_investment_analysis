@@ -6,10 +6,21 @@ import { ArrowLeft, ArrowRight, ArrowRightLeft, CheckCircle2, Loader2, Pencil, T
 import { portfolioApi } from '../api/portfolio';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
-import { ApiErrorAlert, Card, Badge, ConfirmDialog, Drawer, EmptyState, InlineAlert, ToastViewport } from '../components/common';
+import { ApiErrorAlert, Card, Badge, ConfirmDialog, Drawer, EmptyState, InlineAlert, SelectCompat, ToastViewport, Tooltip } from '../components/common';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Badge as ShadcnBadge } from '../components/ui/badge';
+import { Button as ShadcnButton, buttonVariants } from '../components/ui/button';
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from '../components/ui/chart';
 import { useFundIndex } from '../hooks/useFundIndex';
 import { useStockIndex } from '../hooks/useStockIndex';
 import { toDateInputValue } from '../utils/format';
+import { resolvePortfolioTagColor } from '../utils/portfolioTagColors';
+import { Label, Pie, PieChart } from 'recharts';
 import type {
   PortfolioAccountItem,
   PortfolioAdvisoryEventType,
@@ -31,9 +42,6 @@ import type {
   PortfolioCorporateActionType,
   PortfolioCostMethod,
   PortfolioFxRefreshResponse,
-  PortfolioImportBrokerItem,
-  PortfolioImportCommitResponse,
-  PortfolioImportParseResponse,
   PortfolioInsuranceEventType,
   PortfolioInsuranceLedgerListItem,
   PortfolioInsuranceDesignType,
@@ -50,11 +58,6 @@ import type {
 
 const DEFAULT_PAGE_SIZE = 20;
 const PORTFOLIO_ANALYSIS_CACHE_PREFIX = 'dsa_portfolio_analysis';
-const FALLBACK_BROKERS: PortfolioImportBrokerItem[] = [
-  { broker: 'huatai', aliases: [], displayName: '华泰' },
-  { broker: 'citic', aliases: ['zhongxin'], displayName: '中信' },
-  { broker: 'cmb', aliases: ['cmbchina', 'zhaoshang'], displayName: '招商' },
-];
 
 type AccountOption = 'all' | number;
 type EventType = 'trade' | 'cash' | 'corporate' | 'bank' | 'advisory' | 'insurance';
@@ -116,6 +119,17 @@ type AssetTransferOption = {
   asset: PortfolioAssetTransferAsset;
 };
 
+type AssetDistributionDatum = {
+  key: string;
+  chartKey: string;
+  label: string;
+  amount: number;
+  absoluteAmount: number;
+  percentage: number | null;
+  color: string;
+  fill: string;
+};
+
 type InsuranceEventOption = {
   value: PortfolioInsuranceEventType;
   label: string;
@@ -132,33 +146,29 @@ type AssetNameMaps = {
 };
 
 const PORTFOLIO_INPUT_CLASS =
-  'input-surface input-focus-glow h-9 w-full rounded-lg border bg-transparent px-3 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
-const PORTFOLIO_SELECT_CLASS = `${PORTFOLIO_INPUT_CLASS} appearance-none pr-10`;
-const PORTFOLIO_FILE_PICKER_CLASS =
-  'input-surface input-focus-glow flex h-9 w-full cursor-pointer items-center justify-center rounded-lg border bg-transparent px-3 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
-const PORTFOLIO_FIELD_LABEL_CLASS = 'mb-1.5 block text-[11px] font-medium leading-none text-secondary';
+  'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50';
+const PORTFOLIO_SELECT_CLASS = 'w-full';
+const PORTFOLIO_FIELD_LABEL_CLASS = 'mb-1.5 block text-[11px] font-medium leading-none text-muted-foreground';
 const PORTFOLIO_FORM_CLASS = 'space-y-2';
 const PORTFOLIO_ENTRY_FORM_CLASS = 'max-w-5xl space-y-2';
 const PORTFOLIO_FORM_GRID_CLASS = 'grid gap-2 sm:grid-cols-2 lg:grid-cols-4';
 const PORTFOLIO_FORM_GRID_8_CLASS = 'grid gap-2 sm:grid-cols-2 lg:grid-cols-8';
-const PORTFOLIO_FORM_GRID_2_CLASS = 'grid gap-2 md:grid-cols-2';
-const PORTFOLIO_FORM_ACTION_CLASS = 'btn-secondary h-9 w-full self-end whitespace-nowrap !px-3 !py-1.5 text-sm';
+const PORTFOLIO_FORM_ACTION_CLASS = buttonVariants({ variant: 'default', size: 'default', className: 'w-full self-end' });
 const PORTFOLIO_FORM_TEXT_ACTION_CLASS =
-  'h-9 w-full cursor-pointer text-left text-[11px] font-medium leading-none text-primary transition-colors hover:text-primary/80 disabled:cursor-not-allowed disabled:opacity-60';
+  'h-8 w-full cursor-pointer text-left text-[11px] font-medium leading-none text-primary transition-colors hover:text-primary/80 disabled:cursor-not-allowed disabled:opacity-60';
 const PORTFOLIO_FORM_SPAN_2_CLASS = 'md:col-span-2';
 const PORTFOLIO_FORM_SPAN_4_CLASS = 'lg:col-span-4';
 const BANK_WEALTH_SEARCH_TIMEOUT_MS = 15000;
-const PORTFOLIO_ASSET_COLORS = [
-  'hsl(var(--primary))',
-  'hsl(var(--color-purple))',
-  'hsl(var(--success))',
-  'hsl(var(--warning))',
-  'hsl(212 78% 54%)',
-  'hsl(169 68% 42%)',
-  'hsl(326 62% 58%)',
-  'hsl(24 84% 56%)',
+const PORTFOLIO_ASSET_CHART_COLORS = [
+  'oklch(0.55 0.18 255)',
+  'oklch(0.64 0.16 240)',
+  'oklch(0.72 0.13 225)',
+  'oklch(0.48 0.14 265)',
+  'oklch(0.78 0.10 210)',
+  'oklch(0.43 0.11 245)',
+  'oklch(0.68 0.11 260)',
+  'oklch(0.82 0.08 235)',
 ];
-
 function PortfolioField({
   label,
   action,
@@ -218,6 +228,14 @@ function formatPositionListMoney(value: number | undefined | null, currency = 'C
   return currency === 'CNY' ? amount : `${currency} ${amount}`;
 }
 
+function formatPositionUnitPrice(value: number | undefined | null): string {
+  if (value == null || Number.isNaN(value)) return '--';
+  return Number(value).toLocaleString('zh-CN', {
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  });
+}
+
 function formatMissingFxPairs(snapshot: PortfolioSnapshotResponse | null): string {
   const pairs = snapshot?.missingFxPairs || [];
   if (pairs.length === 0) return '';
@@ -240,14 +258,6 @@ function formatSignedPct(value: number | undefined | null): string {
   return `${sign}${value.toFixed(2)}%`;
 }
 
-function getTagButtonStyle(row: PortfolioPositionItem): React.CSSProperties | undefined {
-  if (!row.tagColor) return undefined;
-  return {
-    color: row.tagColor,
-    borderColor: row.tagColor,
-  };
-}
-
 function hasPositionPrice(row: PortfolioPositionItem): boolean {
   return row.priceAvailable !== false && row.priceSource !== 'missing';
 }
@@ -267,13 +277,13 @@ function formatPositionPrice(row: PortfolioPositionItem): string {
   if (row.priceDisplayValue != null) {
     if (row.valuationModel === 'amount_value' || row.valuationModel === 'insurance_cash_value') {
       return formatPositionListMoney(row.priceDisplayValue, row.valuationCurrency);
-    }
-    return Number(row.priceDisplayValue).toFixed(4);
-  }
-  if (row.market === 'advisory') return formatPositionListMoney(row.marketValueBase, row.valuationCurrency);
-  if (isBankWealthPosition(row) && !isBankWealthNavPosition(row)) return formatPositionListMoney(row.marketValueBase, row.valuationCurrency);
-  return row.lastPrice.toFixed(4);
-}
+	    }
+	    return formatPositionUnitPrice(row.priceDisplayValue);
+	  }
+	  if (row.market === 'advisory') return formatPositionListMoney(row.marketValueBase, row.valuationCurrency);
+	  if (isBankWealthPosition(row) && !isBankWealthNavPosition(row)) return formatPositionListMoney(row.marketValueBase, row.valuationCurrency);
+	  return formatPositionUnitPrice(row.lastPrice);
+	}
 
 function formatAssetQuantity(
   value: number | undefined | null,
@@ -307,16 +317,16 @@ function formatPositionQuantityTitle(row: PortfolioPositionItem): string {
 
 function formatPositionCostPrice(row: PortfolioPositionItem): string {
   if (row.costDisplayValue != null) {
-    if (row.valuationModel === 'amount_value' || row.valuationModel === 'insurance_cash_value') {
-      return formatPositionListMoney(row.costDisplayValue, row.valuationCurrency);
-    }
-    return Number(row.costDisplayValue).toFixed(4);
-  }
-  if (row.market === 'advisory') return formatPositionListMoney(row.totalCost || row.avgCost, row.valuationCurrency);
-  if (isBankWealthPosition(row) && !isBankWealthNavPosition(row)) return formatPositionListMoney(row.totalCost || row.avgCost, row.valuationCurrency);
-  if (row.market === 'bank' && !isBankWealthPosition(row)) return formatPositionListMoney(row.totalCost || row.avgCost, row.valuationCurrency);
-  return row.avgCost.toFixed(4);
-}
+	    if (row.valuationModel === 'amount_value' || row.valuationModel === 'insurance_cash_value') {
+	      return formatPositionListMoney(row.costDisplayValue, row.valuationCurrency);
+	    }
+	    return formatPositionUnitPrice(row.costDisplayValue);
+	  }
+	  if (row.market === 'advisory') return formatPositionListMoney(row.totalCost || row.avgCost, row.valuationCurrency);
+	  if (isBankWealthPosition(row) && !isBankWealthNavPosition(row)) return formatPositionListMoney(row.totalCost || row.avgCost, row.valuationCurrency);
+	  if (row.market === 'bank' && !isBankWealthPosition(row)) return formatPositionListMoney(row.totalCost || row.avgCost, row.valuationCurrency);
+	  return formatPositionUnitPrice(row.avgCost);
+	}
 
 function formatTradeQuantity(item: PortfolioTradeListItem): string {
   return formatAssetQuantity(item.quantity, item.market);
@@ -328,8 +338,8 @@ function formatPositionMoney(value: number, row: PortfolioPositionItem): string 
 }
 
 function getChinaPnlColorClass(value: number | undefined | null, hasValue: boolean): string {
-  if (!hasValue || value == null || Number.isNaN(value) || value === 0) return 'text-secondary';
-  return value > 0 ? 'text-danger' : 'text-success';
+  if (!hasValue || value == null || Number.isNaN(value) || value === 0) return 'text-muted-foreground';
+  return value > 0 ? 'text-destructive' : 'text-emerald-600';
 }
 
 function getPositionPriceLabel(row: PortfolioPositionItem): string {
@@ -895,14 +905,6 @@ function saveCachedPortfolioAnalysis(cacheKey: string, value: PortfolioAnalysisR
   }
 }
 
-function formatBrokerLabel(value: string, displayName?: string): string {
-  if (displayName && displayName.trim()) return `${value}（${displayName.trim()}）`;
-  if (value === 'huatai') return 'huatai（华泰）';
-  if (value === 'citic') return 'citic（中信）';
-  if (value === 'cmb') return 'cmb（招商）';
-  return value;
-}
-
 function buildFxRefreshFeedback(data: PortfolioFxRefreshResponse): FxRefreshFeedback {
   if (data.refreshEnabled === false) {
     return {
@@ -943,15 +945,6 @@ function getFxRefreshFeedbackVariant(tone: FxRefreshFeedback['tone']): Portfolio
   if (tone === 'success') return 'success';
   if (tone === 'warning') return 'warning';
   return 'info';
-}
-
-function getCsvParseVariant(result: PortfolioImportParseResponse): PortfolioAlertVariant {
-  return result.errorCount > 0 || result.skippedCount > 0 ? 'warning' : 'info';
-}
-
-function getCsvCommitVariant(result: PortfolioImportCommitResponse, isDryRun: boolean): PortfolioAlertVariant {
-  if (isDryRun) return 'info';
-  return result.failedCount > 0 || result.duplicateCount > 0 ? 'warning' : 'success';
 }
 
 const PortfolioPage: React.FC = () => {
@@ -1007,15 +1000,6 @@ const PortfolioPage: React.FC = () => {
   const [error, setError] = useState<ParsedApiError | null>(null);
   const [writeWarning, setWriteWarning] = useState<string | null>(null);
 
-  const [brokers, setBrokers] = useState<PortfolioImportBrokerItem[]>([]);
-  const [selectedBroker, setSelectedBroker] = useState('huatai');
-  const [csvFile, setCsvFile] = useState<File | null>(null);
-  const [csvDryRun, setCsvDryRun] = useState(true);
-  const [csvParsing, setCsvParsing] = useState(false);
-  const [csvCommitting, setCsvCommitting] = useState(false);
-  const [csvParseResult, setCsvParseResult] = useState<PortfolioImportParseResponse | null>(null);
-  const [csvCommitResult, setCsvCommitResult] = useState<PortfolioImportCommitResponse | null>(null);
-  const [brokerLoadWarning, setBrokerLoadWarning] = useState<string | null>(null);
 
   const [eventType, setEventType] = useState<EventType>('trade');
   const [eventDateFrom, setEventDateFrom] = useState('');
@@ -1280,32 +1264,6 @@ const PortfolioPage: React.FC = () => {
     }
   }, []);
 
-  const loadBrokers = useCallback(async () => {
-    try {
-      const response = await portfolioApi.listImportBrokers();
-      const brokerItems = response.brokers || [];
-      if (brokerItems.length === 0) {
-        setBrokers(FALLBACK_BROKERS);
-        setBrokerLoadWarning('券商列表接口返回为空，已回退为内置券商列表（华泰/中信/招商）。');
-        if (!FALLBACK_BROKERS.some((item) => item.broker === selectedBroker)) {
-          setSelectedBroker(FALLBACK_BROKERS[0].broker);
-        }
-        return;
-      }
-      setBrokers(brokerItems);
-      setBrokerLoadWarning(null);
-      if (!brokerItems.some((item) => item.broker === selectedBroker)) {
-        setSelectedBroker(brokerItems[0].broker);
-      }
-    } catch {
-      setBrokers(FALLBACK_BROKERS);
-      setBrokerLoadWarning('券商列表接口不可用，已回退为内置券商列表（华泰/中信/招商）。');
-      if (!FALLBACK_BROKERS.some((item) => item.broker === selectedBroker)) {
-        setSelectedBroker(FALLBACK_BROKERS[0].broker);
-      }
-    }
-  }, [selectedBroker]);
-
   const loadPortfolioTags = useCallback(async () => {
     try {
       const response = await portfolioApi.listTags();
@@ -1451,9 +1409,8 @@ const PortfolioPage: React.FC = () => {
 
   useEffect(() => {
     void loadAccounts();
-    void loadBrokers();
     void loadPortfolioTags();
-  }, [loadAccounts, loadBrokers, loadPortfolioTags]);
+  }, [loadAccounts, loadPortfolioTags]);
 
   useEffect(() => {
     void loadInsurancePolicies();
@@ -1774,6 +1731,50 @@ const PortfolioPage: React.FC = () => {
       amount: Number(item.amount || 0),
     }));
   const tagBreakdownTotal = tagBreakdownRows.reduce((total, item) => total + Math.abs(item.amount), 0);
+  const assetDistributionRows: AssetDistributionDatum[] = assetBreakdownView === 'tag'
+    ? tagBreakdownRows.map((item, index) => {
+      const absoluteAmount = Math.abs(item.amount);
+      const chartKey = `slice_${index}`;
+      const color = PORTFOLIO_ASSET_CHART_COLORS[index % PORTFOLIO_ASSET_CHART_COLORS.length];
+      return {
+        key: item.key,
+        chartKey,
+        label: item.tagName,
+        amount: item.amount,
+        absoluteAmount,
+        percentage: tagBreakdownTotal > 0 ? absoluteAmount / tagBreakdownTotal * 100 : null,
+        color,
+        fill: `var(--color-${chartKey})`,
+      };
+    })
+    : assetBreakdownRows.map((item, index) => {
+      const absoluteAmount = Math.abs(item.value);
+      const chartKey = `slice_${index}`;
+      const color = PORTFOLIO_ASSET_CHART_COLORS[index % PORTFOLIO_ASSET_CHART_COLORS.length];
+      return {
+        key: item.key,
+        chartKey,
+        label: formatMarketLabel(item.key),
+        amount: item.value,
+        absoluteAmount,
+        percentage: assetBreakdownTotal > 0 ? absoluteAmount / assetBreakdownTotal * 100 : null,
+        color,
+        fill: `var(--color-${chartKey})`,
+      };
+    });
+  const assetDistributionTotal = assetBreakdownView === 'tag' ? tagBreakdownTotal : assetBreakdownTotal;
+  const assetDistributionChartConfig = assetDistributionRows.reduce<ChartConfig>((config, item) => {
+    config[item.chartKey] = {
+      label: item.label,
+      color: item.color,
+    };
+    return config;
+  }, {
+    absoluteAmount: {
+      label: '资产金额',
+    },
+  });
+  const hasAssetDistributionData = assetDistributionRows.length > 0 && assetDistributionTotal > 0;
 
   const handleTradeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2497,47 +2498,6 @@ const PortfolioPage: React.FC = () => {
     }
   };
 
-  const handleParseCsv = async () => {
-    if (!csvFile) return;
-    try {
-      setCsvParsing(true);
-      const parsed = await portfolioApi.parseCsvImport(selectedBroker, csvFile);
-      setCsvParseResult(parsed);
-      setCsvCommitResult(null);
-    } catch (err) {
-      setError(getParsedApiError(err));
-    } finally {
-      setCsvParsing(false);
-    }
-  };
-
-  const handleCommitCsv = async () => {
-    if (!csvFile) return;
-    if (!writableAccountId) {
-      setWriteWarning('请先在右上角选择具体账户，再进行录入或导入提交。');
-      return;
-    }
-    try {
-      setWriteWarning(null);
-      setCsvCommitting(true);
-      const committed = await portfolioApi.commitCsvImport(writableAccountId, selectedBroker, csvFile, csvDryRun);
-      setCsvCommitResult(committed);
-      if (!csvDryRun) {
-        await refreshPortfolioData(eventPage, { refreshPrices: true });
-      }
-      showPortfolioToast(
-        csvDryRun ? 'CSV 预演完成' : 'CSV 导入已提交',
-        csvDryRun
-          ? `解析到 ${committed.recordCount} 条记录，预演未写入账户。`
-          : `已写入 ${committed.insertedCount} 条记录，重复 ${committed.duplicateCount} 条。`,
-      );
-    } catch (err) {
-      setError(getParsedApiError(err));
-    } finally {
-      setCsvCommitting(false);
-    }
-  };
-
   const openDeleteDialog = (item: PendingDelete) => {
     if (!writableAccountId) {
       setWriteWarning('请先在右上角选择具体账户，再进行删除修正。');
@@ -2668,7 +2628,7 @@ const PortfolioPage: React.FC = () => {
   };
 
   const handleRefresh = async () => {
-    await Promise.all([loadAccounts(), loadSnapshot({ refreshPrices: true }), loadEvents(), loadBrokers()]);
+    await Promise.all([loadAccounts(), loadSnapshot({ refreshPrices: true }), loadEvents()]);
   };
 
   const clearEventFilters = () => {
@@ -2787,20 +2747,20 @@ const PortfolioPage: React.FC = () => {
   };
 
   return (
-    <div className="portfolio-page min-h-screen space-y-4 p-4 md:p-6">
+    <div className="portfolio-page min-h-[calc(100vh-5rem)] w-full min-w-0 space-y-4 pb-4 sm:min-h-[calc(100vh-5.5rem)] lg:min-h-[calc(100vh-2rem)]">
       <section className="space-y-3">
         <div className={PORTFOLIO_FORM_CLASS}>
           <h1 className="text-xl md:text-2xl font-semibold text-foreground">持仓管理</h1>
-          <p className="text-xs md:text-sm text-secondary">
-            组合快照、手工录入、CSV 导入与资产分析（支持全组合 / 单账户切换）
+          <p className="text-xs md:text-sm text-muted-foreground">
+            组合快照、手工录入与资产分析（支持全组合 / 单账户切换）
           </p>
         </div>
         {hasAccounts ? (
-          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+          <div className="rounded-xl border border-border bg-muted p-3">
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_220px_280px] gap-2 items-end">
               <div>
-                <p className="text-xs text-secondary mb-1">账户视图</p>
-                <select
+                <p className="text-xs text-muted-foreground mb-1">账户视图</p>
+                <SelectCompat
                   value={String(selectedAccount)}
                   onChange={(e) => {
                     setSelectedAccount(e.target.value === 'all' ? 'all' : Number(e.target.value));
@@ -2815,23 +2775,24 @@ const PortfolioPage: React.FC = () => {
                       {account.name} (#{account.id})
                     </option>
                   ))}
-                </select>
+                </SelectCompat>
               </div>
               <div>
-                <p className="text-xs text-secondary mb-1">成本口径</p>
-                <select
+                <p className="text-xs text-muted-foreground mb-1">成本口径</p>
+                <SelectCompat
                   value={costMethod}
                   onChange={(e) => setCostMethod(e.target.value as PortfolioCostMethod)}
                   className={PORTFOLIO_SELECT_CLASS}
                 >
                   <option value="fifo">先进先出（FIFO）</option>
                   <option value="avg">均价成本（AVG）</option>
-                </select>
+                </SelectCompat>
               </div>
               <div className="flex gap-2">
-                <button
+                <ShadcnButton
                   type="button"
-                  className="btn-secondary text-sm flex-1"
+                  variant="outline"
+                  className="flex-1"
                   onClick={() => {
                     setShowCreateAccount((prev) => !prev);
                     setAccountCreateError(null);
@@ -2839,15 +2800,16 @@ const PortfolioPage: React.FC = () => {
                   }}
                 >
                   {showCreateAccount ? '收起新建' : '新建账户'}
-                </button>
-                <button
+                </ShadcnButton>
+                <ShadcnButton
                   type="button"
+                  variant="outline"
                   onClick={() => void handleRefresh()}
                   disabled={isLoading || fxRefreshing}
-                  className="btn-secondary text-sm flex-1"
+                  className="flex-1"
                 >
                   {isLoading ? '刷新中...' : '刷新数据'}
-                </button>
+                </ShadcnButton>
               </div>
             </div>
           </div>
@@ -2855,7 +2817,7 @@ const PortfolioPage: React.FC = () => {
           <InlineAlert
             variant="warning"
             className="inline-block rounded-lg px-3 py-2 text-xs shadow-none"
-            message="还没有可用账户，请先创建账户后再录入交易或导入 CSV。"
+            message="还没有可用账户，请先创建账户后再录入交易。"
           />
         )}
       </section>
@@ -2877,13 +2839,14 @@ const PortfolioPage: React.FC = () => {
       ) : null}
 
       {(showCreateAccount || !hasAccounts) ? (
-        <Card padding="md" className="portfolio-position-card">
+        <Card padding="md">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-foreground">新建账户</h2>
             {hasAccounts ? (
-              <button
+              <ShadcnButton
                 type="button"
-                className="btn-secondary text-xs px-3 py-1"
+                variant="outline"
+                size="sm"
                 onClick={() => {
                   setShowCreateAccount(false);
                   setAccountCreateError(null);
@@ -2891,9 +2854,9 @@ const PortfolioPage: React.FC = () => {
                 }}
               >
                 收起
-              </button>
+              </ShadcnButton>
             ) : (
-              <span className="text-xs text-secondary">创建后自动切换到该账户</span>
+              <span className="text-xs text-muted-foreground">创建后自动切换到该账户</span>
             )}
           </div>
           {accountCreateError ? (
@@ -2931,7 +2894,7 @@ const PortfolioPage: React.FC = () => {
               value={accountForm.baseCurrency}
               onChange={(e) => setAccountForm((prev) => ({ ...prev, baseCurrency: e.target.value.toUpperCase() }))}
             />
-            <select
+            <SelectCompat
               className={PORTFOLIO_SELECT_CLASS}
               value={accountForm.market}
               onChange={(e) => {
@@ -2951,16 +2914,16 @@ const PortfolioPage: React.FC = () => {
               <option value="bank">银行</option>
               <option value="advisory">投顾</option>
               <option value="insurance">保险</option>
-            </select>
-            <button type="submit" className="btn-secondary text-sm" disabled={accountCreating}>
+            </SelectCompat>
+            <ShadcnButton type="submit" variant="outline" disabled={accountCreating}>
               {accountCreating ? '创建中...' : '创建账户'}
-            </button>
+            </ShadcnButton>
           </form>
         </Card>
       ) : null}
 
       {selectedAccount !== 'all' && writableAccount ? (
-        <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-xs text-secondary">
+        <div className="rounded-xl border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
               当前账户：<span className="text-foreground">{writableAccount.name}</span>
@@ -2968,15 +2931,17 @@ const PortfolioPage: React.FC = () => {
               <span> · {formatMarketLabel(writableAccount.market)}</span>
               <span> · {writableAccount.baseCurrency}</span>
             </div>
-            <button
+            <ShadcnButton
               type="button"
-              className="btn-secondary inline-flex h-8 shrink-0 items-center justify-center gap-1.5 !px-3 !py-1 !text-xs"
+              variant="outline"
+              size="sm"
+              className="shrink-0"
               onClick={accountEditOpen ? closeAccountEdit : openAccountEdit}
               disabled={accountUpdating}
             >
               <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
               {accountEditOpen ? '收起编辑' : '编辑'}
-            </button>
+            </ShadcnButton>
           </div>
           {accountEditOpen ? (
             <form className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" onSubmit={handleUpdateAccount}>
@@ -3006,16 +2971,16 @@ const PortfolioPage: React.FC = () => {
                 />
               </PortfolioField>
               <div className="grid gap-1 self-end md:min-w-52">
-                <div className="text-[11px] leading-none text-secondary">
+                <div className="text-[11px] leading-none text-muted-foreground">
                   账户类型 {formatMarketLabel(writableAccount.market)} · 基准币 {writableAccount.baseCurrency}
                 </div>
                 <div className="flex gap-2">
-                  <button type="button" className="btn-secondary h-9 flex-1 !px-3 !py-1.5 text-sm" onClick={closeAccountEdit} disabled={accountUpdating}>
+                  <ShadcnButton type="button" variant="outline" className="flex-1" onClick={closeAccountEdit} disabled={accountUpdating}>
                     取消
-                  </button>
-                  <button type="submit" className="btn-secondary h-9 flex-1 !px-3 !py-1.5 text-sm" disabled={accountUpdating}>
+                  </ShadcnButton>
+                  <ShadcnButton type="submit" variant="outline" className="flex-1" disabled={accountUpdating}>
                     {accountUpdating ? '保存中...' : '保存'}
-                  </button>
+                  </ShadcnButton>
                 </div>
               </div>
             </form>
@@ -3025,28 +2990,30 @@ const PortfolioPage: React.FC = () => {
 
       <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
         <Card variant="gradient" padding="md">
-          <p className="text-xs text-secondary">总权益</p>
+          <p className="text-xs text-muted-foreground">总权益</p>
           <p className="mt-1 text-xl font-semibold text-foreground">{formatAggregateMoney(snapshot, snapshot?.totalEquity)}</p>
         </Card>
         <Card variant="gradient" padding="md">
-          <p className="text-xs text-secondary">总市值</p>
+          <p className="text-xs text-muted-foreground">总市值</p>
           <p className="mt-1 text-xl font-semibold text-foreground">{formatAggregateMoney(snapshot, snapshot?.totalMarketValue)}</p>
         </Card>
         <Card variant="gradient" padding="md">
-          <p className="text-xs text-secondary">总现金</p>
+          <p className="text-xs text-muted-foreground">总现金</p>
           <p className="mt-1 text-xl font-semibold text-foreground">{formatAggregateMoney(snapshot, snapshot?.totalCash)}</p>
         </Card>
         <Card variant="gradient" padding="md">
           <div className="flex items-start justify-between gap-3">
-            <p className="text-xs text-secondary">汇率状态</p>
-            <button
+            <p className="text-xs text-muted-foreground">汇率状态</p>
+            <ShadcnButton
               type="button"
-              className="btn-secondary !px-3 !py-1 !text-xs shrink-0"
+              variant="outline"
+              size="sm"
+              className="shrink-0"
               onClick={() => void handleRefreshFx()}
               disabled={!hasAccounts || isLoading || fxRefreshing}
             >
               {fxRefreshing ? '刷新中...' : '刷新汇率'}
-            </button>
+            </ShadcnButton>
           </div>
           <div className="mt-2">
             {snapshot?.fxMissing ? <Badge variant="danger">缺失</Badge> : snapshot?.fxStale ? <Badge variant="warning">过期</Badge> : <Badge variant="success">最新</Badge>}
@@ -3067,18 +3034,23 @@ const PortfolioPage: React.FC = () => {
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-foreground">持仓明细</h2>
             <div className="flex items-center gap-2">
-              <span className="text-xs text-secondary">共 {positionRows.length} 项</span>
+              <span className="text-xs text-muted-foreground">共 {positionRows.length} 项</span>
               {selectedAccount !== 'all' ? (
-                <button
-                  type="button"
-                  className="btn-secondary inline-flex h-8 items-center gap-1.5 !px-2.5 !py-1 !text-xs"
-                  onClick={openAssetTransfer}
-                  disabled={!writableAccountId || assetTransferOptions.length === 0}
-                  title={assetTransferOptions.length === 0 ? '当前账户暂无可转移资产' : '转移当前账户中的单个资产'}
+                <Tooltip
+                  content={assetTransferOptions.length === 0 ? '当前账户暂无可转移资产' : '转移当前账户中的单个资产'}
+                  contentClassName="max-w-xs"
                 >
-                  <ArrowRightLeft className="h-3.5 w-3.5" aria-hidden="true" />
-                  转移资产
-                </button>
+                  <ShadcnButton
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={openAssetTransfer}
+                    disabled={!writableAccountId || assetTransferOptions.length === 0}
+                  >
+                    <ArrowRightLeft data-icon="inline-start" aria-hidden="true" />
+                    转移资产
+                  </ShadcnButton>
+                </Tooltip>
               ) : null}
             </div>
           </div>
@@ -3089,54 +3061,77 @@ const PortfolioPage: React.FC = () => {
               className="border-none bg-transparent px-4 py-8 shadow-none"
             />
           ) : (
-            <div className="portfolio-position-table-wrapper">
-              <table className="portfolio-position-table w-full text-sm">
+            <div className="min-w-0">
+              <Table className="table-fixed">
                 <colgroup>
-                  <col className="portfolio-position-col-type" />
-                  <col className="portfolio-position-col-asset" />
-                  <col className="portfolio-position-col-quantity" />
-                  <col className="portfolio-position-col-cost" />
-                  <col className="portfolio-position-col-price" />
-                  <col className="portfolio-position-col-money" />
-                  <col className="portfolio-position-col-pnl" />
-                  <col className="portfolio-position-col-rate" />
-                  <col className="portfolio-position-col-rate" />
+                  <col className="w-[13%]" />
+                  <col className="w-[22%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[11%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[6%]" />
+                  <col className="w-[6%]" />
                 </colgroup>
-                <thead className="text-xs text-secondary border-b border-white/10">
-                  <tr>
-                    <th className="portfolio-position-head-cell text-left">类型/账户</th>
-                    <th className="portfolio-position-head-cell text-left">资产</th>
-                    <th className="portfolio-position-head-cell text-right">数量</th>
-                    <th className="portfolio-position-head-cell text-right">成本价</th>
-                    <th className="portfolio-position-head-cell text-right">现价</th>
-                    <th className="portfolio-position-head-cell text-right">市值</th>
-                    <th className="portfolio-position-head-cell text-right">未实现盈亏</th>
-                    <th className="portfolio-position-head-cell text-right">收益率</th>
-                    <th className="portfolio-position-head-cell text-right">年化</th>
-                  </tr>
-                </thead>
-                <tbody>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>类型/账户</TableHead>
+                    <TableHead>资产</TableHead>
+                    <TableHead className="text-right">数量</TableHead>
+                    <TableHead className="text-right">成本价</TableHead>
+                    <TableHead className="text-right">现价</TableHead>
+                    <TableHead className="text-right">市值</TableHead>
+                    <TableHead className="text-right">未实现盈亏</TableHead>
+                    <TableHead className="text-right">收益率</TableHead>
+                    <TableHead className="text-right">年化</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {positionRows.map((row) => {
                     const assetName = getPositionDisplayName(row);
                     const secondaryLine = getPositionSecondaryLine(row, assetNameMaps);
                     const tagLabel = row.tagName || '+标签';
-                    const assetTitle = [assetName, tagLabel, secondaryLine].filter(Boolean).join('\n');
+                    const matchedTagIndex = row.tagName
+                      ? portfolioTags.findIndex((tag) => (row.tagId != null ? tag.id === row.tagId : tag.name === row.tagName))
+                      : -1;
+                    const matchedTag = matchedTagIndex >= 0 ? portfolioTags[matchedTagIndex] : undefined;
+                    const tagFillColor = row.tagName
+                      ? resolvePortfolioTagColor(matchedTag?.color ?? row.tagColor, matchedTagIndex)
+                      : undefined;
                     const assetType = getPositionAssetType(row, assetNameMaps);
                     return (
-                    <tr key={`${row.accountId}-${row.symbol}-${row.market}-${row.productName || ''}`} className="portfolio-position-row">
-                      <td className="portfolio-position-cell portfolio-position-type-account-cell" data-label="类型/账户" title={`${assetType}\n${row.accountName}`}>
-                        <span className="portfolio-position-type-chip inline-flex text-sm font-semibold text-foreground" title={assetType}>
-                          {assetType}
-                        </span>
-                        <span className="portfolio-position-account-text text-[11px] text-secondary" title={row.accountName}>{row.accountName}</span>
-                      </td>
-                      <td className="portfolio-position-cell portfolio-position-asset-cell text-foreground" data-label="资产" title={assetTitle}>
-                        <div className={`portfolio-position-asset-primary ${row.market === 'bank' || row.market === 'advisory' ? '' : 'font-mono'}`}>{assetName}</div>
-                        <div className="portfolio-position-asset-secondary text-[11px] text-secondary">
-                          <button
+                    <TableRow key={`${row.accountId}-${row.symbol}-${row.market}-${row.productName || ''}`}>
+                      <TableCell data-label="类型/账户">
+                        <div className="flex min-w-0 flex-col gap-0.5">
+                          <Tooltip content={assetType} className="w-full min-w-0" contentClassName="max-w-xs">
+                            <span className="block max-w-full truncate text-sm font-medium text-foreground">
+                              {assetType}
+                            </span>
+                          </Tooltip>
+                          <Tooltip content={row.accountName} className="w-full min-w-0" contentClassName="max-w-xs">
+                            <span className="block max-w-full truncate text-xs text-muted-foreground">
+                              {row.accountName}
+                            </span>
+                          </Tooltip>
+                        </div>
+                      </TableCell>
+                      <TableCell data-label="资产">
+                        <div className="flex min-w-0 flex-col gap-1">
+                          <Tooltip content={assetName} className="w-full min-w-0" contentClassName="max-w-xs">
+                            <span className={`block max-w-full truncate text-foreground ${row.market === 'bank' || row.market === 'advisory' ? '' : 'font-mono'}`}>
+                              {assetName}
+                            </span>
+                          </Tooltip>
+                          <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                            <ShadcnBadge
+                              asChild
+                              variant={row.tagName ? 'secondary' : 'outline'}
+                              className="max-w-[5rem] cursor-pointer"
+                              style={tagFillColor ? { backgroundColor: tagFillColor } : undefined}
+                            >
+                              <button
                             type="button"
-                            className={`portfolio-position-tag-chip ${row.tagName ? 'portfolio-position-tag-chip-selected' : 'portfolio-position-tag-chip-empty'}`}
-                            style={getTagButtonStyle(row)}
                             onClick={(event) => {
                               event.stopPropagation();
                               const productKey = String(row.productKey || '').trim();
@@ -3149,41 +3144,50 @@ const PortfolioPage: React.FC = () => {
                             disabled={!row.productKey || tagUpdatingKey === row.productKey}
                             aria-label={`设置 ${assetName} 的标签`}
                           >
-                            <Tag className="h-3 w-3" aria-hidden="true" />
-                            <span>{tagUpdatingKey === row.productKey ? '保存中' : tagLabel}</span>
-                          </button>
-                          {secondaryLine ? <span className="portfolio-position-asset-meta">{secondaryLine}</span> : null}
+                                <Tag data-icon="inline-start" aria-hidden="true" />
+                                <span className="truncate">{tagUpdatingKey === row.productKey ? '保存中' : tagLabel}</span>
+                              </button>
+                            </ShadcnBadge>
+                            {secondaryLine ? (
+                              <Tooltip content={secondaryLine} className="min-w-0 flex-1" contentClassName="max-w-xs">
+                                <span className="block min-w-0 truncate">{secondaryLine}</span>
+                              </Tooltip>
+                            ) : null}
+                          </div>
                         </div>
-                      </td>
-                      <td
-                        className="portfolio-position-cell portfolio-position-number-cell text-right"
+                      </TableCell>
+                      <TableCell
+                        className="text-right"
                         data-label="数量"
-                        title={formatPositionQuantityTitle(row)}
                       >
-                        {formatPositionQuantity(row)}
-                      </td>
-                      <td className="portfolio-position-cell portfolio-position-number-cell text-right" data-label="成本价">
+                        <Tooltip content={formatPositionQuantityTitle(row)} className="w-full min-w-0 justify-end" contentClassName="max-w-xs">
+                          <span className="block max-w-full truncate">{formatPositionQuantity(row)}</span>
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell className="text-right" data-label="成本价">
                         {formatPositionCostPrice(row)}
-                      </td>
-                      <td className="portfolio-position-cell portfolio-position-number-cell text-right" data-label="现价">
-                        <div>{formatPositionPrice(row)}</div>
-                        <div className={`portfolio-position-price-source text-[11px] ${hasPositionPrice(row) ? 'text-secondary' : 'text-warning'}`} title={getPositionPriceLabel(row)}>
-                          {getPositionPriceLabel(row)}
+                      </TableCell>
+                      <TableCell className="text-right" data-label="现价">
+                        <div className="truncate">{formatPositionPrice(row)}</div>
+                        <div className={`text-xs ${hasPositionPrice(row) ? 'text-muted-foreground' : 'text-amber-600'}`}>
+                          <Tooltip content={getPositionPriceLabel(row)} className="w-full min-w-0 justify-end" contentClassName="max-w-xs">
+                            <span className="block max-w-full truncate">{getPositionPriceLabel(row)}</span>
+                          </Tooltip>
                         </div>
-                      </td>
-                      <td className="portfolio-position-cell portfolio-position-number-cell text-right" data-label="市值">{formatPositionMoney(row.marketValueBase, row)}</td>
-                      <td
+                      </TableCell>
+                      <TableCell className="truncate text-right" data-label="市值">{formatPositionMoney(row.marketValueBase, row)}</TableCell>
+                      <TableCell
                         data-label="未实现盈亏"
-                        className={`portfolio-position-cell portfolio-position-number-cell text-right ${getChinaPnlColorClass(
+                        className={`truncate text-right ${getChinaPnlColorClass(
                           row.unrealizedPnlBase,
                           (row.market !== 'bank' || isBankWealthPosition(row)) && hasPositionPrice(row),
                         )}`}
                       >
                         {row.market === 'bank' && !isBankWealthPosition(row) ? '-' : formatPositionMoney(row.unrealizedPnlBase, row)}
-                      </td>
-                      <td
+                      </TableCell>
+                      <TableCell
                         data-label="收益率"
-                        className={`portfolio-position-cell portfolio-position-number-cell text-right ${getChinaPnlColorClass(
+                        className={`truncate text-right ${getChinaPnlColorClass(
                           row.unrealizedPnlPct,
                           (row.market !== 'bank' || isBankWealthPosition(row))
                             && hasPositionPrice(row)
@@ -3192,21 +3196,21 @@ const PortfolioPage: React.FC = () => {
                         )}`}
                       >
                         {row.market === 'bank' && !isBankWealthPosition(row) ? '-' : formatSignedPct(row.unrealizedPnlPct)}
-                      </td>
-                      <td
+                      </TableCell>
+                      <TableCell
                         data-label="年化"
-                        className={`portfolio-position-cell portfolio-position-number-cell text-right ${getChinaPnlColorClass(
+                        className={`truncate text-right ${getChinaPnlColorClass(
                           row.annualizedReturnPct,
                           row.annualizedReturnPct !== null && row.annualizedReturnPct !== undefined,
                         )}`}
                       >
                         {formatSignedPct(row.annualizedReturnPct)}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                     );
                   })}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           )}
         </Card>
@@ -3215,18 +3219,23 @@ const PortfolioPage: React.FC = () => {
       <section className="grid grid-cols-1 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] gap-3">
         <Card padding="md" className="flex flex-col">
           <div className="flex items-center justify-between gap-3">
-            <h3 className="text-sm font-semibold text-foreground">资产分布</h3>
-            <div className="inline-flex rounded-lg border border-white/10 bg-white/[0.03] p-0.5 text-xs">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">资产分布</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {assetBreakdownView === 'tag' ? '按资产属性查看，不含现金' : '按资产类型查看全账户结构'}
+              </p>
+            </div>
+            <div className="inline-flex rounded-lg border border-border bg-muted p-0.5 text-xs">
               <button
                 type="button"
-                className={`rounded-md px-2.5 py-1 transition-colors ${assetBreakdownView === 'tag' ? 'bg-primary/15 text-primary' : 'text-secondary hover:text-foreground'}`}
+                className={`rounded-md px-2.5 py-1 transition-colors ${assetBreakdownView === 'tag' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
                 onClick={() => setAssetBreakdownView('tag')}
               >
                 资产属性
               </button>
               <button
                 type="button"
-                className={`rounded-md px-2.5 py-1 transition-colors ${assetBreakdownView === 'type' ? 'bg-primary/15 text-primary' : 'text-secondary hover:text-foreground'}`}
+                className={`rounded-md px-2.5 py-1 transition-colors ${assetBreakdownView === 'type' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
                 onClick={() => setAssetBreakdownView('type')}
               >
                 资产类型
@@ -3241,48 +3250,112 @@ const PortfolioPage: React.FC = () => {
               className="mt-3 rounded-xl px-3 py-2 text-xs shadow-none"
             />
           ) : null}
-          <div className="mt-3 space-y-2 text-xs text-secondary">
-            {assetBreakdownView === 'tag' ? (
-              tagBreakdownRows.length > 0 ? tagBreakdownRows.map((item, index) => {
-                const pct = tagBreakdownTotal > 0 ? Math.abs(item.amount) / tagBreakdownTotal * 100 : null;
-                return (
-                  <div key={item.key} className="portfolio-asset-breakdown-row">
-                    <span className="portfolio-asset-breakdown-name">
-                      <span
-                        className="portfolio-asset-breakdown-dot"
-                        style={{ background: item.tagColor || PORTFOLIO_ASSET_COLORS[index % PORTFOLIO_ASSET_COLORS.length] }}
-                      />
-                      {item.tagName}
-                    </span>
-                    <span className="portfolio-asset-breakdown-value">
-                      {snapshot?.fxMissing ? '不可计算' : formatMoney(item.amount, snapshot?.currency || 'CNY')}
-                    </span>
-                    <span className="portfolio-asset-breakdown-pct">
-                      {snapshot?.fxMissing ? '--' : formatPct(pct)}
-                    </span>
-                  </div>
-                );
-              }) : <div>暂无资产属性分布数据</div>
-            ) : assetBreakdownRows.length > 0 ? assetBreakdownRows.map((item, index) => {
-              const pct = assetBreakdownTotal > 0 ? Math.abs(item.value) / assetBreakdownTotal * 100 : null;
-              return (
-                <div key={item.key} className="portfolio-asset-breakdown-row">
-                  <span className="portfolio-asset-breakdown-name">
-                    <span
-                      className="portfolio-asset-breakdown-dot"
-                      style={{ background: PORTFOLIO_ASSET_COLORS[index % PORTFOLIO_ASSET_COLORS.length] }}
+          <div className="mt-4 grid min-h-[260px] gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-center">
+            {hasAssetDistributionData && !snapshot?.fxMissing ? (
+              <div className="flex min-w-0 items-center justify-center rounded-lg border border-border bg-muted/40 px-3 py-4">
+                <ChartContainer
+                  config={assetDistributionChartConfig}
+                  className="mx-auto aspect-square h-[220px] max-h-[240px] w-full"
+                  aria-label="资产分布饼图"
+                >
+                  <PieChart accessibilityLayer>
+                    <ChartTooltip
+                      cursor={false}
+                      content={(
+                        <ChartTooltipContent
+                          hideLabel
+                          nameKey="chartKey"
+                          formatter={(value, _name, item) => {
+                            const payload = item.payload as AssetDistributionDatum | undefined;
+                            return (
+                              <div className="flex min-w-36 flex-1 items-center justify-between gap-4">
+                                <span className="text-muted-foreground">{payload?.label}</span>
+                                <span className="font-mono font-medium text-foreground tabular-nums">
+                                  {formatMoney(Number(payload?.amount || value || 0), snapshot?.currency || 'CNY')}
+                                  <span className="ml-2 text-muted-foreground">
+                                    {formatPct(payload?.percentage ?? null)}
+                                  </span>
+                                </span>
+                              </div>
+                            );
+                          }}
+                        />
+                      )}
                     />
-                    {formatMarketLabel(item.key)}
+                    <Pie
+                      data={assetDistributionRows}
+                      dataKey="absoluteAmount"
+                      nameKey="chartKey"
+                      innerRadius={58}
+                      outerRadius={88}
+                      stroke="0"
+                    >
+                      <Label
+                        content={({ viewBox }) => {
+                          if (!viewBox || !('cx' in viewBox) || !('cy' in viewBox)) return null;
+                          return (
+                            <text
+                              x={viewBox.cx}
+                              y={viewBox.cy}
+                              textAnchor="middle"
+                              dominantBaseline="middle"
+                            >
+                              <tspan
+                                x={viewBox.cx}
+                                y={viewBox.cy}
+                                className="fill-foreground text-sm font-semibold"
+                              >
+                                {formatPct(100)}
+                              </tspan>
+                              <tspan
+                                x={viewBox.cx}
+                                y={(viewBox.cy || 0) + 18}
+                                className="fill-muted-foreground text-[11px]"
+                              >
+                                {assetBreakdownView === 'tag' ? '资产属性' : '资产类型'}
+                              </tspan>
+                            </text>
+                          );
+                        }}
+                      />
+                    </Pie>
+                  </PieChart>
+                </ChartContainer>
+              </div>
+            ) : (
+              <div className="flex min-h-[220px] items-center justify-center rounded-lg border border-dashed border-border bg-muted/40 px-4 py-8 text-center text-sm text-muted-foreground">
+                {snapshot?.fxMissing
+                  ? '汇率缺失，暂不可计算资产分布。'
+                  : assetBreakdownView === 'tag' ? '暂无资产属性分布数据' : '暂无资产分布数据'}
+              </div>
+            )}
+
+            <div className="min-w-0 space-y-1.5">
+              {assetDistributionRows.length > 0 ? assetDistributionRows.map((item) => (
+                <div
+                  key={`${assetBreakdownView}-${item.key}`}
+                  className="grid grid-cols-[minmax(0,1fr)_minmax(5rem,auto)_3.5rem] items-center gap-3 text-xs leading-6"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                      style={{ background: item.color }}
+                    />
+                    <span className="truncate font-medium text-foreground">{item.label}</span>
+                  </div>
+                  <span className="min-w-0 truncate text-right font-mono text-muted-foreground tabular-nums">
+                    {snapshot?.fxMissing ? '不可计算' : formatMoney(item.amount, snapshot?.currency || 'CNY')}
                   </span>
-                  <span className="portfolio-asset-breakdown-value">
-                    {snapshot?.fxMissing ? '不可计算' : formatMoney(item.value, snapshot?.currency || 'CNY')}
-                  </span>
-                  <span className="portfolio-asset-breakdown-pct">
-                    {snapshot?.fxMissing ? '--' : formatPct(pct)}
+                  <span className="text-right font-mono text-muted-foreground tabular-nums">
+                    {snapshot?.fxMissing ? '--' : formatPct(item.percentage)}
                   </span>
                 </div>
-              );
-            }) : <div>暂无资产分布数据</div>}
+              )) : (
+                <div className="rounded-lg border border-dashed border-border px-3 py-8 text-center text-sm text-muted-foreground">
+                  {assetBreakdownView === 'tag' ? '暂无资产属性分布数据' : '暂无资产分布数据'}
+                </div>
+              )}
+            </div>
           </div>
         </Card>
 
@@ -3290,7 +3363,7 @@ const PortfolioPage: React.FC = () => {
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0">
               <h2 className="text-sm font-semibold text-foreground">资产分析</h2>
-              <p className="mt-1 text-xs text-secondary">
+              <p className="mt-1 text-xs text-muted-foreground">
                 {PORTFOLIO_ANALYSIS_DESCRIPTION}
                 {portfolioAnalysis?.generatedAt ? ` · ${portfolioAnalysis.generatedAt.replace('T', ' ')}` : ''}
               </p>
@@ -3309,9 +3382,9 @@ const PortfolioPage: React.FC = () => {
                 {portfolioAnalysis.summaryPoints.slice(0, 3).map((point, index) => (
                   <div
                     key={`${point}-${index}`}
-                    className="flex min-h-10 items-start gap-3 rounded-md border border-white/10 bg-white/[0.025] px-3 py-2"
+                    className="flex min-h-10 items-start gap-3 rounded-md border border-border bg-muted px-3 py-2"
                   >
-                    <span className="mt-0.5 w-6 shrink-0 text-xs font-semibold tabular-nums text-secondary">
+                    <span className="mt-0.5 w-6 shrink-0 text-xs font-semibold tabular-nums text-muted-foreground">
                       {String(index + 1).padStart(2, '0')}
                     </span>
                     <p className="min-w-0 flex-1 text-sm leading-5 text-foreground">{point}</p>
@@ -3319,7 +3392,7 @@ const PortfolioPage: React.FC = () => {
                 ))}
               </div>
             ) : (
-              <div className="rounded-lg border border-dashed border-white/12 bg-white/[0.02] px-4 py-8 text-sm leading-6 text-secondary">
+              <div className="rounded-lg border border-dashed border-border bg-muted px-4 py-8 text-sm leading-6 text-muted-foreground">
                 点击“{portfolioAnalysisButtonLabel}”生成组合要点；结果会按当前持仓快照缓存在本地。
               </div>
             )}
@@ -3331,22 +3404,24 @@ const PortfolioPage: React.FC = () => {
 
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             {portfolioAnalysis ? (
-              <button
+              <ShadcnButton
                 type="button"
-                className="btn-secondary min-h-10 flex-1 !py-2 text-sm"
+                variant="outline"
+                className="flex-1"
                 onClick={() => setPortfolioAnalysisDrawerOpen(true)}
               >
                 查看报告
-              </button>
+              </ShadcnButton>
             ) : null}
-            <button
+            <ShadcnButton
               type="button"
-              className="btn-secondary min-h-10 flex-1 !py-2 text-sm"
+              variant="outline"
+              className="flex-1"
               disabled={positionRows.length === 0 || portfolioAnalysisLoading || !snapshotSignature}
               onClick={() => void handleAnalyzePortfolio()}
             >
               {portfolioAnalysisLoading ? '分析中...' : portfolioAnalysisButtonLabel}
-            </button>
+            </ShadcnButton>
           </div>
         </Card>
       </section>
@@ -3357,30 +3432,32 @@ const PortfolioPage: React.FC = () => {
             <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
               <div>
                 <h3 className="text-sm font-semibold text-foreground">录入流水</h3>
-                <p className="mt-0.5 text-xs text-secondary">
+                <p className="mt-0.5 text-xs text-muted-foreground">
                   {writableAccount.name} · {formatMarketLabel(writableAccount.market)}
                 </p>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {entryPanelOptions.map((item) => (
-                  <button
+                  <ShadcnButton
                     key={item.value}
                     type="button"
                     aria-pressed={selectedEntryPanel === item.value}
-                    className={`btn-secondary !px-3 !py-1.5 !text-xs !font-medium ${
+                    variant={selectedEntryPanel === item.value ? 'default' : 'outline'}
+                    size="sm"
+                    className={
                       selectedEntryPanel === item.value
-                        ? '!border-primary !bg-primary !text-primary-foreground shadow-[0_8px_20px_hsl(var(--primary)/0.22),inset_0_1px_0_hsl(0_0%_100%/0.25)]'
+                        ? ''
                         : 'opacity-80 hover:opacity-100'
-                    }`}
+                    }
                     onClick={() => setActiveEntryPanel(item.value)}
                   >
                     {item.label}
-                  </button>
+                  </ShadcnButton>
                 ))}
               </div>
             </div>
 
-            <div className="mt-2 border-t border-white/10 pt-2">
+            <div className="mt-2 border-t border-border pt-2">
               {selectedEntryPanel === 'trade' && (isStockAccount || isFundAccount || isCryptoAccount) ? (
               <form className={PORTFOLIO_ENTRY_FORM_CLASS} onSubmit={handleTradeSubmit}>
                 <div className={PORTFOLIO_FORM_GRID_CLASS}>
@@ -3398,11 +3475,11 @@ const PortfolioPage: React.FC = () => {
                       onChange={(e) => setTradeForm((prev) => ({ ...prev, tradeDate: e.target.value }))} required />
                   </PortfolioField>
                   <PortfolioField label="交易方向">
-                    <select className={PORTFOLIO_SELECT_CLASS} value={tradeForm.side}
+                    <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={tradeForm.side}
                       onChange={(e) => setTradeForm((prev) => ({ ...prev, side: e.target.value as PortfolioSide }))}>
                       <option value="buy">{isFundAccount ? '申购' : '买入'}</option>
                       <option value="sell">{isFundAccount ? '赎回' : '卖出'}</option>
-                    </select>
+                    </SelectCompat>
                   </PortfolioField>
                   <PortfolioField label="数量">
                     <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step={quantityStep} placeholder={getTradeQuantityPlaceholder(selectedMarket, tradeForm.side)} value={tradeForm.quantity}
@@ -3441,11 +3518,11 @@ const PortfolioPage: React.FC = () => {
                       onChange={(e) => setCashForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
                   </PortfolioField>
                   <PortfolioField label="资金方向">
-                    <select className={PORTFOLIO_SELECT_CLASS} value={cashForm.direction}
+                    <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={cashForm.direction}
                       onChange={(e) => setCashForm((prev) => ({ ...prev, direction: e.target.value as PortfolioCashDirection }))}>
                       <option value="in">入金</option>
                       <option value="out">出金</option>
-                    </select>
+                    </SelectCompat>
                   </PortfolioField>
                   <PortfolioField label="金额">
                     <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder={cashForm.direction === 'in' ? '入金金额' : '出金金额'}
@@ -3472,11 +3549,11 @@ const PortfolioPage: React.FC = () => {
                       onChange={(e) => setCorpForm((prev) => ({ ...prev, effectiveDate: e.target.value }))} required />
                   </PortfolioField>
                   <PortfolioField label="行为类型">
-                    <select className={PORTFOLIO_SELECT_CLASS} value={corpForm.actionType}
+                    <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={corpForm.actionType}
                       onChange={(e) => setCorpForm((prev) => ({ ...prev, actionType: e.target.value as PortfolioCorporateActionType }))}>
                       <option value="cash_dividend">现金分红</option>
                       <option value="split_adjustment">拆并股调整</option>
-                    </select>
+                    </SelectCompat>
                   </PortfolioField>
                   {corpForm.actionType === 'cash_dividend' ? (
                     <PortfolioField label="每股分红">
@@ -3524,7 +3601,7 @@ const PortfolioPage: React.FC = () => {
                       onChange={(e) => setBankForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
                   </PortfolioField>
                   <PortfolioField label="资产类型">
-                    <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.assetKind}
+                    <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={bankForm.assetKind}
                       onChange={(e) => setBankForm((prev) => ({
                         ...prev,
                         assetKind: e.target.value as PortfolioBankAssetKind,
@@ -3541,11 +3618,11 @@ const PortfolioPage: React.FC = () => {
                       <option value="demand">活期/现金</option>
                       <option value="deposit">定期存款</option>
                       <option value="wealth">银行理财</option>
-                    </select>
+                    </SelectCompat>
                   </PortfolioField>
                   {bankForm.assetKind === 'wealth' ? (
                     <PortfolioField label="操作类型">
-                      <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.wealthAction}
+                      <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={bankForm.wealthAction}
                         onChange={(e) => setBankForm((prev) => ({
                           ...prev,
                           wealthAction: e.target.value as BankWealthAction,
@@ -3559,11 +3636,11 @@ const PortfolioPage: React.FC = () => {
                         <option value="buy">买入</option>
                         <option value="append">追加</option>
                         <option value="redeem">赎回</option>
-                      </select>
+                      </SelectCompat>
                     </PortfolioField>
                   ) : (
                     <PortfolioField label="资金方向">
-                      <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.direction}
+                      <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={bankForm.direction}
                         onChange={(e) => setBankForm((prev) => ({
                           ...prev,
                           direction: e.target.value as PortfolioCashDirection,
@@ -3572,7 +3649,7 @@ const PortfolioPage: React.FC = () => {
                         }))}>
                         <option value="in">存入/买入</option>
                         <option value="out">取出/赎回</option>
-                      </select>
+                      </SelectCompat>
                     </PortfolioField>
                   )}
                   <PortfolioField label="发生金额">
@@ -3641,13 +3718,13 @@ const PortfolioPage: React.FC = () => {
                   {bankForm.direction === 'out' && bankForm.assetKind === 'deposit' ? (
                     <div className={PORTFOLIO_FORM_GRID_CLASS}>
                       <PortfolioField label="定期产品" className={PORTFOLIO_FORM_SPAN_2_CLASS}>
-                        <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.linkedEntryId}
+                        <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={bankForm.linkedEntryId}
                           onChange={(e) => setBankForm((prev) => ({ ...prev, linkedEntryId: e.target.value }))} required>
                           <option value="">选择要取出的定期产品</option>
                           {bankDepositOptions.map((item) => (
                             <option key={item.optionValue} value={item.optionValue}>{formatBankPositionOption(item)}</option>
                           ))}
-                        </select>
+                        </SelectCompat>
                       </PortfolioField>
                       <div className="flex items-end">
                         <button type="submit" className={PORTFOLIO_FORM_ACTION_CLASS} disabled={!writableAccountId}>
@@ -3660,13 +3737,13 @@ const PortfolioPage: React.FC = () => {
                     <>
                       <div className={PORTFOLIO_FORM_GRID_8_CLASS}>
                         <PortfolioField label="理财产品" className={PORTFOLIO_FORM_SPAN_4_CLASS}>
-                          <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.linkedEntryId}
+                          <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={bankForm.linkedEntryId}
                             onChange={(e) => setBankForm((prev) => ({ ...prev, linkedEntryId: e.target.value, nav: '', quantity: '' }))} required>
                             <option value="">选择要赎回的理财产品</option>
                             {bankWealthOptions.map((item) => (
                               <option key={item.optionValue} value={item.optionValue}>{formatBankPositionOption(item)}</option>
                             ))}
-                          </select>
+                          </SelectCompat>
                         </PortfolioField>
                         <div className="flex items-end">
                           <button
@@ -3711,13 +3788,13 @@ const PortfolioPage: React.FC = () => {
                     <>
                       <div className={PORTFOLIO_FORM_GRID_8_CLASS}>
                         <PortfolioField label="理财产品" className={PORTFOLIO_FORM_SPAN_4_CLASS}>
-                          <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.linkedEntryId}
+                          <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={bankForm.linkedEntryId}
                             onChange={(e) => setBankForm((prev) => ({ ...prev, linkedEntryId: e.target.value, nav: '', quantity: '' }))} required>
                             <option value="">选择要追加的理财产品</option>
                             {bankWealthOptions.map((item) => (
                               <option key={item.optionValue} value={item.optionValue}>{formatBankPositionOption(item)}</option>
                             ))}
-                          </select>
+                          </SelectCompat>
                         </PortfolioField>
                         <div className="flex items-end">
                           <button
@@ -3792,7 +3869,7 @@ const PortfolioPage: React.FC = () => {
                           onChange={(e) => setBankForm((prev) => ({ ...prev, registrationCode: e.target.value.toUpperCase() }))} />
                       </PortfolioField>
 	                      <PortfolioField label="投资性质">
-	                        <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.investmentNature}
+	                        <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={bankForm.investmentNature}
 	                          onChange={(e) => setBankForm((prev) => ({ ...prev, investmentNature: e.target.value as '' | PortfolioBankInvestmentNature }))}>
                           <option value="">选填</option>
                           <option value="fixed_income">固定收益类</option>
@@ -3801,10 +3878,10 @@ const PortfolioPage: React.FC = () => {
                           <option value="commodity_derivative">商品及金融衍生品类</option>
                           <option value="cash_management">现金管理类</option>
                           <option value="other">其他</option>
-                        </select>
+                        </SelectCompat>
                       </PortfolioField>
                       <PortfolioField label="风险等级">
-                        <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.riskLevel}
+                        <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={bankForm.riskLevel}
                           onChange={(e) => setBankForm((prev) => ({ ...prev, riskLevel: e.target.value as '' | PortfolioBankRiskLevel }))}>
                           <option value="">选填</option>
                           <option value="R1">R1</option>
@@ -3812,16 +3889,16 @@ const PortfolioPage: React.FC = () => {
                           <option value="R3">R3</option>
                           <option value="R4">R4</option>
                           <option value="R5">R5</option>
-                        </select>
+                        </SelectCompat>
                       </PortfolioField>
                     </div>
                     <div className={PORTFOLIO_FORM_GRID_CLASS}>
 	                      <PortfolioField label="收益方式">
-	                        <select className={PORTFOLIO_SELECT_CLASS} value={bankForm.incomeMode}
+	                        <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={bankForm.incomeMode}
 	                          onChange={(e) => setBankForm((prev) => ({ ...prev, incomeMode: e.target.value as PortfolioBankIncomeMode }))}>
 	                          <option value="reinvest">滚存</option>
 	                          <option value="dividend">派息</option>
-	                        </select>
+	                        </SelectCompat>
 	                      </PortfolioField>
                       {bankWealthMatchedProduct && bankForm.nav ? (
                         <>
@@ -3870,13 +3947,13 @@ const PortfolioPage: React.FC = () => {
               <form className={PORTFOLIO_ENTRY_FORM_CLASS} onSubmit={handleBankNavSubmit}>
                 <div className={PORTFOLIO_FORM_GRID_CLASS}>
                   <PortfolioField label="理财产品" className={PORTFOLIO_FORM_SPAN_2_CLASS}>
-                    <select className={PORTFOLIO_SELECT_CLASS} value={bankNavForm.selectedProduct}
+                    <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={bankNavForm.selectedProduct}
                       onChange={(e) => setBankNavForm((prev) => ({ ...prev, selectedProduct: e.target.value }))} required>
                       <option value="">选择要更新价值的理财产品</option>
                       {bankWealthOptions.map((item) => (
                         <option key={item.optionValue} value={item.optionValue}>{formatBankPositionOption(item)}</option>
                       ))}
-                    </select>
+                    </SelectCompat>
                   </PortfolioField>
                   <PortfolioField label="估值日期">
                     <input className={PORTFOLIO_INPUT_CLASS} type="date" value={bankNavForm.priceDate}
@@ -3908,7 +3985,7 @@ const PortfolioPage: React.FC = () => {
                       }} required />
                   </PortfolioField>
                   <PortfolioField label="产品类型">
-                    <select className={PORTFOLIO_SELECT_CLASS} value={advisoryForm.productType}
+                    <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={advisoryForm.productType}
                       onChange={(e) => setAdvisoryForm((prev) => ({
                         ...prev,
                         selectedProduct: '',
@@ -3927,10 +4004,10 @@ const PortfolioPage: React.FC = () => {
                       }))}>
                       <option value="advisory_combo">投顾组合</option>
                       <option value="dca_plan">定投计划</option>
-                    </select>
+                    </SelectCompat>
                   </PortfolioField>
                   <PortfolioField label="操作类型">
-                    <select className={PORTFOLIO_SELECT_CLASS} value={advisoryForm.eventType}
+                    <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={advisoryForm.eventType}
                       onChange={(e) => setAdvisoryForm((prev) => ({
                         ...prev,
                         selectedProduct: '',
@@ -3953,7 +4030,7 @@ const PortfolioPage: React.FC = () => {
                           <option value="redeem">赎回/止盈</option>
                         </>
                       )}
-                    </select>
+                    </SelectCompat>
                   </PortfolioField>
                   <PortfolioField label={advisoryForm.eventType === 'redeem' ? '到账金额' : '投入金额'}>
                     <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01"
@@ -3969,7 +4046,7 @@ const PortfolioPage: React.FC = () => {
                 {advisoryEventRequiresExistingProduct ? (
                   <div className={PORTFOLIO_FORM_GRID_CLASS}>
                     <PortfolioField label="投顾产品" className={PORTFOLIO_FORM_SPAN_2_CLASS}>
-                      <select className={PORTFOLIO_SELECT_CLASS} value={advisoryForm.selectedProduct}
+                      <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={advisoryForm.selectedProduct}
                         onChange={(e) => {
                           const option = advisoryFormProductOptions.find((item) => item.optionValue === e.target.value);
                           void applyExistingAdvisoryProduct(option);
@@ -3978,11 +4055,11 @@ const PortfolioPage: React.FC = () => {
                         {advisoryFormProductOptions.map((item) => (
                           <option key={item.optionValue} value={item.optionValue}>{formatAdvisoryPositionOption(item)}</option>
                         ))}
-                      </select>
+                      </SelectCompat>
                     </PortfolioField>
                     <div className="lg:col-span-2">
                       <span className={PORTFOLIO_FIELD_LABEL_CLASS}>当前价值</span>
-                      <div className="flex h-9 items-center rounded-lg border border-white/10 bg-white/[0.02] px-3 text-xs text-secondary">
+                      <div className="flex h-8 items-center rounded-lg border border-border bg-muted px-2.5 text-xs text-muted-foreground">
                         {selectedAdvisoryOption ? formatMoney(selectedAdvisoryOption.marketValueBase, selectedAdvisoryOption.valuationCurrency) : '--'}
                       </div>
                     </div>
@@ -4057,13 +4134,13 @@ const PortfolioPage: React.FC = () => {
               <form className={PORTFOLIO_ENTRY_FORM_CLASS} onSubmit={handleAdvisoryNavSubmit}>
                 <div className={PORTFOLIO_FORM_GRID_CLASS}>
                   <PortfolioField label="投顾产品" className={PORTFOLIO_FORM_SPAN_2_CLASS}>
-                    <select className={PORTFOLIO_SELECT_CLASS} value={advisoryNavForm.selectedProduct}
+                    <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={advisoryNavForm.selectedProduct}
                       onChange={(e) => setAdvisoryNavForm((prev) => ({ ...prev, selectedProduct: e.target.value }))} required>
                       <option value="">选择要更新价值的投顾产品</option>
                       {advisoryOptions.map((item) => (
                         <option key={item.optionValue} value={item.optionValue}>{formatAdvisoryPositionOption(item)}</option>
                       ))}
-                    </select>
+                    </SelectCompat>
                   </PortfolioField>
                   <PortfolioField label="估值日期">
                     <input className={PORTFOLIO_INPUT_CLASS} type="date" value={advisoryNavForm.priceDate}
@@ -4096,7 +4173,7 @@ const PortfolioPage: React.FC = () => {
                       onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, policyNo: e.target.value }))} />
                   </PortfolioField>
                   <PortfolioField label="险种">
-                    <select className={PORTFOLIO_SELECT_CLASS} value={insurancePolicyForm.insuranceKind}
+                    <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={insurancePolicyForm.insuranceKind}
                       onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, insuranceKind: e.target.value as PortfolioInsuranceKind }))}>
                       <option value="annuity">年金险</option>
                       <option value="whole_life">终身寿险</option>
@@ -4104,20 +4181,20 @@ const PortfolioPage: React.FC = () => {
                       <option value="universal">万能险</option>
                       <option value="unit_linked">投连险</option>
                       <option value="other">其他保险</option>
-                    </select>
+                    </SelectCompat>
                   </PortfolioField>
                   <PortfolioField label="设计类型">
-                    <select className={PORTFOLIO_SELECT_CLASS} value={insurancePolicyForm.designType}
+                    <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={insurancePolicyForm.designType}
                       onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, designType: e.target.value as PortfolioInsuranceDesignType }))}>
                       <option value="ordinary">普通型</option>
                       <option value="participating">分红型</option>
                       <option value="universal">万能型</option>
                       <option value="unit_linked">投资连结型</option>
                       <option value="other">其他</option>
-                    </select>
+                    </SelectCompat>
                   </PortfolioField>
                   <PortfolioField label="缴费方式">
-                    <select className={PORTFOLIO_SELECT_CLASS} value={insurancePolicyForm.paymentMode}
+                    <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={insurancePolicyForm.paymentMode}
                       onChange={(e) => setInsurancePolicyForm((prev) => ({ ...prev, paymentMode: e.target.value as PortfolioInsurancePaymentMode }))}>
                       <option value="single">趸交</option>
                       <option value="annual">年交</option>
@@ -4125,7 +4202,7 @@ const PortfolioPage: React.FC = () => {
                       <option value="quarterly">季交</option>
                       <option value="monthly">月交</option>
                       <option value="irregular">不定期</option>
-                    </select>
+                    </SelectCompat>
                   </PortfolioField>
                   <PortfolioField label="每期保费">
                     <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder="选填" value={insurancePolicyForm.premiumPerPeriod}
@@ -4160,7 +4237,7 @@ const PortfolioPage: React.FC = () => {
               <form className={PORTFOLIO_ENTRY_FORM_CLASS} onSubmit={handleInsuranceLedgerSubmit}>
                 <div className={PORTFOLIO_FORM_GRID_CLASS}>
                   <PortfolioField label="保单" className={PORTFOLIO_FORM_SPAN_2_CLASS}>
-                    <select className={PORTFOLIO_SELECT_CLASS} value={insuranceLedgerForm.policyId}
+                    <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={insuranceLedgerForm.policyId}
                       onChange={(e) => {
                         const policy = insurancePolicies.find((item) => String(item.id) === e.target.value);
                         const nextEventType = getDefaultInsuranceEventType(policy);
@@ -4175,21 +4252,21 @@ const PortfolioPage: React.FC = () => {
                       {insurancePolicies.map((item) => (
                         <option key={item.id} value={item.id}>{item.policyName}{item.insurer ? ` · ${item.insurer}` : ''}</option>
                       ))}
-                    </select>
+                    </SelectCompat>
                   </PortfolioField>
                   <PortfolioField label="流水日期">
                     <input className={PORTFOLIO_INPUT_CLASS} type="date" value={insuranceLedgerForm.eventDate}
                       onChange={(e) => setInsuranceLedgerForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
                   </PortfolioField>
                   <PortfolioField label="事件类型">
-                    <select className={PORTFOLIO_SELECT_CLASS} value={insuranceLedgerForm.eventType}
+                    <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={insuranceLedgerForm.eventType}
                       onChange={(e) => setInsuranceLedgerForm((prev) => ({ ...prev, eventType: e.target.value as PortfolioInsuranceEventType }))} disabled={!selectedInsurancePolicy}>
                       {insuranceLedgerEventOptions.length === 0 ? (
                         <option value={insuranceLedgerForm.eventType}>{selectedInsurancePolicy ? '保单已终止' : '先选择保单'}</option>
                       ) : insuranceLedgerEventOptions.map((item) => (
                         <option key={item.value} value={item.value}>{item.label}</option>
                       ))}
-                    </select>
+                    </SelectCompat>
                   </PortfolioField>
                   <PortfolioField label={insuranceLedgerForm.eventType === 'value_update' ? '当前价值' : '金额'}>
                     <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.01" placeholder={insuranceLedgerForm.eventType === 'value_update' ? '现金价值/账户价值' : '金额'} value={insuranceLedgerForm.amount}
@@ -4218,109 +4295,52 @@ const PortfolioPage: React.FC = () => {
         </section>
       ) : null}
 
-      <section className={isStockAccount ? "grid grid-cols-1 xl:grid-cols-2 gap-3" : "grid grid-cols-1 gap-3"}>
-        {isStockAccount ? (
-        <Card padding="md">
-          <h3 className="text-sm font-semibold text-foreground mb-3">券商 CSV 导入</h3>
-          <div className={PORTFOLIO_FORM_CLASS}>
-            {brokerLoadWarning ? (
-              <InlineAlert
-                variant="warning"
-                className="rounded-lg px-2 py-1 text-xs shadow-none"
-                message={brokerLoadWarning}
-              />
-            ) : null}
-            <div className={PORTFOLIO_FORM_GRID_2_CLASS}>
-              <select className={PORTFOLIO_SELECT_CLASS} value={selectedBroker} onChange={(e) => setSelectedBroker(e.target.value)}>
-                {brokers.length > 0 ? (
-                  brokers.map((item) => <option key={item.broker} value={item.broker}>{formatBrokerLabel(item.broker, item.displayName)}</option>)
-                ) : (
-                  <option value="huatai">huatai（华泰）</option>
-                )}
-              </select>
-              <label className={PORTFOLIO_FILE_PICKER_CLASS}>
-                选择 CSV
-                <input type="file" accept=".csv" className="hidden"
-                  onChange={(e) => setCsvFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)} />
-              </label>
-            </div>
-            <div className="flex items-center gap-2 text-xs text-secondary">
-              <input id="csv-dry-run" type="checkbox" checked={csvDryRun} onChange={(e) => setCsvDryRun(e.target.checked)} />
-              <label htmlFor="csv-dry-run">仅预演（不写入）</label>
-            </div>
-            <div className="flex gap-2">
-              <button type="button" className="btn-secondary flex-1" disabled={!csvFile || csvParsing} onClick={() => void handleParseCsv()}>
-                {csvParsing ? '解析中...' : '解析文件'}
-              </button>
-              <button type="button" className="btn-secondary flex-1"
-                disabled={!csvFile || !writableAccountId || csvCommitting} onClick={() => void handleCommitCsv()}>
-                {csvCommitting ? '提交中...' : '提交导入'}
-              </button>
-            </div>
-            {csvParseResult ? (
-              <InlineAlert
-                variant={getCsvParseVariant(csvParseResult)}
-                title="CSV 解析结果"
-                message={`有效 ${csvParseResult.recordCount} 条，跳过 ${csvParseResult.skippedCount} 条，错误 ${csvParseResult.errorCount} 条。`}
-                className="rounded-lg px-3 py-2 text-xs shadow-none"
-              />
-            ) : null}
-            {csvCommitResult ? (
-              <InlineAlert
-                variant={getCsvCommitVariant(csvCommitResult, csvDryRun)}
-                title={csvDryRun ? 'CSV 预演结果' : 'CSV 提交结果'}
-                message={`${csvDryRun ? '预演检查' : '实际写入'}：写入 ${csvCommitResult.insertedCount} 条，重复 ${csvCommitResult.duplicateCount} 条，失败 ${csvCommitResult.failedCount} 条。`}
-                className="rounded-lg px-3 py-2 text-xs shadow-none"
-              />
-            ) : null}
-          </div>
-        </Card>
-        ) : null}
-
+      <section className="grid grid-cols-1 gap-3">
         <Card padding="md">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <h3 className="text-sm font-semibold text-foreground">事件记录</h3>
-              <p className="mt-1 text-xs text-secondary">
+              <p className="mt-1 text-xs text-muted-foreground">
                 共 {eventTotal} 条{writeBlocked ? ' · 单账户视图可删除修正' : ' · 可删除错误流水'}
               </p>
             </div>
             <div className="grid grid-cols-2 gap-2 md:flex md:items-center">
-              <select className={`${PORTFOLIO_SELECT_CLASS} md:w-36`} value={eventType} onChange={(e) => setEventType(e.target.value as EventType)}>
+              <SelectCompat className={`${PORTFOLIO_SELECT_CLASS} md:w-36`} value={eventType} onChange={(e) => setEventType(e.target.value as EventType)}>
                 <option value="trade">交易流水</option>
                 <option value="cash">资金流水</option>
                 {isStockAccount || selectedAccount === 'all' ? <option value="corporate">公司行为</option> : null}
                 {isBankAccount || selectedAccount === 'all' ? <option value="bank">银行流水</option> : null}
                 {isAdvisoryAccount || selectedAccount === 'all' ? <option value="advisory">投顾流水</option> : null}
                 {isInsuranceAccount || selectedAccount === 'all' ? <option value="insurance">保险流水</option> : null}
-              </select>
-              <button
+              </SelectCompat>
+              <ShadcnButton
                 type="button"
-                className={`btn-secondary text-sm ${showEventFilters || hasEventFilters ? 'border-primary/50 bg-primary/10 text-foreground' : ''}`}
+                variant="outline"
+                className={showEventFilters || hasEventFilters ? 'border-primary/50 bg-primary/10 text-foreground' : ''}
                 onClick={() => setShowEventFilters((prev) => !prev)}
               >
                 {hasEventFilters ? `筛选 ${eventFilterChips.length}` : '筛选'}
-              </button>
-              <button type="button" className="btn-secondary text-sm col-span-2 md:col-span-1" onClick={() => void loadEvents()} disabled={eventLoading}>
+              </ShadcnButton>
+              <ShadcnButton type="button" variant="outline" className="col-span-2 md:col-span-1" onClick={() => void loadEvents()} disabled={eventLoading}>
                 {eventLoading ? '加载中...' : '刷新'}
-              </button>
+              </ShadcnButton>
             </div>
           </div>
           <div className="mt-3 space-y-2">
             {hasEventFilters ? (
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 {eventFilterChips.map((chip) => (
-                  <span key={chip} className="rounded-full border border-white/10 bg-white/[0.03] px-2 py-1 text-secondary">
+                  <span key={chip} className="rounded-full border border-border bg-muted px-2 py-1 text-muted-foreground">
                     {chip}
                   </span>
                 ))}
-                <button type="button" className="btn-secondary !px-2 !py-1 !text-[11px]" onClick={clearEventFilters}>
+                <ShadcnButton type="button" variant="outline" size="xs" onClick={clearEventFilters}>
                   清空
-                </button>
+                </ShadcnButton>
               </div>
             ) : null}
             {(showEventFilters || hasEventFilters) ? (
-              <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-white/[0.02] p-2 md:grid-cols-4">
+              <div className="grid grid-cols-2 gap-2 rounded-xl border border-border bg-muted p-2 md:grid-cols-4">
                 <input className={PORTFOLIO_INPUT_CLASS} type="date" value={eventDateFrom} onChange={(e) => setEventDateFrom(e.target.value)} />
                 <input className={PORTFOLIO_INPUT_CLASS} type="date" value={eventDateTo} onChange={(e) => setEventDateTo(e.target.value)} />
                 {(eventType === 'trade' || eventType === 'corporate') ? (
@@ -4328,49 +4348,49 @@ const PortfolioPage: React.FC = () => {
                     onChange={(e) => setEventSymbol(e.target.value)} />
                 ) : null}
                 {eventType === 'trade' ? (
-                  <select className={PORTFOLIO_SELECT_CLASS} value={eventSide} onChange={(e) => setEventSide(e.target.value as '' | PortfolioSide)}>
+                  <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={eventSide} onChange={(e) => setEventSide(e.target.value as '' | PortfolioSide)}>
                     <option value="">全部方向</option>
                     <option value="buy">买入</option>
                     <option value="sell">卖出</option>
-                  </select>
+                  </SelectCompat>
                 ) : null}
                 {eventType === 'cash' ? (
-                  <select className={PORTFOLIO_SELECT_CLASS} value={eventDirection}
+                  <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={eventDirection}
                     onChange={(e) => setEventDirection(e.target.value as '' | PortfolioCashDirection)}>
                     <option value="">全部方向</option>
                     <option value="in">流入</option>
                     <option value="out">流出</option>
-                  </select>
+                  </SelectCompat>
                 ) : null}
                 {eventType === 'corporate' ? (
-                  <select className={PORTFOLIO_SELECT_CLASS} value={eventActionType}
+                  <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={eventActionType}
                     onChange={(e) => setEventActionType(e.target.value as '' | PortfolioCorporateActionType)}>
                     <option value="">全部公司行为</option>
                     <option value="cash_dividend">现金分红</option>
                     <option value="split_adjustment">拆并股调整</option>
-                  </select>
+                  </SelectCompat>
                 ) : null}
                 {eventType === 'bank' ? (
-                  <select className={PORTFOLIO_SELECT_CLASS} value={eventBankAssetKind}
+                  <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={eventBankAssetKind}
                     onChange={(e) => setEventBankAssetKind(e.target.value as '' | PortfolioBankAssetKind)}>
                     <option value="">全部银行资产</option>
                     <option value="demand">活期/现金</option>
                     <option value="deposit">定期存款</option>
                     <option value="wealth">银行理财</option>
-                  </select>
+                  </SelectCompat>
                 ) : null}
                 {eventType === 'advisory' ? (
-                  <select className={PORTFOLIO_SELECT_CLASS} value={eventAdvisoryDirection}
+                  <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={eventAdvisoryDirection}
                     onChange={(e) => setEventAdvisoryDirection(e.target.value as '' | PortfolioAdvisoryEventType)}>
                     <option value="">全部投顾事件</option>
                     <option value="buy">买入/追加</option>
                     <option value="initial_buy">首次买入</option>
                     <option value="follow_buy">跟投</option>
                     <option value="redeem">赎回/止盈</option>
-                  </select>
+                  </SelectCompat>
                 ) : null}
                 {eventType === 'insurance' ? (
-                  <select className={PORTFOLIO_SELECT_CLASS} value={eventInsuranceEventType}
+                  <SelectCompat className={PORTFOLIO_SELECT_CLASS} value={eventInsuranceEventType}
                     onChange={(e) => setEventInsuranceEventType(e.target.value as '' | PortfolioInsuranceEventType)}>
                     <option value="">全部保险事件</option>
                     <option value="premium">缴费</option>
@@ -4384,20 +4404,22 @@ const PortfolioPage: React.FC = () => {
                     <option value="refund">退费</option>
                     <option value="other_inflow">其他返还</option>
                     <option value="other_outflow">其他支出</option>
-                  </select>
+                  </SelectCompat>
                 ) : null}
               </div>
             ) : null}
-            <div className="max-h-64 overflow-auto rounded-lg border border-white/10 p-2">
+            <div className="max-h-64 overflow-auto rounded-lg border border-border p-2">
               {eventType === 'trade' && tradeEvents.map((item) => (
-                <div key={`t-${item.id}`} className="flex items-start justify-between gap-3 border-b border-white/5 py-2 text-xs text-secondary">
+                <div key={`t-${item.id}`} className="flex items-start justify-between gap-3 border-b border-border py-2 text-xs text-muted-foreground">
                   <div className="min-w-0">
                     {item.tradeDate} {formatSideLabel(item.side)} {item.symbol} 数量={formatTradeQuantity(item)} 价格={item.price}
                   </div>
                   {!writeBlocked ? (
-                    <button
+                    <ShadcnButton
                       type="button"
-                      className="btn-secondary shrink-0 !px-3 !py-1 !text-[11px]"
+                      variant="outline"
+                      size="xs"
+                      className="shrink-0"
                       onClick={() => openDeleteDialog({
                         eventType: 'trade',
                         id: item.id,
@@ -4405,19 +4427,21 @@ const PortfolioPage: React.FC = () => {
                       })}
                     >
                       删除
-                    </button>
+                    </ShadcnButton>
                   ) : null}
                 </div>
               ))}
               {eventType === 'cash' && cashEvents.map((item) => (
-                <div key={`c-${item.id}`} className="flex items-start justify-between gap-3 border-b border-white/5 py-2 text-xs text-secondary">
+                <div key={`c-${item.id}`} className="flex items-start justify-between gap-3 border-b border-border py-2 text-xs text-muted-foreground">
                   <div className="min-w-0">
                     {item.eventDate} {formatCashDirectionLabel(item.direction)} {item.amount} {item.currency}
                   </div>
                   {!writeBlocked ? (
-                    <button
+                    <ShadcnButton
                       type="button"
-                      className="btn-secondary shrink-0 !px-3 !py-1 !text-[11px]"
+                      variant="outline"
+                      size="xs"
+                      className="shrink-0"
                       onClick={() => openDeleteDialog({
                         eventType: 'cash',
                         id: item.id,
@@ -4425,19 +4449,21 @@ const PortfolioPage: React.FC = () => {
                       })}
                     >
                       删除
-                    </button>
+                    </ShadcnButton>
                   ) : null}
                 </div>
               ))}
               {eventType === 'corporate' && corporateEvents.map((item) => (
-                <div key={`ca-${item.id}`} className="flex items-start justify-between gap-3 border-b border-white/5 py-2 text-xs text-secondary">
+                <div key={`ca-${item.id}`} className="flex items-start justify-between gap-3 border-b border-border py-2 text-xs text-muted-foreground">
                   <div className="min-w-0">
                     {item.effectiveDate} {formatCorporateActionLabel(item.actionType)} {item.symbol}
                   </div>
                   {!writeBlocked ? (
-                    <button
+                    <ShadcnButton
                       type="button"
-                      className="btn-secondary shrink-0 !px-3 !py-1 !text-[11px]"
+                      variant="outline"
+                      size="xs"
+                      className="shrink-0"
                       onClick={() => openDeleteDialog({
                         eventType: 'corporate',
                         id: item.id,
@@ -4445,19 +4471,21 @@ const PortfolioPage: React.FC = () => {
                       })}
                     >
                       删除
-                    </button>
+                    </ShadcnButton>
                   ) : null}
                 </div>
               ))}
               {eventType === 'bank' && bankEvents.map((item) => (
-                <div key={`b-${item.id}`} className="flex items-start justify-between gap-3 border-b border-white/5 py-2 text-xs text-secondary">
+                <div key={`b-${item.id}`} className="flex items-start justify-between gap-3 border-b border-border py-2 text-xs text-muted-foreground">
                   <div className="min-w-0">
                     {item.eventDate} {formatBankAssetKind(item.assetKind)} {formatCashDirectionLabel(item.direction)} {item.amount} {item.currency} · {item.bankName}{item.productName ? ` · ${item.productName}` : ''}{item.productPublicCode ? ` · ${item.productPublicCode}` : ''}{item.registrationCode ? ` · ${item.registrationCode}` : ''}
                   </div>
                   {!writeBlocked ? (
-                    <button
+                    <ShadcnButton
                       type="button"
-                      className="btn-secondary shrink-0 !px-3 !py-1 !text-[11px]"
+                      variant="outline"
+                      size="xs"
+                      className="shrink-0"
                       onClick={() => openDeleteDialog({
                         eventType: 'bank',
                         id: item.id,
@@ -4465,20 +4493,22 @@ const PortfolioPage: React.FC = () => {
                       })}
                     >
                       删除
-                    </button>
+                    </ShadcnButton>
                   ) : null}
                 </div>
               ))}
               {eventType === 'advisory' && advisoryEvents.map((item) => (
-                <div key={`a-${item.id}`} className="flex items-start justify-between gap-3 border-b border-white/5 py-2 text-xs text-secondary">
+                <div key={`a-${item.id}`} className="flex items-start justify-between gap-3 border-b border-border py-2 text-xs text-muted-foreground">
                   <div className="min-w-0">
                     {item.eventDate} {formatAdvisoryProductTypeLabel(item.productType)} · {formatAdvisoryEventLabel(item.eventType || item.direction)} {item.productName}
                     {item.productCode ? ` · ${item.productCode}` : ''} · {item.platform} · 金额 {item.amount} {item.currency}
                   </div>
                   {!writeBlocked ? (
-                    <button
+                    <ShadcnButton
                       type="button"
-                      className="btn-secondary shrink-0 !px-3 !py-1 !text-[11px]"
+                      variant="outline"
+                      size="xs"
+                      className="shrink-0"
                       onClick={() => openDeleteDialog({
                         eventType: 'advisory',
                         id: item.id,
@@ -4486,21 +4516,23 @@ const PortfolioPage: React.FC = () => {
                       })}
                     >
                       删除
-                    </button>
+                    </ShadcnButton>
                   ) : null}
                 </div>
               ))}
               {eventType === 'insurance' && insuranceEvents.map((item) => {
                 const policy = insurancePolicies.find((candidate) => candidate.id === item.policyId);
                 return (
-                <div key={`i-${item.id}`} className="flex items-start justify-between gap-3 border-b border-white/5 py-2 text-xs text-secondary">
+                <div key={`i-${item.id}`} className="flex items-start justify-between gap-3 border-b border-border py-2 text-xs text-muted-foreground">
                   <div className="min-w-0">
                     {item.eventDate} {formatInsuranceEventType(item.eventType)} {policy?.policyName || `保单 #${item.policyId}`} · {item.amount} {item.currency}{item.periodNo ? ` · 第 ${item.periodNo} 期` : ''}
                   </div>
                   {!writeBlocked ? (
-                    <button
+                    <ShadcnButton
                       type="button"
-                      className="btn-secondary shrink-0 !px-3 !py-1 !text-[11px]"
+                      variant="outline"
+                      size="xs"
+                      className="shrink-0"
                       onClick={() => openDeleteDialog({
                         eventType: 'insurance',
                         id: item.id,
@@ -4508,7 +4540,7 @@ const PortfolioPage: React.FC = () => {
                       })}
                     >
                       删除
-                    </button>
+                    </ShadcnButton>
                   ) : null}
                 </div>
                 );
@@ -4527,17 +4559,17 @@ const PortfolioPage: React.FC = () => {
                     />
                   ) : null}
             </div>
-            <div className="flex items-center justify-between text-xs text-secondary">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>第 {eventPage} / {totalEventPages} 页</span>
               <div className="flex gap-2">
-                <button type="button" className="btn-secondary text-xs px-3 py-1" disabled={eventPage <= 1}
+                <ShadcnButton type="button" variant="outline" size="sm" disabled={eventPage <= 1}
                   onClick={() => setEventPage((prev) => Math.max(1, prev - 1))}>
                   上一页
-                </button>
-                <button type="button" className="btn-secondary text-xs px-3 py-1" disabled={eventPage >= totalEventPages}
+                </ShadcnButton>
+                <ShadcnButton type="button" variant="outline" size="sm" disabled={eventPage >= totalEventPages}
                   onClick={() => setEventPage((prev) => Math.min(totalEventPages, prev + 1))}>
                   下一页
-                </button>
+                </ShadcnButton>
               </div>
             </div>
           </div>
@@ -4547,9 +4579,9 @@ const PortfolioPage: React.FC = () => {
         <ToastViewport className="bottom-auto right-auto left-1/2 top-1/2 w-[380px] -translate-x-1/2 -translate-y-1/2">
           <div
             role="status"
-            className="pointer-events-auto rounded-2xl border border-success/45 bg-card px-5 py-4 text-center text-foreground shadow-soft-card-strong ring-1 ring-success/15"
+            className="pointer-events-auto rounded-xl border border-emerald-500/45 bg-card px-5 py-4 text-center text-foreground shadow-none ring-1 ring-success/15"
           >
-            <p className="text-sm font-semibold text-success">{portfolioToast.title}</p>
+            <p className="text-sm font-semibold text-emerald-600">{portfolioToast.title}</p>
             <p className="mt-1 text-sm text-foreground">{portfolioToast.message}</p>
           </div>
         </ToastViewport>
@@ -4577,7 +4609,7 @@ const PortfolioPage: React.FC = () => {
           onClick={closeAssetTransfer}
         >
           <div
-            className="w-full max-w-2xl rounded-2xl border border-border/70 bg-card px-5 py-4 text-foreground shadow-soft-card-strong"
+            className="w-full max-w-2xl rounded-xl border border-border/70 bg-card px-5 py-4 text-foreground shadow-none"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3">
@@ -4585,20 +4617,22 @@ const PortfolioPage: React.FC = () => {
                 <h3 id="asset-transfer-title" className="text-sm font-semibold text-foreground">
                   转移资产
                 </h3>
-                <p className="mt-1 text-xs text-secondary">
+                <p className="mt-1 text-xs text-muted-foreground">
                   {assetTransferStep === 'select' ? '选择当前账户中的一个资产和同类型目标账户。' : null}
                   {assetTransferStep === 'preview' ? '确认将迁移的源数据。' : null}
                   {assetTransferStep === 'result' ? '转移已完成。' : null}
                 </p>
               </div>
-              <button
+              <ShadcnButton
                 type="button"
-                className="btn-secondary shrink-0 !px-2.5 !py-1 !text-xs"
+                variant="outline"
+                size="sm"
+                className="shrink-0"
                 onClick={closeAssetTransfer}
                 disabled={assetTransferLoading}
               >
                 关闭
-              </button>
+              </ShadcnButton>
             </div>
 
             <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
@@ -4606,7 +4640,7 @@ const PortfolioPage: React.FC = () => {
                 <div
                   key={step}
                   className={`rounded-lg border px-3 py-2 ${
-                    assetTransferStep === step ? 'border-primary/50 bg-primary/10 text-foreground' : 'border-border/60 text-secondary'
+                    assetTransferStep === step ? 'border-primary/50 bg-primary/10 text-foreground' : 'border-border/60 text-muted-foreground'
                   }`}
                 >
                   {index + 1}. {step === 'select' ? '选择资产' : step === 'preview' ? '数据概览' : '转移结果'}
@@ -4626,7 +4660,7 @@ const PortfolioPage: React.FC = () => {
             {assetTransferStep === 'select' ? (
               <div className="mt-4 grid gap-4">
                 <PortfolioField label="目标账户">
-                  <select
+                  <SelectCompat
                     className={PORTFOLIO_SELECT_CLASS}
                     value={assetTransferTargetId}
                     onChange={(event) => setAssetTransferTargetId(event.target.value)}
@@ -4640,11 +4674,11 @@ const PortfolioPage: React.FC = () => {
                         {account.name} · {account.broker || '未设置机构/平台'}
                       </option>
                     ))}
-                  </select>
+                  </SelectCompat>
                 </PortfolioField>
 
                 <div className="grid gap-2">
-                  <div className="text-xs font-medium text-secondary">选择资产</div>
+                  <div className="text-xs font-medium text-muted-foreground">选择资产</div>
                   <div className="max-h-72 overflow-auto rounded-xl border border-border/70">
                     {assetTransferOptions.map((option) => {
                       const assetName = getPositionDisplayName(option.row);
@@ -4653,7 +4687,7 @@ const PortfolioPage: React.FC = () => {
                         <label
                           key={option.key}
                           className={`flex cursor-pointer items-start gap-3 border-b border-border/50 px-3 py-2.5 last:border-b-0 ${
-                            checked ? 'bg-primary/10' : 'hover:bg-white/[0.03]'
+                            checked ? 'bg-primary/10' : 'hover:bg-muted'
                           }`}
                         >
                           <input
@@ -4667,7 +4701,7 @@ const PortfolioPage: React.FC = () => {
                           />
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-sm font-medium text-foreground">{assetName}</span>
-                            <span className="mt-1 block truncate text-xs text-secondary">
+                            <span className="mt-1 block truncate text-xs text-muted-foreground">
                               {getPositionAssetType(option.row, assetNameMaps)} · {option.row.currency} · 市值 {formatPositionMoney(option.row.marketValueBase, option.row)}
                             </span>
                           </span>
@@ -4675,7 +4709,7 @@ const PortfolioPage: React.FC = () => {
                       );
                     })}
                     {assetTransferOptions.length === 0 ? (
-                      <div className="px-3 py-6 text-center text-xs text-secondary">
+                      <div className="px-3 py-6 text-center text-xs text-muted-foreground">
                         当前账户暂无可转移资产。
                       </div>
                     ) : null}
@@ -4683,15 +4717,14 @@ const PortfolioPage: React.FC = () => {
                 </div>
 
                 <div className="flex justify-end">
-                  <button
+                  <ShadcnButton
                     type="button"
-                    className="btn-primary inline-flex h-9 items-center gap-1.5 !px-3 !py-1.5 text-sm"
                     onClick={() => void handlePreviewAssetTransfer()}
                     disabled={assetTransferLoading || !assetTransferAssetKey || !assetTransferTargetId}
                   >
                     {assetTransferLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <ArrowRight className="h-4 w-4" aria-hidden="true" />}
                     下一步
-                  </button>
+                  </ShadcnButton>
                 </div>
               </div>
             ) : null}
@@ -4702,17 +4735,17 @@ const PortfolioPage: React.FC = () => {
                   <div className="font-medium text-foreground">
                     {String(assetTransferPreview.asset.displayName || selectedAssetTransferOption?.asset.displayName || selectedAssetTransferOption?.row.symbol || '选中资产')}
                   </div>
-                  <div className="mt-1 text-xs text-secondary">
+                  <div className="mt-1 text-xs text-muted-foreground">
                     {assetTransferPreview.sourceAccountName} <ArrowRight className="inline h-3.5 w-3.5 align-[-2px]" aria-hidden="true" /> {assetTransferPreview.targetAccountName}
                   </div>
-                  <div className="mt-1 text-xs text-secondary">
+                  <div className="mt-1 text-xs text-muted-foreground">
                     {assetTransferPreview.dateFrom || '--'} 至 {assetTransferPreview.dateTo || '--'} · 共 {assetTransferPreview.totalRecords} 条源数据
                   </div>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {Object.entries(assetTransferPreview.transferredCounts || {}).map(([key, value]) => (
                     <div key={key} className="rounded-lg border border-border/70 px-3 py-2 text-xs">
-                      <span className="text-secondary">{formatTransferCountLabel(key)}</span>
+                      <span className="text-muted-foreground">{formatTransferCountLabel(key)}</span>
                       <span className="ml-2 font-semibold text-foreground">{value}</span>
                     </div>
                   ))}
@@ -4726,9 +4759,9 @@ const PortfolioPage: React.FC = () => {
                   />
                 ) : null}
                 <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-                  <button
+                  <ShadcnButton
                     type="button"
-                    className="btn-secondary inline-flex h-9 items-center justify-center gap-1.5 !px-3 !py-1.5 text-sm"
+                    variant="outline"
                     onClick={() => {
                       setAssetTransferStep('select');
                       setAssetTransferPreview(null);
@@ -4738,41 +4771,40 @@ const PortfolioPage: React.FC = () => {
                   >
                     <ArrowLeft className="h-4 w-4" aria-hidden="true" />
                     上一步
-                  </button>
-                  <button
+                  </ShadcnButton>
+                  <ShadcnButton
                     type="button"
-                    className="btn-primary inline-flex h-9 items-center justify-center gap-1.5 !px-3 !py-1.5 text-sm"
                     onClick={() => void handleConfirmAssetTransfer()}
                     disabled={assetTransferLoading}
                   >
                     {assetTransferLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />}
                     确定转移
-                  </button>
+                  </ShadcnButton>
                 </div>
               </div>
             ) : null}
 
             {assetTransferStep === 'result' && assetTransferResult ? (
               <div className="mt-4 grid gap-4">
-                <div className="rounded-xl border border-success/40 bg-success/10 px-4 py-4 text-center">
-                  <CheckCircle2 className="mx-auto h-8 w-8 text-success" aria-hidden="true" />
+                <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-4 text-center">
+                  <CheckCircle2 className="mx-auto h-8 w-8 text-emerald-600" aria-hidden="true" />
                   <div className="mt-2 text-sm font-semibold text-foreground">资产转移完成</div>
-                  <div className="mt-1 text-xs text-secondary">
+                  <div className="mt-1 text-xs text-muted-foreground">
                     已迁移 {assetTransferResult.totalRecords} 条源数据到 {assetTransferResult.targetAccountName}
                   </div>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {Object.entries(assetTransferResult.transferredCounts || {}).map(([key, value]) => (
                     <div key={key} className="rounded-lg border border-border/70 px-3 py-2 text-xs">
-                      <span className="text-secondary">{formatTransferCountLabel(key)}</span>
+                      <span className="text-muted-foreground">{formatTransferCountLabel(key)}</span>
                       <span className="ml-2 font-semibold text-foreground">{value}</span>
                     </div>
                   ))}
                 </div>
                 <div className="flex justify-end">
-                  <button type="button" className="btn-primary h-9 !px-3 !py-1.5 text-sm" onClick={closeAssetTransfer}>
+                  <ShadcnButton type="button" onClick={closeAssetTransfer}>
                     完成
-                  </button>
+                  </ShadcnButton>
                 </div>
               </div>
             ) : null}
@@ -4788,7 +4820,7 @@ const PortfolioPage: React.FC = () => {
           onClick={() => setActiveTagTarget(null)}
         >
           <div
-            className="w-full max-w-sm rounded-2xl border border-border/70 bg-card px-5 py-4 text-foreground shadow-soft-card-strong"
+            className="w-full max-w-sm rounded-xl border border-border/70 bg-card px-5 py-4 text-foreground shadow-none"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3">
@@ -4796,42 +4828,44 @@ const PortfolioPage: React.FC = () => {
                 <h3 id="portfolio-tag-picker-title" className="text-sm font-semibold text-foreground">
                   选择持仓标签
                 </h3>
-                <p className="mt-1 truncate text-xs text-secondary">
+                <p className="mt-1 truncate text-xs text-muted-foreground">
                   {getPositionDisplayName(activeTagTarget.row)}
                 </p>
               </div>
-              <button
+              <ShadcnButton
                 type="button"
-                className="btn-secondary shrink-0 !px-2.5 !py-1 !text-xs"
+                variant="outline"
+                size="sm"
+                className="shrink-0"
                 onClick={() => setActiveTagTarget(null)}
               >
                 取消
-              </button>
+              </ShadcnButton>
             </div>
             <div className="mt-4 grid gap-2">
               <button
                 type="button"
-                className={`portfolio-tag-picker-option ${activeTagTarget.row.tagId == null ? 'portfolio-tag-picker-option-active' : ''}`}
+                className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors hover:bg-muted ${activeTagTarget.row.tagId == null ? 'bg-muted text-foreground' : 'bg-background text-muted-foreground'}`}
                 onClick={() => void handleProductTagChange(activeTagTarget.row, '')}
                 disabled={tagUpdatingKey === activeTagTarget.productKey}
               >
-                <span className="portfolio-tag-picker-dot border border-border/70 bg-transparent" />
+                <span className="h-2.5 w-2.5 rounded-full border bg-transparent" />
                 <span>无标签</span>
               </button>
               {portfolioTags.map((tag) => (
                 <button
                   key={tag.id}
                   type="button"
-                  className={`portfolio-tag-picker-option ${activeTagTarget.row.tagId === tag.id ? 'portfolio-tag-picker-option-active' : ''}`}
+                  className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors hover:bg-muted ${activeTagTarget.row.tagId === tag.id ? 'bg-muted text-foreground' : 'bg-background text-muted-foreground'}`}
                   onClick={() => void handleProductTagChange(activeTagTarget.row, String(tag.id))}
                   disabled={tagUpdatingKey === activeTagTarget.productKey}
                 >
-                  <span className="portfolio-tag-picker-dot" style={{ background: tag.color }} />
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: tag.color }} />
                   <span>{tag.name}</span>
                 </button>
               ))}
               {portfolioTags.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-border/70 px-3 py-4 text-center text-xs text-secondary">
+                <p className="rounded-xl border border-dashed border-border/70 px-3 py-4 text-center text-xs text-muted-foreground">
                   先在设置中添加标签。
                 </p>
               ) : null}
@@ -4846,14 +4880,14 @@ const PortfolioPage: React.FC = () => {
           aria-modal="true"
           aria-labelledby="bank-wealth-search-title"
         >
-          <div className="w-full max-w-xl rounded-2xl border border-border/70 bg-card px-5 py-4 text-foreground shadow-soft-card-strong">
+          <div className="w-full max-w-xl rounded-xl border border-border/70 bg-card px-5 py-4 text-foreground shadow-none">
             {bankWealthSearchLoading ? (
               <div className="text-center">
                 <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary/25 border-t-primary" />
                 <h3 id="bank-wealth-search-title" className="mt-3 text-sm font-semibold text-foreground">
                   正在查询银行理财
                 </h3>
-                <p className="mt-1 text-xs leading-5 text-secondary">
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
                   正在通过问财匹配产品信息，请稍候。
                 </p>
               </div>
@@ -4864,12 +4898,12 @@ const PortfolioPage: React.FC = () => {
                     <h3 id="bank-wealth-search-title" className="text-sm font-semibold text-foreground">
                       选择银行理财产品
                     </h3>
-                    <p className="mt-1 text-xs leading-5 text-secondary">
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
                       确认后将填入产品信息，并继续查询交易日单位净值。
                     </p>
                   </div>
                   {bankWealthNavLoading ? (
-                    <span className="shrink-0 text-xs text-secondary">净值查询中...</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">净值查询中...</span>
                   ) : null}
                 </div>
                 <div className="mt-4 max-h-[360px] space-y-2 overflow-y-auto pr-1">
@@ -4883,7 +4917,7 @@ const PortfolioPage: React.FC = () => {
                         className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
                           selected
                             ? 'border-primary bg-primary/8 text-foreground'
-                            : 'border-border/70 bg-muted/30 text-secondary hover:border-primary/50 hover:text-foreground'
+                            : 'border-border/70 bg-muted/30 text-muted-foreground hover:border-primary/50 hover:text-foreground'
                         }`}
                         onClick={() => setSelectedBankWealthCandidateKey(candidateKey)}
                         disabled={bankWealthNavLoading}
@@ -4899,9 +4933,10 @@ const PortfolioPage: React.FC = () => {
                   })}
                 </div>
                 <div className="mt-4 flex justify-end gap-2">
-                  <button
+                  <ShadcnButton
                     type="button"
-                    className="btn-secondary h-9 w-24 !px-3 !py-1.5 text-sm"
+                    variant="outline"
+                    className="w-24"
                     onClick={() => {
                       setBankWealthCandidateModalOpen(false);
                       setSelectedBankWealthCandidateKey('');
@@ -4909,15 +4944,15 @@ const PortfolioPage: React.FC = () => {
                     disabled={bankWealthNavLoading}
                   >
                     取消
-                  </button>
-                  <button
+                  </ShadcnButton>
+                  <ShadcnButton
                     type="button"
-                    className="btn-primary h-9 w-24 !px-3 !py-1.5 text-sm"
+                    className="w-24"
                     onClick={() => void handleConfirmBankWealthCandidate()}
                     disabled={bankWealthNavLoading || !selectedBankWealthCandidateKey}
                   >
                     {bankWealthNavLoading ? '查询中...' : '确定'}
-                  </button>
+                  </ShadcnButton>
                 </div>
               </>
             )}
@@ -4931,14 +4966,14 @@ const PortfolioPage: React.FC = () => {
           aria-modal="true"
           aria-labelledby="advisory-search-title"
         >
-          <div className="w-full max-w-xl rounded-2xl border border-border/70 bg-card px-5 py-4 text-foreground shadow-soft-card-strong">
+          <div className="w-full max-w-xl rounded-xl border border-border/70 bg-card px-5 py-4 text-foreground shadow-none">
             {advisorySearchLoading ? (
               <div className="text-center">
                 <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary/25 border-t-primary" />
                 <h3 id="advisory-search-title" className="mt-3 text-sm font-semibold text-foreground">
                   正在查询投顾产品
                 </h3>
-                <p className="mt-1 text-xs leading-5 text-secondary">
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
                   正在通过盈米匹配产品信息，请稍候。
                 </p>
               </div>
@@ -4949,12 +4984,12 @@ const PortfolioPage: React.FC = () => {
                     <h3 id="advisory-search-title" className="text-sm font-semibold text-foreground">
                       选择投顾产品
                     </h3>
-                    <p className="mt-1 text-xs leading-5 text-secondary">
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
                       确认后将填入产品信息；投顾组合会继续按流水日期查询历史净值。
                     </p>
                   </div>
                   {advisoryNavLoading ? (
-                    <span className="shrink-0 text-xs text-secondary">历史净值查询中...</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">历史净值查询中...</span>
                   ) : null}
                 </div>
                 <div className="mt-4 max-h-[360px] space-y-2 overflow-y-auto pr-1">
@@ -4968,7 +5003,7 @@ const PortfolioPage: React.FC = () => {
                         className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
                           selected
                             ? 'border-primary bg-primary/8 text-foreground'
-                            : 'border-border/70 bg-muted/30 text-secondary hover:border-primary/50 hover:text-foreground'
+                            : 'border-border/70 bg-muted/30 text-muted-foreground hover:border-primary/50 hover:text-foreground'
                         }`}
                         onClick={() => setSelectedAdvisoryCandidateKey(candidateKey)}
                         disabled={advisoryNavLoading}
@@ -4988,9 +5023,10 @@ const PortfolioPage: React.FC = () => {
                   })}
                 </div>
                 <div className="mt-4 flex justify-end gap-2">
-                  <button
+                  <ShadcnButton
                     type="button"
-                    className="btn-secondary h-9 w-24 !px-3 !py-1.5 text-sm"
+                    variant="outline"
+                    className="w-24"
                     onClick={() => {
                       setAdvisoryCandidateModalOpen(false);
                       setSelectedAdvisoryCandidateKey('');
@@ -4998,15 +5034,15 @@ const PortfolioPage: React.FC = () => {
                     disabled={advisoryNavLoading}
                   >
                     取消
-                  </button>
-                  <button
+                  </ShadcnButton>
+                  <ShadcnButton
                     type="button"
-                    className="btn-primary h-9 w-24 !px-3 !py-1.5 text-sm"
+                    className="w-24"
                     onClick={() => void handleConfirmAdvisoryCandidate()}
                     disabled={advisoryNavLoading || !selectedAdvisoryCandidateKey}
                   >
                     {advisoryNavLoading ? '查询中...' : '确定'}
-                  </button>
+                  </ShadcnButton>
                 </div>
               </>
             )}
@@ -5021,10 +5057,10 @@ const PortfolioPage: React.FC = () => {
         backdropClassName="bg-background/56 backdrop-blur-[2px]"
       >
         <div className="space-y-4">
-          <div className="border-b border-white/10 pb-4">
+            <div className="border-b pb-4">
             <div>
               <h2 className="text-base font-semibold text-foreground">资产分析报告</h2>
-              <p className="mt-1 text-xs text-secondary">
+              <p className="mt-1 text-xs text-muted-foreground">
                 {portfolioAnalysis
                   ? `${portfolioAnalysis.asOf} · ${portfolioAnalysis.modelUsed || 'LLM'}`
                   : '尚未生成当前快照的资产分析'}
@@ -5034,7 +5070,7 @@ const PortfolioPage: React.FC = () => {
 
           {portfolioAnalysis ? (
             <div
-              className="home-markdown-prose prose prose-invert prose-sm max-w-none
+              className="prose prose-sm max-w-none
                 prose-headings:text-foreground prose-headings:font-semibold prose-headings:mt-4 prose-headings:mb-2
                 prose-h2:text-lg prose-h3:text-base
                 prose-p:leading-relaxed prose-p:mb-3 prose-p:last:mb-0

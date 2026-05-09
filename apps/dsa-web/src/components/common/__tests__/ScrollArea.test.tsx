@@ -18,6 +18,6 @@ describe('ScrollArea', () => {
     expect(viewport).toBeInTheDocument();
     expect(viewport).toHaveClass('inner-viewport');
     expect(viewport).toHaveTextContent('scroll content');
-    expect(viewport.parentElement).toHaveClass('outer-shell');
+    expect(viewport.closest('[data-slot="scroll-area"]')).toHaveClass('outer-shell');
   });
 });

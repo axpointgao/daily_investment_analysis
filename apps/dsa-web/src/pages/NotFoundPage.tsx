@@ -25,11 +25,11 @@ const NotFoundPage: React.FC = () => {
       </div>
 
       <h1 className="text-2xl font-bold text-foreground mb-2">页面未找到</h1>
-      <p className="text-muted-text mb-8">抱歉，您访问的页面不存在或已被移动</p>
+      <p className="text-muted-foreground mb-8">抱歉，您访问的页面不存在或已被移动</p>
 
       <button 
         type="button"
-        className="btn-primary flex items-center gap-2"
+        className="inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground flex items-center gap-2"
         onClick={() => navigate('/')}
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

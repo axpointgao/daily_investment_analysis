@@ -44,8 +44,8 @@ describe('LoginPage', () => {
 
     expect(await screen.findByText('两次输入的密码不一致')).toBeInTheDocument();
     expect(login).not.toHaveBeenCalled();
-    expect(screen.getByLabelText('管理员密码')).toHaveAttribute('data-appearance', 'login');
-    expect(screen.getByLabelText('确认密码')).toHaveAttribute('data-appearance', 'login');
+    expect(screen.getByLabelText('管理员密码')).not.toHaveAttribute('data-appearance');
+    expect(screen.getByLabelText('确认密码')).not.toHaveAttribute('data-appearance');
   });
 
   it('navigates to redirect after a successful login', async () => {
@@ -58,10 +58,10 @@ describe('LoginPage', () => {
     render(<LoginPage />);
 
     fireEvent.change(screen.getByLabelText('登录密码'), { target: { value: 'passwd6' } });
-    fireEvent.click(screen.getByRole('button', { name: '授权进入工作台' }));
+    fireEvent.click(screen.getByRole('button', { name: '登录' }));
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/settings', { replace: true }));
-    expect(screen.getByLabelText('登录密码')).toHaveAttribute('data-appearance', 'login');
+    expect(screen.getByLabelText('登录密码')).not.toHaveAttribute('data-appearance');
   });
 
   it('does not override login theme tokens inline so light mode can take effect', () => {

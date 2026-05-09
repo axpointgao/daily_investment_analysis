@@ -44,7 +44,7 @@ describe('HistoryList', () => {
     expect(screen.getByText('暂无历史分析记录')).toBeInTheDocument();
     expect(screen.getByText('完成首次分析后，这里会保留最近结果。')).toBeInTheDocument();
     expect(screen.getByText('历史分析')).toBeInTheDocument();
-    expect(container.querySelector('.glass-card')).toBeTruthy();
+    expect(container.querySelector('.rounded-xl.border.bg-card')).toBeTruthy();
   });
 
   it('renders selected count and forwards item interactions', () => {

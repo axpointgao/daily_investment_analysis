@@ -1,5 +1,5 @@
 import type React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveWebBuildInfo } from '../../utils/constants';
 import SettingsPage from '../SettingsPage';
@@ -20,6 +20,10 @@ const {
   applyPartialUpdate,
   refreshAfterExternalSave,
   refreshStatus,
+  listTags,
+  createTag,
+  updateTag,
+  deleteTag,
   useAuthMock,
   useSystemConfigMock,
   webBuildInfoMock,
@@ -39,6 +43,10 @@ const {
   applyPartialUpdate: vi.fn(),
   refreshAfterExternalSave: vi.fn(),
   refreshStatus: vi.fn(),
+  listTags: vi.fn(),
+  createTag: vi.fn(),
+  updateTag: vi.fn(),
+  deleteTag: vi.fn(),
   useAuthMock: vi.fn(),
   useSystemConfigMock: vi.fn(),
   webBuildInfoMock: {
@@ -61,6 +69,15 @@ vi.mock('../../api/systemConfig', () => ({
   systemConfigApi: {
     exportDesktopEnv: (...args: unknown[]) => exportDesktopEnv(...args),
     importDesktopEnv: (...args: unknown[]) => importDesktopEnv(...args),
+  },
+}));
+
+vi.mock('../../api/portfolio', () => ({
+  portfolioApi: {
+    listTags,
+    createTag,
+    updateTag,
+    deleteTag,
   },
 }));
 
@@ -349,6 +366,10 @@ describe('SettingsPage', () => {
     });
     desktopOpenReleasePage.mockResolvedValue(true);
     desktopOnUpdateStateChange.mockImplementation(() => () => undefined);
+    listTags.mockResolvedValue({ tags: [] });
+    createTag.mockResolvedValue({ id: 1, name: '长期核心', color: '#FDCDC5' });
+    updateTag.mockResolvedValue({ id: 1, name: '长期核心', color: '#FDF4BF' });
+    deleteTag.mockResolvedValue({ deleted: 1 });
     useAuthMock.mockReturnValue({
       authEnabled: true,
       passwordChangeable: true,
@@ -548,6 +569,7 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
 
     expect(screen.getByText('AGENT_ORCHESTRATOR_TIMEOUT_S')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '展开' }));
     expect(screen.getByText('AGENT_DEEP_RESEARCH_BUDGET')).toBeInTheDocument();
     expect(screen.getByText('AGENT_EVENT_MONITOR_ENABLED')).toBeInTheDocument();
   });
@@ -585,6 +607,40 @@ describe('SettingsPage', () => {
 
     expect(refreshAfterExternalSave).toHaveBeenCalledWith(['STOCK_LIST']);
     expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders portfolio tag color selectors as swatches and existing tags as badges', async () => {
+    listTags.mockResolvedValue({
+      tags: [
+        {
+          id: 10,
+          name: '长期核心',
+          color: '#FDF4BF',
+          sortOrder: 0,
+          createdAt: '2026-03-19T00:00:00Z',
+          updatedAt: '2026-03-19T00:00:00Z',
+        },
+      ],
+    });
+    useSystemConfigMock.mockReturnValue(buildSystemConfigState({ activeCategory: 'base' }));
+
+    render(<SettingsPage />);
+
+    const section = (await screen.findByRole('heading', { name: '持仓标签' })).closest('section');
+    expect(section).not.toBeNull();
+    await waitFor(() => expect(listTags).toHaveBeenCalled());
+
+    const newColorSelect = within(section as HTMLElement).getByRole('combobox', { name: '新标签颜色' });
+    expect(newColorSelect).toHaveTextContent('#FDCDC5');
+    expect(within(section as HTMLElement).queryByText('颜色 1')).not.toBeInTheDocument();
+
+    const tagBadge = within(section as HTMLElement).getByText('长期核心').closest('[data-slot="badge"]');
+    expect(tagBadge).not.toBeNull();
+    expect(tagBadge).toHaveStyle({ backgroundColor: '#FDF4BF' });
+    expect(within(section as HTMLElement).getByRole('combobox', { name: '选择 长期核心 标签颜色' })).toHaveTextContent('#FDF4BF');
+
+    fireEvent.pointerDown(newColorSelect);
+    expect(await screen.findAllByText('#FDF4BF')).not.toHaveLength(0);
   });
 
   it('refreshes server state after llm channel editor saves', async () => {

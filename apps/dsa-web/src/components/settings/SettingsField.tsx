@@ -55,7 +55,7 @@ function renderFieldControl(
   controlId: string,
 ) {
   const schema = item.schema;
-  const commonClass = 'input-surface input-focus-glow h-11 w-full rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+  const commonClass = 'h-11 w-full rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
   const controlType = schema?.uiControl ?? 'text';
   const isMultiValue = isMultiValueField(item);
 
@@ -95,7 +95,7 @@ function renderFieldControl(
           disabled={disabled || !schema?.isEditable}
           onChange={(event) => onChange(event.target.checked ? 'true' : 'false')}
         />
-        <span className="text-sm text-secondary-text">{checked ? '已启用' : '未启用'}</span>
+        <span className="text-sm text-muted-foreground">{checked ? '已启用' : '未启用'}</span>
       </label>
     );
   }
@@ -129,9 +129,9 @@ function renderFieldControl(
               </div>
               <Button
                 type="button"
-                variant="settings-secondary"
+                variant="outline"
                 size="lg"
-                className="px-3 text-xs text-muted-text shadow-none hover:text-danger"
+                className="px-3 text-xs text-muted-foreground shadow-none hover:text-destructive"
                 disabled={disabled || !schema?.isEditable || values.length <= 1}
                 onClick={() => {
                   const nextValues = values.filter((_, rowIndex) => rowIndex !== index);
@@ -146,7 +146,7 @@ function renderFieldControl(
           <div className="flex items-center gap-2">
             <Button
               type="button"
-              variant="settings-secondary"
+              variant="outline"
               size="sm"
               className="text-xs shadow-none"
               disabled={disabled || !schema?.isEditable}
@@ -206,9 +206,9 @@ export const SettingsField: React.FC<SettingsFieldProps> = ({
   return (
     <div
       className={cn(
-        'rounded-[1.15rem] border bg-[var(--settings-surface)] p-4 shadow-soft-card transition-[background-color,border-color,box-shadow] duration-200',
-        hasError ? 'border-danger/40 hover:border-danger/55' : 'border-[var(--settings-border)] hover:border-[var(--settings-border-strong)]',
-        'hover:bg-[var(--settings-surface-hover)]',
+        'rounded-[1.15rem] border bg-[var(--bg-card)] p-4 shadow-none transition-[background-color,border-color,box-shadow] duration-200',
+        hasError ? 'border-destructive/40 hover:border-destructive/55' : 'border-[var(--border)] hover:border-[var(--border)]',
+        'hover:bg-[var(--muted)]',
       )}
     >
       <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -229,7 +229,7 @@ export const SettingsField: React.FC<SettingsFieldProps> = ({
 
       {description ? (
         <Tooltip content={description}>
-          <p className="mb-3 inline-flex max-w-full text-xs leading-5 text-muted-text">
+          <p className="mb-3 inline-flex max-w-full text-xs leading-5 text-muted-foreground">
             {description}
           </p>
         </Tooltip>
@@ -248,7 +248,7 @@ export const SettingsField: React.FC<SettingsFieldProps> = ({
       </div>
 
       {schema?.isSensitive ? (
-        <p className="mt-3 text-[11px] leading-5 text-secondary-text">
+        <p className="mt-3 text-[11px] leading-5 text-muted-foreground">
           敏感内容默认隐藏，可点击眼睛图标查看明文。
           {isMultiValue ? ' 支持添加多个输入框进行增删。' : ''}
         </p>
@@ -259,7 +259,7 @@ export const SettingsField: React.FC<SettingsFieldProps> = ({
           {issues.map((issue, index) => (
             <p
               key={`${issue.code}-${issue.key}-${index}`}
-              className={issue.severity === 'error' ? 'text-xs text-danger' : 'text-xs text-warning'}
+              className={issue.severity === 'error' ? 'text-xs text-destructive' : 'text-xs text-amber-600'}
             >
               {issue.message}
             </p>

@@ -24,7 +24,7 @@ export const Collapsible: React.FC<CollapsibleProps> = ({
   return (
     <div
       className={cn(
-        'overflow-hidden rounded-2xl border border-subtle bg-card/70 shadow-soft-card transition-all duration-300',
+        'overflow-hidden rounded-xl border border-border bg-card/70 shadow-none transition-all duration-300',
         'hover:border-accent',
         className,
       )}
@@ -32,14 +32,14 @@ export const Collapsible: React.FC<CollapsibleProps> = ({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-hover"
+        className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-muted"
       >
         <div className="flex items-center gap-3">
-          {icon && <span className="text-cyan">{icon}</span>}
+          {icon && <span className="text-primary">{icon}</span>}
           <span className="font-medium text-foreground">{title}</span>
         </div>
         <svg
-          className={cn('h-5 w-5 text-secondary-text transition-transform duration-300', isOpen && 'rotate-180')}
+          className={cn('h-5 w-5 text-muted-foreground transition-transform duration-300', isOpen && 'rotate-180')}
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -51,7 +51,7 @@ export const Collapsible: React.FC<CollapsibleProps> = ({
       <div
         className={cn('overflow-hidden transition-all duration-300 ease-in-out', isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0')}
       >
-        <div className="border-t border-subtle px-4 pb-4 pt-2">
+        <div className="border-t border-border px-4 pb-4 pt-2">
           {children}
         </div>
       </div>

@@ -8,7 +8,7 @@ import LoginPage from './pages/LoginPage';
 import NotFoundPage from './pages/NotFoundPage';
 import ChatPage from './pages/ChatPage';
 import PortfolioPage from './pages/PortfolioPage';
-import { ApiErrorAlert, Shell } from './components/common';
+import { ApiErrorAlert, Button, Shell } from './components/common';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { useAgentChatStore } from './stores/agentChatStore';
 import './App.css';
@@ -23,25 +23,21 @@ const AppContent: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-base">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan/20 border-t-cyan" />
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-primary" />
       </div>
     );
   }
 
   if (loadError) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-base px-4">
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background px-4">
         <div className="w-full max-w-lg">
           <ApiErrorAlert error={loadError} />
         </div>
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={() => void refreshStatus()}
-        >
+        <Button type="button" onClick={() => void refreshStatus()}>
           重试
-        </button>
+        </Button>
       </div>
     );
   }

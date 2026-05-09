@@ -68,7 +68,7 @@ export function SuggestionsList({
               <span className="text-sm font-medium text-primary-text">
                 {suggestion.nameZh}
               </span>
-              <span className="text-sm text-secondary-text">
+              <span className="text-sm text-muted-foreground">
                 {suggestion.displayCode}
               </span>
             </div>
@@ -84,11 +84,11 @@ export function SuggestionsList({
 
 // Helper component: Market badge
 const MARKET_BADGE_CONFIG = {
-  CN: { label: 'A股', className: 'border-danger/25 bg-danger/10 text-danger' },
-  HK: { label: '港股', className: 'border-success/25 bg-success/10 text-success' },
-  US: { label: '美股', className: 'border-cyan/25 bg-cyan/10 text-cyan' },
-  INDEX: { label: '指数', className: 'border-purple/25 bg-purple/10 text-purple' },
-  ETF: { label: 'ETF', className: 'border-warning/25 bg-warning/10 text-warning' },
+  CN: { label: 'A股', className: 'border-destructive/25 bg-destructive/10 text-destructive' },
+  HK: { label: '港股', className: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600' },
+  US: { label: '美股', className: 'border-primary/25 bg-primary/10 text-primary' },
+  INDEX: { label: '指数', className: 'border-muted/25 bg-muted/10 text-muted-foreground' },
+  ETF: { label: 'ETF', className: 'border-amber-500/25 bg-amber-500/10 text-amber-600' },
   BSE: { label: '北交所', className: 'border-orange-500/25 bg-orange-500/10 text-orange-500' },
 } as const;
 
@@ -109,10 +109,10 @@ function MarketBadge({ market }: { market: string }) {
 // Helper component: Match type badge
 function MatchTypeBadge({ matchType }: { matchType: string }) {
   const configMap = {
-    exact: { label: '精确', className: 'border-cyan/25 bg-cyan/10 text-cyan' },
-    prefix: { label: '前缀', className: 'border-purple/25 bg-purple/10 text-purple' },
-    contains: { label: '包含', className: 'border-warning/25 bg-warning/10 text-warning' },
-    fuzzy: { label: '模糊', className: 'border-border/55 bg-elevated/75 text-muted-text' },
+    exact: { label: '精确', className: 'border-primary/25 bg-primary/10 text-primary' },
+    prefix: { label: '前缀', className: 'border-muted/25 bg-muted/10 text-muted-foreground' },
+    contains: { label: '包含', className: 'border-amber-500/25 bg-amber-500/10 text-amber-600' },
+    fuzzy: { label: '模糊', className: 'border-border/55 bg-card/75 text-muted-foreground' },
   };
 
   const config = configMap[matchType as keyof typeof configMap] || configMap.fuzzy;

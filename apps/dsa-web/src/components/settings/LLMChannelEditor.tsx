@@ -233,7 +233,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
         : 'default';
 
   return (
-    <div className="mb-2 overflow-hidden rounded-xl border border-[var(--settings-border)] bg-[var(--settings-surface)] shadow-soft-card transition-[background-color,border-color,box-shadow] duration-200 hover:border-[var(--settings-border-strong)] hover:bg-[var(--settings-surface-hover)]">
+    <div className="mb-2 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-card)] shadow-none transition-[background-color,border-color,box-shadow] duration-200 hover:border-[var(--border)] hover:bg-[var(--muted)]">
       <div
         className="flex cursor-pointer select-none items-center gap-2.5 px-4 py-3 transition-colors"
         onClick={() => onToggleExpand(index)}
@@ -246,13 +246,13 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
         role="button"
         tabIndex={0}
       >
-        <span className={`w-4 shrink-0 text-[11px] text-muted-text transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
+        <span className={`w-4 shrink-0 text-[11px] text-muted-foreground transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
 
         <input
           type="checkbox"
           checked={channel.enabled}
           disabled={busy}
-          className="settings-input-checkbox h-4 w-4 shrink-0 rounded border-border/70 bg-base"
+          className="accent-primary h-4 w-4 shrink-0 rounded border-border/70 bg-background"
           onClick={(e) => e.stopPropagation()}
           onChange={(e) => onUpdate(index, 'enabled', e.target.checked)}
         />
@@ -264,7 +264,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
               {channel.protocol}
             </Badge>
           </div>
-          <p className="mt-0.5 truncate text-[11px] text-secondary-text">
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
             {modelCount > 0 ? `${modelCount} 个模型已配置` : '未配置模型'}
           </p>
         </div>
@@ -305,7 +305,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
               type="button"
               variant="ghost"
               size="sm"
-              className="h-8 shrink-0 px-2 text-xs text-muted-text hover:text-rose-300"
+              className="h-8 shrink-0 px-2 text-xs text-muted-foreground hover:text-rose-300"
               disabled={busy}
               onClick={(e) => {
                 e.stopPropagation();
@@ -319,7 +319,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
       </div>
 
       {expanded ? (
-        <div className="settings-surface-overlay-soft space-y-4 px-4 py-4">
+        <div className="bg-muted space-y-4 px-4 py-4">
           <div className="grid gap-2 sm:grid-cols-2">
             <Input
               label="渠道名称"
@@ -365,11 +365,11 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
             placeholder={channel.protocol === 'ollama' ? '本地 Ollama 可留空' : '支持多个 Key 逗号分隔'}
           />
 
-          <div className="space-y-3 rounded-xl border border-[var(--settings-border)] bg-[var(--settings-surface-hover)] p-3">
+          <div className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--muted)] p-3">
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
-                variant="settings-secondary"
+                variant="outline"
                 size="sm"
                 className="px-3 text-[11px] shadow-none"
                 disabled={busy}
@@ -379,17 +379,17 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
               </Button>
               <span className={`text-xs ${
                 discoveryState?.status === 'success'
-                  ? 'text-success'
+                  ? 'text-emerald-600'
                   : discoveryState?.status === 'error'
-                    ? 'text-danger'
-                    : 'text-muted-text'
+                    ? 'text-destructive'
+                    : 'text-muted-foreground'
               }`}
               >
                 {discoveryState?.text || '支持 `/models` 的 OpenAI Compatible 渠道可自动拉取模型。'}
               </span>
             </div>
             {discoveryState?.hint ? (
-              <p className="text-[11px] text-secondary-text">
+              <p className="text-[11px] text-muted-foreground">
                 {discoveryState.hint}
               </p>
             ) : null}
@@ -397,9 +397,9 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
             {discoveredModels.length > 0 ? (
               <div>
                 <label className="mb-2 block text-sm font-medium text-foreground">可选模型（可多选）</label>
-                <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-[var(--settings-border)] bg-[var(--settings-surface)] p-3">
+                <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-3">
                   {discoveredModels.map((model) => (
-                    <label key={model} className="flex items-center gap-2 text-sm text-secondary-text">
+                    <label key={model} className="flex items-center gap-2 text-sm text-muted-foreground">
                       <input
                         type="checkbox"
                         checked={selectedModels.some((selectedModel) => (
@@ -407,7 +407,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                         ))}
                         disabled={busy}
                         onChange={() => onUpdate(index, 'models', toggleModelSelection(channel.models, model, channel.protocol))}
-                        className="settings-input-checkbox h-4 w-4 rounded border-border/70 bg-base"
+                        className="accent-primary h-4 w-4 rounded border-border/70 bg-background"
                       />
                       <span>{model}</span>
                     </label>
@@ -430,7 +430,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
             />
 
             {manualOnlyModels.length > 0 ? (
-              <p className="text-[11px] text-secondary-text">
+              <p className="text-[11px] text-muted-foreground">
                 额外手动模型：{manualOnlyModels.join('，')}
               </p>
             ) : null}
@@ -439,7 +439,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
           <div className="flex items-center gap-2 pt-1">
             <Button
               type="button"
-              variant="settings-secondary"
+              variant="outline"
               size="sm"
               className="px-3 text-[11px] shadow-none"
               disabled={busy}
@@ -451,16 +451,16 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
               <div className="space-y-1">
                 <span className={`block text-xs ${
                   testState.status === 'success'
-                    ? 'text-success'
+                    ? 'text-emerald-600'
                     : testState.status === 'error'
-                      ? 'text-danger'
-                      : 'text-muted-text'
+                      ? 'text-destructive'
+                      : 'text-muted-foreground'
                 }`}
                 >
                   {testState.text}
                 </span>
                 {testState.hint ? (
-                  <p className="text-[11px] text-secondary-text">
+                  <p className="text-[11px] text-muted-foreground">
                     {testState.hint}
                   </p>
                 ) : null}
@@ -1281,33 +1281,33 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
     <div className="space-y-4">
       <button
         type="button"
-        className="flex w-full items-center justify-between rounded-[1.35rem] border border-[var(--settings-border)] bg-[var(--settings-surface)] px-5 py-4 text-left shadow-soft-card transition-[background-color,border-color,box-shadow] duration-200 hover:border-[var(--settings-border-strong)] hover:bg-[var(--settings-surface-hover)]"
+        className="flex w-full items-center justify-between rounded-[1.35rem] border border-[var(--border)] bg-[var(--bg-card)] px-5 py-4 text-left shadow-none transition-[background-color,border-color,box-shadow] duration-200 hover:border-[var(--border)] hover:bg-[var(--muted)]"
         onClick={() => setIsCollapsed((previous) => !previous)}
       >
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <h3 className="text-base font-semibold text-foreground">AI 模型配置</h3>
-            <Badge variant="info" className="settings-accent-badge">渠道管理</Badge>
+            <Badge variant="info" className="">渠道管理</Badge>
           </div>
-          <p className="text-xs text-muted-text">
+          <p className="text-xs text-muted-foreground">
             添加服务商渠道后可自动获取模型列表并多选，也可继续手动填写。配置会自动同步到 .env 文件。
           </p>
         </div>
-        <span className="text-xs text-muted-text">{isCollapsed ? '▶ 展开' : '▼ 收起'}</span>
+        <span className="text-xs text-muted-foreground">{isCollapsed ? '▶ 展开' : '▼ 收起'}</span>
       </button>
 
       {!isCollapsed ? (
         <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-          <div className="rounded-[1.35rem] border border-[var(--settings-border)] bg-[var(--settings-surface)] p-4 shadow-soft-card">
+          <div className="rounded-[1.35rem] border border-[var(--border)] bg-[var(--bg-card)] p-4 shadow-none">
             <div className="mb-3 flex items-center justify-between">
               <div>
                 <h4 className="text-sm font-medium text-foreground">快速添加渠道</h4>
-                <p className="mt-1 text-xs text-secondary-text">先选择预设服务商，再一键创建配置草稿。</p>
+                <p className="mt-1 text-xs text-muted-foreground">先选择预设服务商，再一键创建配置草稿。</p>
               </div>
-              <Badge variant="default" className="border-[var(--settings-border)] bg-[var(--settings-surface-hover)] text-muted-text">{channels.length} 个渠道</Badge>
+              <Badge variant="default" className="border-[var(--border)] bg-[var(--muted)] text-muted-foreground">{channels.length} 个渠道</Badge>
             </div>
             <div className="flex items-center gap-2">
-              <Button type="button" variant="settings-primary" className="whitespace-nowrap" disabled={busy} onClick={addChannel}>
+              <Button type="button" variant="primary" className="whitespace-nowrap" disabled={busy} onClick={addChannel}>
                 + 添加渠道
               </Button>
               <Select
@@ -1326,16 +1326,16 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
 
           <div className="space-y-2">
             <div className="flex items-center justify-between px-1">
-              <span className="text-xs font-medium uppercase tracking-wider text-muted-text">渠道列表</span>
+              <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">渠道列表</span>
               {channels.length > 0 ? (
-                <span className="text-[10px] text-muted-text">{channels.filter((c) => c.enabled).length}/{channels.length} 已启用</span>
+                <span className="text-[10px] text-muted-foreground">{channels.filter((c) => c.enabled).length}/{channels.length} 已启用</span>
               ) : null}
             </div>
 
             {channels.length === 0 ? (
-              <div className="settings-surface-overlay-muted rounded-[1.35rem] border border-dashed settings-border-strong px-4 py-10 text-center">
-                <p className="text-sm font-medium text-secondary-text">还没有渠道</p>
-                <p className="mt-1 text-xs text-muted-text">选择服务商预设后点击“添加渠道”即可开始配置。</p>
+              <div className="bg-muted rounded-[1.35rem] border border-dashed border-border px-4 py-10 text-center">
+                <p className="text-sm font-medium text-muted-foreground">还没有渠道</p>
+                <p className="mt-1 text-xs text-muted-foreground">选择服务商预设后点击“添加渠道”即可开始配置。</p>
               </div>
             ) : channels.map((channel, index) => (
               <ChannelRow
@@ -1358,16 +1358,16 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
           </div>
 
           {managesRuntimeConfig ? (
-            <div className="rounded-[1.35rem] border border-[var(--settings-border)] bg-[var(--settings-surface)] p-4 shadow-soft-card">
+            <div className="rounded-[1.35rem] border border-[var(--border)] bg-[var(--bg-card)] p-4 shadow-none">
               <div className="mb-4 flex items-center justify-between">
                 <div>
-                  <span className="settings-accent-text text-xs font-medium uppercase tracking-wider">运行时参数</span>
-                  <p className="mt-1 text-[11px] text-muted-text">主模型、备选模型、Vision 与 Temperature 会直接写入运行时配置。</p>
+                  <span className="text-primary text-xs font-medium uppercase tracking-wider">运行时参数</span>
+                  <p className="mt-1 text-[11px] text-muted-foreground">主模型、备选模型、Vision 与 Temperature 会直接写入运行时配置。</p>
                 </div>
-                <Badge variant="default" className="border-[var(--settings-border)] bg-[var(--settings-surface-hover)] text-muted-text">Runtime</Badge>
+                <Badge variant="default" className="border-[var(--border)] bg-[var(--muted)] text-muted-foreground">Runtime</Badge>
               </div>
               <div className="mb-4">
-                <label className="mb-1 block text-xs text-muted-text">Temperature</label>
+                <label className="mb-1 block text-xs text-muted-foreground">Temperature</label>
                 <div className="flex items-center gap-3">
                   <input
                     type="range"
@@ -1377,23 +1377,23 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
                     value={runtimeConfig.temperature}
                     disabled={busy}
                     onChange={(event) => setRuntimeConfig((previous) => ({ ...previous, temperature: event.target.value }))}
-                    className="settings-input-checkbox h-1.5 flex-1 cursor-pointer rounded-full bg-border/60"
+                    className="accent-primary h-1.5 flex-1 cursor-pointer rounded-full bg-border/60"
                   />
-                  <span className="w-8 text-right text-sm text-secondary-text">{runtimeConfig.temperature}</span>
+                  <span className="w-8 text-right text-sm text-muted-foreground">{runtimeConfig.temperature}</span>
                 </div>
-                <p className="mt-1 text-[11px] text-secondary-text">
+                <p className="mt-1 text-[11px] text-muted-foreground">
                   控制模型输出随机性，0 为确定性输出，2 为最大随机性，推荐 0.7。
                 </p>
               </div>
 
               {availableModels.length === 0 ? (
-                <div className="rounded-xl border border-dashed settings-border-strong settings-surface-overlay-soft px-3 py-2 text-xs text-muted-text">
+                <div className="rounded-xl border border-dashed border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
                   先添加至少一个已启用渠道并填写模型，下面的主模型 / 备选模型 / Vision 选项才会出现。
                 </div>
               ) : (
                 <div className="space-y-4">
                   <div>
-                    <label htmlFor="runtime-primary-model" className="mb-1 block text-xs text-muted-text">主模型</label>
+                    <label htmlFor="runtime-primary-model" className="mb-1 block text-xs text-muted-foreground">主模型</label>
                     <Select
                       id="runtime-primary-model"
                       value={runtimeConfig.primaryModel}
@@ -1405,7 +1405,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
                   </div>
 
                   <div>
-                    <label htmlFor="runtime-agent-primary-model" className="mb-1 block text-xs text-muted-text">Agent 主模型</label>
+                    <label htmlFor="runtime-agent-primary-model" className="mb-1 block text-xs text-muted-foreground">Agent 主模型</label>
                     <Select
                       id="runtime-agent-primary-model"
                       value={runtimeConfig.agentPrimaryModel}
@@ -1420,28 +1420,28 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
                   </div>
 
                   <div>
-                    <label className="mb-2 block text-xs text-muted-text">备选模型</label>
-                    <div className="space-y-2 rounded-xl border settings-border-strong settings-surface-overlay-soft p-3">
+                    <label className="mb-2 block text-xs text-muted-foreground">备选模型</label>
+                    <div className="space-y-2 rounded-xl border border-border bg-muted p-3">
                       {availableModels.map((model) => (
-                        <label key={model} className="flex items-center gap-2 text-sm text-secondary-text">
+                        <label key={model} className="flex items-center gap-2 text-sm text-muted-foreground">
                           <input
                             type="checkbox"
                             checked={runtimeConfig.fallbackModels.includes(model)}
                             disabled={busy || model === runtimeConfig.primaryModel}
                             onChange={() => toggleFallbackModel(model)}
-                            className="settings-input-checkbox h-4 w-4 rounded border-border/70 bg-base"
+                            className="accent-primary h-4 w-4 rounded border-border/70 bg-background"
                           />
                           <span>{model}</span>
                         </label>
                       ))}
                     </div>
-                    <p className="mt-1 text-[11px] text-secondary-text">
+                    <p className="mt-1 text-[11px] text-muted-foreground">
                       备选模型只会在主模型失败时使用。主模型不会重复加入备选模型。
                     </p>
                   </div>
 
                   <div>
-                    <label htmlFor="runtime-vision-model" className="mb-1 block text-xs text-muted-text">Vision 模型</label>
+                    <label htmlFor="runtime-vision-model" className="mb-1 block text-xs text-muted-foreground">Vision 模型</label>
                     <Select
                       id="runtime-vision-model"
                       value={runtimeConfig.visionModel}
@@ -1465,14 +1465,14 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
           <div className="flex flex-wrap items-center gap-3">
             <Button
               type="button"
-              variant="settings-primary"
+              variant="primary"
               glow
               disabled={busy || !hasChanges}
               onClick={() => void handleSave()}
             >
               {isSaving ? '保存中...' : managesRuntimeConfig ? '保存 AI 配置' : '保存渠道配置'}
             </Button>
-            {!hasChanges ? <span className="text-xs text-muted-text">当前没有未保存的改动</span> : null}
+            {!hasChanges ? <span className="text-xs text-muted-foreground">当前没有未保存的改动</span> : null}
           </div>
 
           {saveMessage?.type === 'success' ? (

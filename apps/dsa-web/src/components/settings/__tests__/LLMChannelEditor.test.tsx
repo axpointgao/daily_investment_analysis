@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LLMChannelEditor } from '../LLMChannelEditor';
 
@@ -20,6 +20,16 @@ vi.mock('../../../api/systemConfig', () => ({
     discoverLLMChannelModels: (...args: unknown[]) => discoverLLMChannelModels(...args),
   },
 }));
+
+const openSelect = (trigger: HTMLElement) => {
+  fireEvent.pointerDown(trigger);
+  fireEvent.click(trigger);
+};
+
+const chooseSelectOption = async (trigger: HTMLElement, optionName: string | RegExp) => {
+  openSelect(trigger);
+  fireEvent.click(await screen.findByRole('option', { name: optionName }));
+};
 
 describe('LLMChannelEditor', () => {
   beforeEach(() => {
@@ -78,7 +88,7 @@ describe('LLMChannelEditor', () => {
     expect(screen.queryByText(/LITELLM_CONFIG/i)).not.toBeInTheDocument();
   });
 
-  it('keeps minimax-prefixed models in runtime selections', () => {
+  it('keeps minimax-prefixed models in runtime selections', async () => {
     render(
       <LLMChannelEditor
         items={[
@@ -99,9 +109,14 @@ describe('LLMChannelEditor', () => {
     const agentModelSelect = screen.getByRole('combobox', { name: 'Agent 主模型' });
     const visionModelSelect = screen.getByRole('combobox', { name: 'Vision 模型' });
 
-    expect(within(primaryModelSelect).getByRole('option', { name: 'minimax/MiniMax-M1' })).toBeInTheDocument();
-    expect(within(agentModelSelect).getByRole('option', { name: 'minimax/MiniMax-M1' })).toBeInTheDocument();
-    expect(within(visionModelSelect).getByRole('option', { name: 'minimax/MiniMax-M1' })).toBeInTheDocument();
+    openSelect(primaryModelSelect);
+    expect(await screen.findByRole('option', { name: 'minimax/MiniMax-M1' })).toBeInTheDocument();
+    fireEvent.keyDown(primaryModelSelect, { key: 'Escape' });
+    openSelect(agentModelSelect);
+    expect(await screen.findByRole('option', { name: 'minimax/MiniMax-M1' })).toBeInTheDocument();
+    fireEvent.keyDown(agentModelSelect, { key: 'Escape' });
+    openSelect(visionModelSelect);
+    expect(await screen.findByRole('option', { name: 'minimax/MiniMax-M1' })).toBeInTheDocument();
   });
 
   it('uses DeepSeek V4 defaults when adding the official preset', async () => {
@@ -114,7 +129,7 @@ describe('LLMChannelEditor', () => {
       />
     );
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'deepseek' } });
+    await chooseSelectOption(screen.getByRole('combobox'), 'DeepSeek 官方');
     fireEvent.click(screen.getByRole('button', { name: '+ 添加渠道' }));
 
     await screen.findByRole('button', { name: /DeepSeek 官方/i });
@@ -125,7 +140,7 @@ describe('LLMChannelEditor', () => {
   it.each([
     ['minimax', /MiniMax 官方/i, 'https://api.minimax.io/v1', 'MiniMax-M2.7,MiniMax-M2.7-highspeed'],
     ['volcengine', /火山方舟/i, 'https://ark.cn-beijing.volces.com/api/v3', 'doubao-seed-1-6-251015,doubao-seed-1-6-thinking-251015'],
-  ])('uses %s OpenAI-compatible defaults when adding the official preset', async (preset, buttonName, baseUrl, models) => {
+  ])('uses %s OpenAI-compatible defaults when adding the official preset', async (_preset, buttonName, baseUrl, models) => {
     render(
       <LLMChannelEditor
         items={[]}
@@ -135,13 +150,11 @@ describe('LLMChannelEditor', () => {
       />
     );
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: preset } });
+    await chooseSelectOption(screen.getByRole('combobox'), buttonName);
     fireEvent.click(screen.getByRole('button', { name: '+ 添加渠道' }));
 
     await screen.findByRole('button', { name: buttonName });
-    expect(screen.getAllByRole('combobox').some((select) => (
-      select instanceof HTMLSelectElement && select.value === 'openai'
-    ))).toBe(true);
+    expect(screen.getAllByRole('combobox').some((select) => select.textContent?.includes('OpenAI Compatible'))).toBe(true);
     expect(screen.getByLabelText('Base URL')).toHaveValue(baseUrl);
     expect(screen.getByLabelText('模型（逗号分隔）')).toHaveValue(models);
   });
@@ -166,7 +179,7 @@ describe('LLMChannelEditor', () => {
       />
     );
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'minimax' } });
+    await chooseSelectOption(screen.getByRole('combobox'), 'MiniMax 官方');
     fireEvent.click(screen.getByRole('button', { name: '+ 添加渠道' }));
     await screen.findByRole('button', { name: /MiniMax 官方/i });
     fireEvent.click(screen.getByRole('button', { name: '保存 AI 配置' }));

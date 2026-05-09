@@ -78,13 +78,13 @@ export const ReportDetails: React.FC<ReportDetailsProps> = ({
           <button
             type="button"
             onClick={() => copyToClipboard(jsonStr, panel)}
-            className="home-accent-link text-xs text-muted-text"
+            className="text-primary underline-offset-4 hover:underline text-xs text-muted-foreground"
             aria-label={copiedPanels[panel] ? text.copied : text.copy}
           >
             {copiedPanels[panel] ? text.copied : text.copy}
           </button>
         </span>
-        <pre className="home-trace-pre home-trace-pre-content text-xs text-foreground font-mono overflow-x-auto p-3 bg-base rounded-lg max-h-80 overflow-y-auto text-left w-0 min-w-full">
+        <pre className="home-trace-pre home-trace-pre-content text-xs text-foreground font-mono overflow-x-auto p-3 bg-background rounded-lg max-h-80 overflow-y-auto text-left w-0 min-w-full">
           {jsonStr}
         </pre>
       </div>
@@ -92,7 +92,7 @@ export const ReportDetails: React.FC<ReportDetailsProps> = ({
   };
 
   return (
-    <Card variant="bordered" padding="md" className="home-panel-card text-left">
+    <Card variant="bordered" padding="md" className=" text-left">
       <DashboardPanelHeader
         eyebrow={text.transparency}
         title={text.traceability}
@@ -101,9 +101,9 @@ export const ReportDetails: React.FC<ReportDetailsProps> = ({
 
       {/* Record ID */}
       {recordId && (
-        <div className="home-divider mb-3 flex items-center gap-2 border-b pb-3 text-xs text-muted-text">
+        <div className="border-border mb-3 flex items-center gap-2 border-b pb-3 text-xs text-muted-foreground">
           <span>{text.recordId}:</span>
-          <code className="home-accent-chip px-1.5 py-0.5 font-mono text-xs">
+          <code className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs px-1.5 py-0.5 font-mono text-xs">
             {recordId}
           </code>
         </div>
@@ -117,11 +117,11 @@ export const ReportDetails: React.FC<ReportDetailsProps> = ({
             <button
               type="button"
               onClick={() => setShowRaw(!showRaw)}
-              className="home-surface-button home-trace-toggle flex w-full items-center justify-between rounded-lg p-2.5"
+              className=" home-trace-toggle flex w-full items-center justify-between rounded-lg p-2.5"
             >
               <span className="text-xs text-foreground">{text.rawResult}</span>
               <svg
-                className={`w-3.5 h-3.5 text-muted-text transition-transform ${showRaw ? 'rotate-180' : ''}`}
+                className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${showRaw ? 'rotate-180' : ''}`}
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -143,11 +143,11 @@ export const ReportDetails: React.FC<ReportDetailsProps> = ({
             <button
               type="button"
               onClick={() => setShowSnapshot(!showSnapshot)}
-              className="home-surface-button home-trace-toggle flex w-full items-center justify-between rounded-lg p-2.5"
+              className=" home-trace-toggle flex w-full items-center justify-between rounded-lg p-2.5"
             >
               <span className="text-xs text-foreground">{text.analysisSnapshot}</span>
               <svg
-                className={`w-3.5 h-3.5 text-muted-text transition-transform ${showSnapshot ? 'rotate-180' : ''}`}
+                className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${showSnapshot ? 'rotate-180' : ''}`}
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
