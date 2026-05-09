@@ -53,7 +53,7 @@ export const ReportSummary: React.FC<ReportSummaryProps> = ({
       <ReportDetails details={details} recordId={recordId} language={reportLanguage} />
 
       {shouldShowModel && (
-        <p className="px-1 text-xs text-muted-text">
+        <p className="px-1 text-xs text-muted-foreground">
           {text.analysisModel}: {modelUsed}
         </p>
       )}

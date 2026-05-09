@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
-import { motion } from 'motion/react';
 import { BarChart3, BriefcaseBusiness, FileSearch, Home, LogOut, MessageSquareQuote, Settings2 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAgentChatStore } from '../../stores/agentChatStore';
-import { cn } from '../../utils/cn';
+import { cn } from '@/lib/utils';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { StatusDot } from '../common/StatusDot';
-import { ThemeToggle } from '../theme/ThemeToggle';
+import { Button } from '@/components/ui/button';
 
 type SidebarNavProps = {
   collapsed?: boolean;
@@ -32,6 +31,8 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'settings', label: '设置', to: '/settings', icon: Settings2 },
 ];
 
+const LOGO_SRC = '/dsa-logo.svg';
+
 export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNavigate }) => {
   const { authEnabled, logout } = useAuth();
   const stockCompletionBadge = useAgentChatStore((state) => state.stockCompletionBadge);
@@ -41,8 +42,8 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
   return (
     <div className="flex h-full flex-col">
       <div className={cn('mb-4 flex items-center gap-2 px-1', collapsed ? 'justify-center' : '')}>
-        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-gradient text-[hsl(var(--primary-foreground))] shadow-[0_12px_28px_var(--nav-brand-shadow)]">
-          <BarChart3 className="h-5 w-5" />
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg border bg-background">
+          <img src={LOGO_SRC} alt="" className="h-7 w-7" aria-hidden="true" />
         </div>
         {!collapsed ? (
           <p className="min-w-0 truncate text-sm font-semibold text-foreground">DSA</p>
@@ -59,27 +60,17 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
             aria-label={label}
             className={({ isActive }) =>
               cn(
-                'group relative flex items-center gap-3 border-y border-x-0 text-sm transition-all',
-                'h-[var(--nav-item-height)]',
-                collapsed ? 'justify-center px-0' : 'px-[var(--nav-item-padding-x)]',
+                'group relative flex h-10 items-center gap-3 rounded-lg px-3 text-sm transition-colors',
+                collapsed ? 'justify-center px-0' : '',
                 isActive
-                  ? 'border-[var(--nav-active-border)] bg-[var(--nav-active-bg)] text-[hsl(var(--primary))] font-medium'
-                  : 'border-transparent text-secondary-text hover:bg-[var(--nav-hover-bg)] hover:text-foreground'
+                  ? 'bg-muted font-medium text-foreground'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               )
             }
           >
             {({ isActive }) => (
               <>
-                {isActive && (
-                  <motion.div 
-                    layoutId="activeIndicator"
-                    className="absolute top-0 bottom-0 left-0 w-[var(--nav-indicator-width)] bg-[var(--nav-indicator-bg)] shadow-[0_0_10px_var(--nav-indicator-shadow)]"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ duration: 0.2 }}
-                  />
-                )}
-                <Icon className={cn('ml-1 h-5 w-5 shrink-0', isActive ? 'text-[var(--nav-icon-active)]' : 'text-current')} />
+                <Icon className={cn('h-5 w-5 shrink-0', isActive ? 'text-foreground' : 'text-current')} />
                 {!collapsed ? <span className="truncate">{label}</span> : null}
                 {((badge === 'stock-completion' && stockCompletionBadge) ||
                   (badge === 'fund-completion' && fundCompletionBadge)) ? (
@@ -87,7 +78,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
                     tone="info"
                     data-testid={badge === 'fund-completion' ? 'fund-chat-completion-badge' : 'chat-completion-badge'}
                     className={cn(
-                      'absolute right-3 border-2 border-background shadow-[0_0_10px_var(--nav-indicator-shadow)]',
+                      'absolute right-3 border-2 border-background',
                       collapsed ? 'right-2 top-2' : ''
                     )}
                     aria-label={badge === 'fund-completion' ? '诊基有新消息' : '问股有新消息'}
@@ -99,22 +90,19 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
         ))}
       </nav>
 
-      <div className="mt-4 mb-2">
-        <ThemeToggle variant="nav" collapsed={collapsed} />
-      </div>
-
       {authEnabled ? (
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={() => setShowLogoutConfirm(true)}
           className={cn(
-            'mt-5 flex h-11 w-full cursor-pointer select-none items-center gap-3 rounded-2xl border border-transparent px-3 text-sm text-secondary-text transition-all hover:border-border/70 hover:bg-hover hover:text-foreground',
+            'mt-5 w-full justify-start gap-3 text-muted-foreground',
             collapsed ? 'justify-center px-2' : ''
           )}
         >
           <LogOut className="h-5 w-5 shrink-0" />
           {!collapsed ? <span>退出</span> : null}
-        </button>
+        </Button>
       ) : null}
 
       <ConfirmDialog

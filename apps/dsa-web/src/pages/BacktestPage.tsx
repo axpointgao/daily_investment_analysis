@@ -12,9 +12,9 @@ import type {
 } from '../types/backtest';
 
 const BACKTEST_INPUT_CLASS =
-  'input-surface input-focus-glow h-11 w-full rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+  'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50';
 const BACKTEST_COMPACT_INPUT_CLASS =
-  'input-surface input-focus-glow h-10 rounded-xl border bg-transparent px-3 py-2 text-xs transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
+  'h-8 min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-xs transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50';
 
 // ============ Helpers ============
 
@@ -27,11 +27,11 @@ function outcomeBadge(outcome?: string) {
   if (!outcome) return <Badge variant="default">--</Badge>;
   switch (outcome) {
     case 'win':
-      return <Badge variant="success" glow>WIN</Badge>;
+      return <Badge variant="success">盈利</Badge>;
     case 'loss':
-      return <Badge variant="danger" glow>LOSS</Badge>;
+      return <Badge variant="danger">亏损</Badge>;
     case 'neutral':
-      return <Badge variant="warning">NEUTRAL</Badge>;
+      return <Badge variant="warning">持平</Badge>;
     default:
       return <Badge variant="default">{outcome}</Badge>;
   }
@@ -40,12 +40,12 @@ function outcomeBadge(outcome?: string) {
 function statusBadge(status: string) {
   switch (status) {
     case 'completed':
-      return <Badge variant="success">completed</Badge>;
+      return <Badge variant="success">已完成</Badge>;
     case 'insufficient':
     case 'insufficient_data':
-      return <Badge variant="warning">insufficient</Badge>;
+      return <Badge variant="warning">数据不足</Badge>;
     case 'error':
-      return <Badge variant="danger">error</Badge>;
+      return <Badge variant="danger">错误</Badge>;
     default:
       return <Badge variant="default">{status}</Badge>;
   }
@@ -54,13 +54,32 @@ function statusBadge(status: string) {
 function actualMovementBadge(movement?: string | null) {
   switch (movement) {
     case 'up':
-      return <Badge variant="success">UP</Badge>;
+      return <Badge variant="success">上涨</Badge>;
     case 'down':
-      return <Badge variant="danger">DOWN</Badge>;
+      return <Badge variant="danger">下跌</Badge>;
     case 'flat':
-      return <Badge variant="warning">FLAT</Badge>;
+      return <Badge variant="warning">持平</Badge>;
     default:
       return <Badge variant="default">--</Badge>;
+  }
+}
+
+function directionExpectedLabel(direction?: string | null) {
+  switch (direction) {
+    case 'up':
+      return '看涨';
+    case 'down':
+      return '看跌';
+    case 'not_down':
+      return '不看跌';
+    case 'flat':
+      return '震荡';
+    case 'long':
+      return '持仓';
+    case 'cash':
+      return '空仓';
+    default:
+      return direction || '';
   }
 }
 
@@ -68,10 +87,10 @@ function boolIcon(value?: boolean | null) {
   if (value === true) {
     return (
       <span
-        className="backtest-status-chip backtest-status-chip-success"
-        aria-label="yes"
+        className="inline-flex items-center justify-center gap-1 rounded-full border px-2 py-1 text-xs inline-flex items-center justify-center gap-1 rounded-full border px-2 py-1 text-xs-success"
+        aria-label="是"
       >
-        <StatusDot tone="success" className="backtest-status-chip-dot" />
+        <StatusDot tone="success" className="inline-flex items-center justify-center gap-1 rounded-full border px-2 py-1 text-xs-dot" />
         <Check className="h-3.5 w-3.5" />
       </span>
     );
@@ -80,10 +99,10 @@ function boolIcon(value?: boolean | null) {
   if (value === false) {
     return (
       <span
-        className="backtest-status-chip backtest-status-chip-danger"
-        aria-label="no"
+        className="inline-flex items-center justify-center gap-1 rounded-full border px-2 py-1 text-xs inline-flex items-center justify-center gap-1 rounded-full border px-2 py-1 text-xs-danger"
+        aria-label="否"
       >
-        <StatusDot tone="danger" className="backtest-status-chip-dot" />
+        <StatusDot tone="danger" className="inline-flex items-center justify-center gap-1 rounded-full border px-2 py-1 text-xs-dot" />
         <X className="h-3.5 w-3.5" />
       </span>
     );
@@ -91,10 +110,10 @@ function boolIcon(value?: boolean | null) {
 
   return (
     <span
-      className="backtest-status-chip backtest-status-chip-neutral"
-      aria-label="unknown"
+      className="inline-flex items-center justify-center gap-1 rounded-full border px-2 py-1 text-xs inline-flex items-center justify-center gap-1 rounded-full border px-2 py-1 text-xs-neutral"
+      aria-label="未知"
     >
-      <StatusDot tone="neutral" className="backtest-status-chip-dot" />
+      <StatusDot tone="neutral" className="inline-flex items-center justify-center gap-1 rounded-full border px-2 py-1 text-xs-dot" />
       <Minus className="h-3.5 w-3.5" />
     </span>
   );
@@ -103,7 +122,7 @@ function boolIcon(value?: boolean | null) {
 // ============ Metric Row ============
 
 const MetricRow: React.FC<{ label: string; value: string; accent?: boolean }> = ({ label, value, accent }) => (
-  <div className="backtest-metric-row">
+  <div className="flex items-center justify-between border-b py-2">
     <span className="label">{label}</span>
     <span className={`value ${accent ? 'accent' : ''}`}>{value}</span>
   </div>
@@ -112,31 +131,31 @@ const MetricRow: React.FC<{ label: string; value: string; accent?: boolean }> = 
 // ============ Performance Card ============
 
 const PerformanceCard: React.FC<{ metrics: PerformanceMetrics; title: string }> = ({ metrics, title }) => (
-  <Card variant="gradient" padding="md" className="animate-fade-in">
+  <Card padding="md" className="animate-fade-in">
     <div className="mb-3">
-      <span className="label-uppercase">{title}</span>
+      <span className="text-xs font-medium uppercase text-muted-foreground">{title}</span>
     </div>
-    <MetricRow label="Direction Accuracy" value={pct(metrics.directionAccuracyPct)} accent />
-    <MetricRow label="Win Rate" value={pct(metrics.winRatePct)} accent />
-    <MetricRow label="Avg Sim. Return" value={pct(metrics.avgSimulatedReturnPct)} />
-    <MetricRow label="Avg Stock Return" value={pct(metrics.avgStockReturnPct)} />
-    <MetricRow label="SL Trigger Rate" value={pct(metrics.stopLossTriggerRate)} />
-    <MetricRow label="TP Trigger Rate" value={pct(metrics.takeProfitTriggerRate)} />
-    <MetricRow label="Avg Days to Hit" value={metrics.avgDaysToFirstHit != null ? metrics.avgDaysToFirstHit.toFixed(1) : '--'} />
-    <div className="backtest-metric-footer">
-      <span className="text-xs text-muted-text">Evaluations</span>
-      <span className="text-xs text-secondary-text font-mono">
+    <MetricRow label="方向准确率" value={pct(metrics.directionAccuracyPct)} accent />
+    <MetricRow label="胜率" value={pct(metrics.winRatePct)} accent />
+    <MetricRow label="平均模拟收益" value={pct(metrics.avgSimulatedReturnPct)} />
+    <MetricRow label="平均标的收益" value={pct(metrics.avgStockReturnPct)} />
+    <MetricRow label="止损触发率" value={pct(metrics.stopLossTriggerRate)} />
+    <MetricRow label="止盈触发率" value={pct(metrics.takeProfitTriggerRate)} />
+    <MetricRow label="平均命中天数" value={metrics.avgDaysToFirstHit != null ? metrics.avgDaysToFirstHit.toFixed(1) : '--'} />
+    <div className="flex items-center justify-between border-t pt-2 mt-2">
+      <span className="text-xs text-muted-foreground">评估数</span>
+      <span className="text-xs text-muted-foreground font-mono">
         {Number(metrics.completedCount)} / {Number(metrics.totalEvaluations)}
       </span>
     </div>
     <div className="flex items-center justify-between">
-      <span className="text-xs text-muted-text">W / L / N</span>
+      <span className="text-xs text-muted-foreground">盈 / 亏 / 平</span>
       <span className="text-xs font-mono">
-        <span className="text-success">{metrics.winCount}</span>
+        <span className="text-emerald-600">{metrics.winCount}</span>
         {' / '}
-        <span className="text-danger">{metrics.lossCount}</span>
+        <span className="text-destructive">{metrics.lossCount}</span>
         {' / '}
-        <span className="text-warning">{metrics.neutralCount}</span>
+        <span className="text-amber-600">{metrics.neutralCount}</span>
       </span>
     </div>
   </Card>
@@ -145,13 +164,13 @@ const PerformanceCard: React.FC<{ metrics: PerformanceMetrics; title: string }> 
 // ============ Run Summary ============
 
 const RunSummary: React.FC<{ data: BacktestRunResponse }> = ({ data }) => (
-  <div className="backtest-summary animate-fade-in">
-    <span className="label">Processed: <span className="value">{data.processed}</span></span>
-    <span className="label">Saved: <span className="value primary">{data.saved}</span></span>
-    <span className="label">Completed: <span className="value success">{data.completed}</span></span>
-    <span className="label">Insufficient: <span className="value warning">{data.insufficient}</span></span>
+  <div className="rounded-lg border bg-card animate-fade-in">
+    <span className="label">已处理：<span className="value">{data.processed}</span></span>
+    <span className="label">已保存：<span className="value primary">{data.saved}</span></span>
+    <span className="label">已完成：<span className="value success">{data.completed}</span></span>
+    <span className="label">数据不足：<span className="value warning">{data.insufficient}</span></span>
     {data.errors > 0 && (
-      <span className="label">Errors: <span className="value danger">{data.errors}</span></span>
+      <span className="label">错误：<span className="value danger">{data.errors}</span></span>
     )}
   </div>
 );
@@ -327,9 +346,9 @@ const BacktestPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-full flex flex-col rounded-[1.5rem] bg-transparent">
+    <div className="flex min-h-[calc(100vh-5rem)] w-full min-w-0 flex-col bg-transparent pb-4 sm:min-h-[calc(100vh-5.5rem)] lg:min-h-[calc(100vh-2rem)]">
       {/* Header */}
-      <header className="flex-shrink-0 border-b border-white/5 px-3 py-3 sm:px-4">
+      <header className="flex-shrink-0 border-b border-border pb-3">
         <div className="flex max-w-5xl flex-wrap items-center gap-2">
           <div className="relative min-w-0 flex-[1_1_220px]">
             <input
@@ -337,7 +356,7 @@ const BacktestPage: React.FC = () => {
               value={codeFilter}
               onChange={(e) => setCodeFilter(e.target.value.toUpperCase())}
               onKeyDown={handleKeyDown}
-              placeholder="Filter by stock code (leave empty for all)"
+              placeholder="按股票代码筛选（留空查看全部）"
               disabled={isRunning}
               className={BACKTEST_INPUT_CLASS}
             />
@@ -346,12 +365,12 @@ const BacktestPage: React.FC = () => {
             type="button"
             onClick={handleFilter}
             disabled={isLoadingResults}
-            className="btn-secondary flex items-center gap-1.5 whitespace-nowrap"
+            className="inline-flex items-center justify-center rounded-lg border bg-background px-3 py-2 text-sm font-medium text-foreground flex items-center gap-1.5 whitespace-nowrap"
           >
-            Filter
+            筛选
           </button>
           <div className="flex items-center gap-2 whitespace-nowrap lg:w-40 lg:justify-between">
-            <span className="text-xs text-muted-text">Window</span>
+            <span className="text-xs text-muted-foreground">窗口</span>
             <input
               type="number"
               min={1}
@@ -364,10 +383,10 @@ const BacktestPage: React.FC = () => {
             />
           </div>
           <div className="flex items-center gap-2 whitespace-nowrap">
-            <span className="text-xs text-muted-text">From</span>
+            <span className="text-xs text-muted-foreground">开始</span>
             <input
               type="date"
-              aria-label="Analysis date from"
+              aria-label="分析日期开始"
               value={analysisDateFrom}
               onChange={(e) => setAnalysisDateFrom(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -376,10 +395,10 @@ const BacktestPage: React.FC = () => {
             />
           </div>
           <div className="flex items-center gap-2 whitespace-nowrap">
-            <span className="text-xs text-muted-text">To</span>
+            <span className="text-xs text-muted-foreground">结束</span>
             <input
               type="date"
-              aria-label="Analysis date to"
+              aria-label="分析日期结束"
               value={analysisDateTo}
               onChange={(e) => setAnalysisDateTo(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -391,25 +410,25 @@ const BacktestPage: React.FC = () => {
             type="button"
             onClick={handleShowNextDay}
             disabled={isLoadingResults || isLoadingPerf}
-            className={`backtest-force-btn ${isNextDayValidation ? 'active' : ''}`}
+            className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${isNextDayValidation ? 'active' : ''}`}
           >
             <span className="dot" />
-            1D Validation
+            次日验证
           </button>
           <button
             type="button"
             onClick={() => setForceRerun(!forceRerun)}
             disabled={isRunning}
-            className={`backtest-force-btn ${forceRerun ? 'active' : ''}`}
+            className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${forceRerun ? 'active' : ''}`}
           >
             <span className="dot" />
-            Force
+            强制重跑
           </button>
           <button
             type="button"
             onClick={handleRun}
             disabled={isRunning}
-            className="btn-primary flex items-center gap-1.5 whitespace-nowrap"
+            className="inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground flex items-center gap-1.5 whitespace-nowrap"
           >
             {isRunning ? (
               <>
@@ -417,10 +436,10 @@ const BacktestPage: React.FC = () => {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
-                Running...
+                运行中...
               </>
             ) : (
-              'Run Backtest'
+              '运行回测'
             )}
           </button>
         </div>
@@ -432,27 +451,27 @@ const BacktestPage: React.FC = () => {
         {runError && (
           <ApiErrorAlert error={runError} className="mt-2 max-w-4xl" />
         )}
-        <p className="mt-2 text-xs text-muted-text">
+        <p className="mt-2 text-xs text-muted-foreground">
           {isNextDayValidation
-            ? 'Next-day validation mode compares AI predictions with the next trading day close.'
-            : 'Use window = 1 to review AI predictions against the next trading day close.'}
+            ? '次日验证模式会将智能预测与下一个交易日收盘表现进行对比。'
+            : '将窗口设为 1，可查看智能预测与下一个交易日收盘表现的对比。'}
         </p>
       </header>
 
       {/* Main content */}
-      <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3 lg:flex-row">
+      <main className="flex min-h-0 flex-1 flex-col gap-4 pt-3 lg:flex-row">
         {/* Left sidebar - Performance */}
-        <div className="flex max-h-[38vh] flex-col gap-3 overflow-y-auto lg:max-h-none lg:w-60 lg:flex-shrink-0">
+        <div className="flex flex-col gap-3 lg:w-60 lg:flex-shrink-0">
           {isLoadingPerf ? (
             <div className="flex items-center justify-center py-8">
-              <div className="backtest-spinner sm" />
+              <div className="rounded-full border-muted border-t-primary animate-spin sm" />
             </div>
           ) : overallPerf ? (
-            <PerformanceCard metrics={overallPerf} title="Overall Performance" />
+            <PerformanceCard metrics={overallPerf} title="整体表现" />
           ) : (
             <EmptyState
-              title="No Metrics Yet"
-              description="Run a backtest to generate portfolio-level performance metrics."
+              title="暂无指标"
+              description="运行回测后会生成组合层面的表现指标。"
               className="h-full min-h-[12rem] border-dashed bg-card/45 shadow-none"
             />
           )}
@@ -463,20 +482,20 @@ const BacktestPage: React.FC = () => {
         </div>
 
         {/* Right content - Results table */}
-        <section className="min-h-0 flex-1 overflow-y-auto">
+        <section className="min-h-0 flex-1">
           {pageError ? (
             <ApiErrorAlert error={pageError} className="mb-3" />
           ) : null}
           {isLoadingResults ? (
             <div className="flex flex-col items-center justify-center h-64">
-              <div className="backtest-spinner md" />
-              <p className="mt-3 text-secondary-text text-sm">Loading results...</p>
+              <div className="rounded-full border-muted border-t-primary animate-spin md" />
+              <p className="mt-3 text-muted-foreground text-sm">正在加载结果...</p>
             </div>
           ) : results.length === 0 ? (
             <EmptyState
-              title="No Results"
-              description="Run a backtest to evaluate historical analysis accuracy"
-              className="backtest-empty-state border-dashed"
+              title="暂无结果"
+              description="运行回测以评估历史分析准确性。"
+              className="flex h-64 flex-col items-center justify-center text-center border-dashed"
               icon={(
                 <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -485,49 +504,49 @@ const BacktestPage: React.FC = () => {
             />
           ) : (
             <div className="animate-fade-in">
-              <div className="backtest-table-toolbar">
-                <div className="backtest-table-toolbar-meta">
-                  <span className="label-uppercase">{isNextDayValidation ? 'Next-Day Validation' : 'Result Set'}</span>
-                  <span className="text-xs text-secondary-text">
-                    {codeFilter.trim() ? `Filtered by ${codeFilter.trim()}` : 'All stocks'}
-                    {evalDays ? ` · ${evalDays} day window` : ''}
-                    {analysisDateFrom ? ` · from ${analysisDateFrom}` : ''}
-                    {analysisDateTo ? ` · to ${analysisDateTo}` : ''}
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div className="flex items-center justify-between gap-3 mb-3-meta">
+                  <span className="text-xs font-medium uppercase text-muted-foreground">{isNextDayValidation ? '次日验证' : '结果集'}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {codeFilter.trim() ? `筛选：${codeFilter.trim()}` : '全部股票'}
+                    {evalDays ? ` · ${evalDays} 天窗口` : ''}
+                    {analysisDateFrom ? ` · 起 ${analysisDateFrom}` : ''}
+                    {analysisDateTo ? ` · 止 ${analysisDateTo}` : ''}
                   </span>
                 </div>
-                <span className="backtest-table-scroll-hint">Scroll horizontally on small screens</span>
+                <span className="text-xs text-muted-foreground">小屏可横向滚动</span>
               </div>
-              <div className="backtest-table-wrapper">
-                <table className="backtest-table min-w-[840px] w-full text-sm">
-                  <thead className="backtest-table-head">
+              <div className="rounded-lg border bg-card overflow-x-auto">
+                <table className="w-full caption-bottom min-w-[840px] w-full text-sm">
+                  <thead className="bg-muted">
                     <tr className="text-left">
-                      <th className="backtest-table-head-cell">Stock</th>
-                      <th className="backtest-table-head-cell">Analysis Date</th>
-                      <th className="backtest-table-head-cell">AI Prediction</th>
-                      <th className="backtest-table-head-cell">
-                        {showNextDayActualColumns ? 'Actual' : 'Window Return'}
+                      <th className="bg-muted-cell">股票</th>
+                      <th className="bg-muted-cell">分析日期</th>
+                      <th className="bg-muted-cell">智能预测</th>
+                      <th className="bg-muted-cell">
+                        {showNextDayActualColumns ? '实际表现' : '窗口收益'}
                       </th>
-                      <th className="backtest-table-head-cell">
-                        {showNextDayActualColumns ? 'Accuracy' : 'Direction Match'}
+                      <th className="bg-muted-cell">
+                        {showNextDayActualColumns ? '准确性' : '方向匹配'}
                       </th>
-                      <th className="backtest-table-head-cell">Outcome</th>
-                      <th className="backtest-table-head-cell">Status</th>
+                      <th className="bg-muted-cell">结果</th>
+                      <th className="bg-muted-cell">状态</th>
                     </tr>
                   </thead>
                   <tbody>
                     {results.map((row) => (
                       <tr
                         key={row.analysisHistoryId}
-                        className="backtest-table-row"
+                        className="border-b hover:bg-muted/50"
                       >
-                        <td className="backtest-table-cell backtest-table-code">
+                        <td className="p-2 align-middle whitespace-nowrap w-full caption-bottom-code">
                           <div className="flex flex-col">
                             <span>{row.code}</span>
-                            <span className="text-xs text-muted-text">{row.stockName || '--'}</span>
+                            <span className="text-xs text-muted-foreground">{row.stockName || '--'}</span>
                           </div>
                         </td>
-                        <td className="backtest-table-cell text-secondary-text">{row.analysisDate || '--'}</td>
-                        <td className="backtest-table-cell max-w-[220px] text-foreground">
+                        <td className="p-2 align-middle whitespace-nowrap text-muted-foreground">{row.analysisDate || '--'}</td>
+                        <td className="p-2 align-middle whitespace-nowrap max-w-[220px] text-foreground">
                           {(row.trendPrediction || row.operationAdvice) ? (
                             <Tooltip
                               content={[row.trendPrediction, row.operationAdvice].filter(Boolean).join(' / ')}
@@ -535,33 +554,33 @@ const BacktestPage: React.FC = () => {
                             >
                               <div className="flex flex-col gap-1">
                                 <span className="block truncate">{row.trendPrediction || '--'}</span>
-                                <span className="block truncate text-xs text-secondary-text">{row.operationAdvice || '--'}</span>
+                                <span className="block truncate text-xs text-muted-foreground">{row.operationAdvice || '--'}</span>
                               </div>
                             </Tooltip>
                           ) : (
                             '--'
                           )}
                         </td>
-                        <td className="backtest-table-cell">
+                        <td className="p-2 align-middle whitespace-nowrap">
                           <div className="flex items-center gap-2">
                             {actualMovementBadge(row.actualMovement)}
                             <span className={
                               row.actualReturnPct != null
-                                ? row.actualReturnPct > 0 ? 'text-success' : row.actualReturnPct < 0 ? 'text-danger' : 'text-secondary-text'
-                                : 'text-muted-text'
+                                ? row.actualReturnPct > 0 ? 'text-emerald-600' : row.actualReturnPct < 0 ? 'text-destructive' : 'text-muted-foreground'
+                                : 'text-muted-foreground'
                             }>
                               {pct(row.actualReturnPct)}
                             </span>
                           </div>
                         </td>
-                        <td className="backtest-table-cell">
+                        <td className="p-2 align-middle whitespace-nowrap">
                           <span className="flex items-center gap-2">
                             {boolIcon(row.directionCorrect)}
-                            <span className="text-muted-text">{row.directionExpected || ''}</span>
+                            <span className="text-muted-foreground">{directionExpectedLabel(row.directionExpected)}</span>
                           </span>
                         </td>
-                        <td className="backtest-table-cell">{outcomeBadge(row.outcome)}</td>
-                        <td className="backtest-table-cell">{statusBadge(row.evalStatus)}</td>
+                        <td className="p-2 align-middle whitespace-nowrap">{outcomeBadge(row.outcome)}</td>
+                        <td className="p-2 align-middle whitespace-nowrap">{statusBadge(row.evalStatus)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -577,8 +596,8 @@ const BacktestPage: React.FC = () => {
                 />
               </div>
 
-              <p className="text-xs text-muted-text text-center mt-2">
-                {totalResults} result{totalResults !== 1 ? 's' : ''} total · page {currentPage} of {Math.max(totalPages, 1)}
+              <p className="text-xs text-muted-foreground text-center mt-2">
+                共 {totalResults} 条结果 · 第 {currentPage} / {Math.max(totalPages, 1)} 页
               </p>
             </div>
           )}

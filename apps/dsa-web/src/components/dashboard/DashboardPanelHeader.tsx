@@ -1,5 +1,5 @@
 import type React from 'react';
-import { cn } from '../../utils/cn';
+import { cn } from '@/lib/utils';
 
 interface DashboardPanelHeaderProps {
   eyebrow?: React.ReactNode;
@@ -32,7 +32,7 @@ export const DashboardPanelHeader: React.FC<DashboardPanelHeaderProps> = ({
         <div className={cn('flex items-baseline gap-2', headingClassName)}>
           {leading ? <span className="shrink-0">{leading}</span> : null}
           {eyebrow ? (
-            <span className={cn('label-uppercase', accentEyebrow && 'home-title-accent')}>
+            <span className={cn('text-xs font-medium uppercase text-muted-foreground', accentEyebrow && 'text-foreground')}>
               {eyebrow}
             </span>
           ) : null}

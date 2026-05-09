@@ -30,8 +30,8 @@ describe('ReportNews', () => {
 
     expect(await screen.findByText('茅台发布最新经营数据')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '跳转' })).toHaveAttribute('href', 'https://example.com/news');
-    expect(container.querySelector('.home-panel-card')).toBeTruthy();
-    expect(container.querySelector('.home-subpanel')).toBeTruthy();
+    expect(container.querySelector('[data-slot="card"]')).toBeTruthy();
+    expect(container.querySelector('[data-slot="button"]')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: '刷新' }));
 

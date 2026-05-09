@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 > For user-friendly release highlights, see the [GitHub Releases](https://github.com/ZhuLinsen/daily_stock_analysis/releases) page.
 
 ## [Unreleased]
+- [改进] Web 设置页持仓标签配置改为色块下拉与标签预览样式，持仓明细标签同步使用固定浅色底色调色板。
+- [修复] Web 持仓明细成本价、现价、市值和盈亏列统一使用千分位数字格式。
+- [改进] Web 持仓页资产分布改为 shadcn 图表环形图与紧凑单行明细，改善资产名称、金额和占比拥挤问题。
+- [改进] Web 持仓页录入流水提交按钮改为主按钮，并移除股票账户的券商 CSV 导入模块。
+- [改进] Web 回测页面用户可见文案改为中文，统一筛选、指标、结果表和状态展示。
+- [改进] Web 问股和诊基历史对话列表改为卡片式信息结构，提升会话标题、消息数、时间和删除操作的可读性。
+- [改进] Web 前端新增 DSA SVG 标志，并替换 favicon、侧边导航和登录页品牌标识。
+- [改进] Web 前端整体切换为 shadcn/ui 默认浅色组件样式，移除旧双主题切换、历史自定义视觉样式和持仓表格手写样式。
 - [新功能] 持仓明细新增现金流 XIRR 年化收益率、全局产品标签和按标签优先展示的资产分布视图。
 - [改进] 设置页补齐系统配置项中文标题和辅助说明，未映射字段不再回退展示英文 schema 描述。
 - [改进] Agent 设置页新增问财 API 连通性测试卡片，用于验证银行理财产品搜索配置是否可用。

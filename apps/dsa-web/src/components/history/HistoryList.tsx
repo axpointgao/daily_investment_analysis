@@ -80,10 +80,10 @@ export const HistoryList: React.FC<HistoryListProps> = ({
   }, [someVisibleSelected]);
 
   return (
-    <aside className={`glass-card overflow-hidden flex flex-col ${className}`}>
+    <aside className={`flex flex-col overflow-hidden rounded-xl border bg-card ${className}`}>
       <ScrollArea
         viewportRef={scrollContainerRef}
-        viewportClassName="p-4"
+        viewportClassName="px-4 py-4 pr-5"
         testId="home-history-list-scroll"
       >
         <div className="mb-4 space-y-3">
@@ -122,10 +122,10 @@ export const HistoryList: React.FC<HistoryListProps> = ({
                   aria-label="全选当前已加载历史记录"
                   className="history-select-all-checkbox h-3.5 w-3.5 cursor-pointer bg-transparent accent-primary focus:ring-primary/30 disabled:opacity-50"
                 />
-                <span className="text-[11px] text-muted-text select-none">全选当前</span>
+                <span className="text-[11px] text-muted-foreground select-none">全选当前</span>
               </label>
               <Button
-                variant="danger-subtle"
+                variant="danger"
                 size="xsm"
                 onClick={onDeleteSelected}
                 disabled={selectedCount === 0 || isDeleting}
@@ -172,14 +172,14 @@ export const HistoryList: React.FC<HistoryListProps> = ({
             
             {isLoadingMore && (
               <div className="flex justify-center py-4">
-                <div className="home-spinner h-5 w-5 animate-spin border-2" />
+                <div className="rounded-full border-muted border-t-primary h-5 w-5 animate-spin border-2" />
               </div>
             )}
 
             {!hasMore && items.length > 0 && (
               <div className="text-center py-5">
-                <div className="h-px bg-subtle w-full mb-3" />
-                <span className="text-[10px] text-secondary-text uppercase tracking-[0.2em]">已到底部</span>
+                <div className="h-px bg-muted w-full mb-3" />
+                <span className="text-[10px] text-muted-foreground uppercase tracking-[0.2em]">已到底部</span>
               </div>
             )}
           </div>

@@ -5,6 +5,10 @@ import { createParsedApiError, getParsedApiError, type ParsedApiError } from '..
 import { portfolioApi } from '../api/portfolio';
 import { systemConfigApi } from '../api/systemConfig';
 import { ApiErrorAlert, Button, ConfirmDialog, EmptyState } from '../components/common';
+import { Badge as ShadcnBadge } from '../components/ui/badge';
+import { Button as ShadcnButton } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger } from '../components/ui/select';
 import {
   AuthSettingsCard,
   ChangePasswordCard,
@@ -18,6 +22,7 @@ import {
 } from '../components/settings';
 import { WEB_BUILD_INFO } from '../utils/constants';
 import { getCategoryDescriptionZh } from '../utils/systemConfigI18n';
+import { PORTFOLIO_TAG_COLORS, resolvePortfolioTagColor } from '../utils/portfolioTagColors';
 import type { ConfigValidationIssue, SystemConfigCategory } from '../types/systemConfig';
 import type { SystemConfigItem, TestDataSourceResponse, TestDataSourceSource } from '../types/systemConfig';
 import type { PortfolioTagItem } from '../types/portfolio';
@@ -62,14 +67,50 @@ type DataSourceTestState = {
   error?: ParsedApiError;
 };
 
-const PORTFOLIO_TAG_COLORS = [
-  'hsl(var(--primary))',
-  'hsl(var(--success))',
-  'hsl(var(--warning))',
-  'hsl(var(--color-purple))',
-  'hsl(212 78% 54%)',
-  'hsl(326 62% 58%)',
-];
+function PortfolioTagColorSelect({
+  value,
+  onValueChange,
+  disabled = false,
+  className = '',
+  ariaLabel,
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+  disabled?: boolean;
+  className?: string;
+  ariaLabel: string;
+}) {
+  const selectedColor = resolvePortfolioTagColor(value, 0) || PORTFOLIO_TAG_COLORS[0];
+
+  return (
+    <Select value={selectedColor} onValueChange={onValueChange} disabled={disabled}>
+      <SelectTrigger aria-label={ariaLabel} className={`w-full ${className}`}>
+        <span className="flex min-w-0 items-center gap-2">
+          <span
+            aria-hidden="true"
+            className="size-4 shrink-0 rounded-full border border-border"
+            style={{ backgroundColor: selectedColor }}
+          />
+          <span className="truncate font-mono text-xs">{selectedColor}</span>
+        </span>
+      </SelectTrigger>
+      <SelectContent align="start">
+        {PORTFOLIO_TAG_COLORS.map((color) => (
+          <SelectItem key={color} value={color}>
+            <span className="flex items-center gap-2">
+              <span
+                aria-hidden="true"
+                className="size-4 shrink-0 rounded-full border border-border"
+                style={{ backgroundColor: color }}
+              />
+              <span className="font-mono text-xs">{color}</span>
+            </span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
 
 type AgentConfigGroup = {
   id: string;
@@ -321,17 +362,17 @@ function AgentFieldGroup({
   );
 
   return (
-    <div className="rounded-2xl border settings-border bg-background/30 p-4">
+    <div className="rounded-xl border border-border bg-background/30 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold text-foreground">{group.title}</h3>
-          <p className="mt-1 text-xs leading-5 text-muted-text">{group.description}</p>
-          <p className="mt-2 text-xs leading-5 text-secondary-text">{group.impact}</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">{group.description}</p>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">{group.impact}</p>
         </div>
         {group.collapsible ? (
           <Button
             type="button"
-            variant="settings-secondary"
+            variant="outline"
             size="sm"
             className="shrink-0"
             onClick={() => setIsOpen((current) => !current)}
@@ -369,20 +410,20 @@ function AgentSettingsSections({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border settings-border bg-background/35 p-4">
+      <div className="rounded-xl border border-border bg-background/35 p-4">
         <h3 className="text-sm font-semibold text-foreground">先看这三件事</h3>
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
-          <div className="rounded-xl border settings-border bg-card/70 p-3">
+          <div className="rounded-xl border border-border bg-card/70 p-3">
             <p className="text-xs font-semibold text-foreground">基金分析更专业</p>
-            <p className="mt-1 text-xs leading-5 text-muted-text">配置盈米后，首页基金分析、诊基和持仓资产分析报告会在基金/投顾部分优先使用盈米。</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">配置盈米后，首页基金分析、诊基和持仓资产分析报告会在基金/投顾部分优先使用盈米。</p>
           </div>
-          <div className="rounded-xl border settings-border bg-card/70 p-3">
+          <div className="rounded-xl border border-border bg-card/70 p-3">
             <p className="text-xs font-semibold text-foreground">天天基金做补充</p>
-            <p className="mt-1 text-xs leading-5 text-muted-text">天天基金 Skills 主要补搜索、净值、持仓、经理和交易规则。</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">天天基金 Skills 主要补搜索、净值、持仓、经理和交易规则。</p>
           </div>
-          <div className="rounded-xl border settings-border bg-card/70 p-3">
+          <div className="rounded-xl border border-border bg-card/70 p-3">
             <p className="text-xs font-semibold text-foreground">高级项可以先不动</p>
-            <p className="mt-1 text-xs leading-5 text-muted-text">多 Agent、深研、事件监控会影响成本、耗时或后台任务。</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">多 Agent、深研、事件监控会影响成本、耗时或后台任务。</p>
           </div>
         </div>
       </div>
@@ -444,27 +485,27 @@ function PromptEditorCard({
   const title = item.schema?.title || item.key;
 
   return (
-    <div className={`rounded-2xl border p-4 transition-colors ${
-      hasError ? 'border-danger/40 bg-danger/5' : 'settings-border bg-background/35'
+    <div className={`rounded-xl border p-4 transition-colors ${
+      hasError ? 'border-destructive/40 bg-destructive/5' : 'border-border bg-background/35'
     }`}>
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-sm font-semibold text-foreground">{title}</h3>
             <span className={`rounded-full border px-2 py-0.5 text-[11px] ${
-              isCustomized ? 'border-info/25 bg-info/10 text-info' : 'border-border/60 bg-background/40 text-muted-text'
+              isCustomized ? 'border-primary/25 bg-primary/10 text-primary' : 'border-border/60 bg-background/40 text-muted-foreground'
             }`}>
               {isCustomized ? '已自定义' : '使用默认'}
             </span>
           </div>
-          <p className="mt-1 text-xs leading-5 text-muted-text">
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
             {item.schema?.description || '留空时使用系统默认模板。'}
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           <Button
             type="button"
-            variant="settings-secondary"
+            variant="outline"
             size="sm"
             onClick={() => setShowDefault((current) => !current)}
           >
@@ -472,7 +513,7 @@ function PromptEditorCard({
           </Button>
           <Button
             type="button"
-            variant="settings-secondary"
+            variant="outline"
             size="sm"
             disabled={isSaving || !isCustomized}
             onClick={() => onChange(item.key, '')}
@@ -483,31 +524,31 @@ function PromptEditorCard({
       </div>
 
       {showDefault ? (
-        <div className="mt-4 rounded-xl border settings-border bg-card/65 p-3">
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-text">系统默认模板</p>
-          <p className="whitespace-pre-wrap text-xs leading-6 text-secondary-text">{defaultPrompt || '暂无默认模板。'}</p>
+        <div className="mt-4 rounded-xl border border-border bg-card/65 p-3">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">系统默认模板</p>
+          <p className="whitespace-pre-wrap text-xs leading-6 text-muted-foreground">{defaultPrompt || '暂无默认模板。'}</p>
         </div>
       ) : null}
 
-      <label className="mt-4 block text-xs font-medium text-secondary-text" htmlFor={`prompt-${item.key}`}>
+      <label className="mt-4 block text-xs font-medium text-muted-foreground" htmlFor={`prompt-${item.key}`}>
         自定义模板
       </label>
       <textarea
         id={`prompt-${item.key}`}
-        className="input-surface input-focus-glow mt-2 min-h-[150px] w-full resize-y rounded-xl border bg-transparent px-4 py-3 text-sm leading-6 transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+        className="mt-2 min-h-[150px] w-full resize-y rounded-xl border bg-transparent px-4 py-3 text-sm leading-6 transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
         value={value}
         disabled={isSaving}
         placeholder="留空则使用系统默认模板。只写你希望额外强调的分析口径，不需要重复输出格式要求。"
         onChange={(event) => onChange(item.key, event.target.value)}
       />
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-text">
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
         <span>只影响报告写法，不改变账户识别、工具调用或失败降级。</span>
         <span>{value.length}/4000</span>
       </div>
       {issues.length ? (
         <div className="mt-2 space-y-1">
           {issues.map((issue, index) => (
-            <p key={`${issue.key}-${issue.code}-${index}`} className={issue.severity === 'error' ? 'text-xs text-danger' : 'text-xs text-warning'}>
+            <p key={`${issue.key}-${issue.code}-${index}`} className={issue.severity === 'error' ? 'text-xs text-destructive' : 'text-xs text-amber-600'}>
               {issue.message}
             </p>
           ))}
@@ -537,26 +578,26 @@ function PortfolioAnalysisPromptSections({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border settings-border bg-background/35 p-4">
+      <div className="rounded-xl border border-border bg-background/35 p-4">
         <h3 className="text-sm font-semibold text-foreground">先确认边界</h3>
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
-          <div className="rounded-xl border settings-border bg-card/70 p-3">
+          <div className="rounded-xl border border-border bg-card/70 p-3">
             <p className="text-xs font-semibold text-foreground">只改写法</p>
-            <p className="mt-1 text-xs leading-5 text-muted-text">Prompt 不控制账户类型、工具调用和降级逻辑。</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">Prompt 不控制账户类型、工具调用和降级逻辑。</p>
           </div>
-          <div className="rounded-xl border settings-border bg-card/70 p-3">
+          <div className="rounded-xl border border-border bg-card/70 p-3">
             <p className="text-xs font-semibold text-foreground">留空更稳</p>
-            <p className="mt-1 text-xs leading-5 text-muted-text">没有明确偏好时留空，系统会使用内置模板。</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">没有明确偏好时留空，系统会使用内置模板。</p>
           </div>
-          <div className="rounded-xl border settings-border bg-card/70 p-3">
+          <div className="rounded-xl border border-border bg-card/70 p-3">
             <p className="text-xs font-semibold text-foreground">安全约束保留</p>
-            <p className="mt-1 text-xs leading-5 text-muted-text">系统仍会要求不编造、不承诺收益、不直接给交易指令。</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">系统仍会要求不编造、不承诺收益、不直接给交易指令。</p>
           </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[220px_1fr]">
-        <div className="rounded-2xl border settings-border bg-background/35 p-2">
+        <div className="rounded-xl border border-border bg-background/35 p-2">
           {PORTFOLIO_PROMPT_GROUPS.map((group) => {
             const isActive = group.id === activeGroup.id;
             return (
@@ -564,12 +605,12 @@ function PortfolioAnalysisPromptSections({
                 key={group.id}
                 type="button"
                 className={`w-full rounded-xl px-3 py-3 text-left transition-colors ${
-                  isActive ? 'bg-primary/10 text-foreground' : 'text-secondary-text hover:bg-background/50 hover:text-foreground'
+                  isActive ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-background/50 hover:text-foreground'
                 }`}
                 onClick={() => setActiveGroupId(group.id)}
               >
                 <p className="text-sm font-semibold">{group.title}</p>
-                <p className="mt-1 text-xs leading-5 text-muted-text">{group.description}</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">{group.description}</p>
               </button>
             );
           })}
@@ -613,7 +654,7 @@ const SettingsPage: React.FC = () => {
   const [portfolioTagActionLoading, setPortfolioTagActionLoading] = useState<number | 'create' | null>(null);
   const [portfolioTagsError, setPortfolioTagsError] = useState<ParsedApiError | null>(null);
   const [portfolioTagsSuccess, setPortfolioTagsSuccess] = useState('');
-  const [portfolioTagForm, setPortfolioTagForm] = useState({
+  const [portfolioTagForm, setPortfolioTagForm] = useState<{ name: string; color: string }>({
     name: '',
     color: PORTFOLIO_TAG_COLORS[0],
   });
@@ -973,12 +1014,12 @@ const SettingsPage: React.FC = () => {
   const desktopUpdateNotice = getDesktopUpdateNotice(desktopUpdateState);
 
   return (
-    <div className="settings-page min-h-full px-4 pb-6 pt-4 md:px-6">
-      <div className="mb-5 rounded-[1.5rem] border settings-border bg-card/94 px-5 py-5 shadow-soft-card-strong backdrop-blur-sm">
+    <div className="min-h-[calc(100vh-5rem)] w-full min-w-0 pb-4 sm:min-h-[calc(100vh-5.5rem)] lg:min-h-[calc(100vh-2rem)]">
+      <div className="mb-5 rounded-[1.5rem] border border-border bg-card/94 px-5 py-5 shadow-none backdrop-blur-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-xl font-semibold tracking-tight text-foreground">系统设置</h1>
-            <p className="text-xs leading-6 text-muted-text">
+            <p className="text-xs leading-6 text-muted-foreground">
               统一管理模型、数据源、通知、安全认证与导入能力。
             </p>
           </div>
@@ -986,7 +1027,7 @@ const SettingsPage: React.FC = () => {
           <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
-              variant="settings-secondary"
+              variant="outline"
               onClick={resetDraft}
               disabled={isLoading || isSaving}
             >
@@ -994,7 +1035,7 @@ const SettingsPage: React.FC = () => {
             </Button>
             <Button
               type="button"
-              variant="settings-primary"
+              variant="primary"
               onClick={() => void save()}
               disabled={!hasDirty || isSaving || isLoading}
               isLoading={isSaving}
@@ -1047,24 +1088,24 @@ const SettingsPage: React.FC = () => {
                 <div
                   className={`grid grid-cols-1 gap-3 ${shouldShowDesktopVersionCard ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}
                 >
-                  <div className="rounded-2xl border settings-border bg-background/40 px-4 py-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-text">
+                  <div className="rounded-xl border border-border bg-background/40 px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                       WebUI 版本
                     </p>
                     <p className="mt-2 break-all font-mono text-sm text-foreground">
                       {WEB_BUILD_INFO.version}
                     </p>
                   </div>
-                  <div className="rounded-2xl border settings-border bg-background/40 px-4 py-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-text">
+                  <div className="rounded-xl border border-border bg-background/40 px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                       构建标识
                     </p>
                     <p className="mt-2 break-all font-mono text-sm text-foreground">
                       {WEB_BUILD_INFO.buildId}
                     </p>
                   </div>
-                  <div className="rounded-2xl border settings-border bg-background/40 px-4 py-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-text">
+                  <div className="rounded-xl border border-border bg-background/40 px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                       构建时间
                     </p>
                     <p className="mt-2 break-all font-mono text-sm text-foreground">
@@ -1072,8 +1113,8 @@ const SettingsPage: React.FC = () => {
                     </p>
                   </div>
                   {shouldShowDesktopVersionCard ? (
-                    <div className="rounded-2xl border settings-border bg-background/40 px-4 py-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-text">
+                    <div className="rounded-xl border border-border bg-background/40 px-4 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                         桌面端版本
                       </p>
                       <p className="mt-2 break-all font-mono text-sm text-foreground">
@@ -1082,21 +1123,21 @@ const SettingsPage: React.FC = () => {
                     </div>
                   ) : null}
                 </div>
-                <p className="text-xs leading-6 text-muted-text">
+                <p className="text-xs leading-6 text-muted-foreground">
                   重新执行前端构建或 Docker 镜像构建后，此处的构建标识和构建时间会更新，可用来确认当前页面资源是否已切换。
                 </p>
                 {canCheckDesktopUpdate ? (
-                  <div className="mt-4 space-y-3 rounded-2xl border settings-border bg-background/30 px-4 py-4">
+                  <div className="mt-4 space-y-3 rounded-xl border border-border bg-background/30 px-4 py-4">
                     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                       <div>
                         <p className="text-sm font-medium text-foreground">桌面端更新</p>
-                        <p className="text-xs leading-6 text-muted-text">
+                        <p className="text-xs leading-6 text-muted-foreground">
                           启动后会自动检查 GitHub Releases 最新正式版；发现更新时仅提醒并跳转下载页，不会静默下载或自动安装。
                         </p>
                       </div>
                       <Button
                         type="button"
-                        variant="settings-secondary"
+                        variant="outline"
                         onClick={() => void handleDesktopUpdateCheck()}
                         disabled={isCheckingDesktopUpdate}
                         isLoading={isCheckingDesktopUpdate}
@@ -1116,7 +1157,7 @@ const SettingsPage: React.FC = () => {
                         } : undefined}
                       />
                     ) : (
-                      <p className="text-xs leading-6 text-muted-text">
+                      <p className="text-xs leading-6 text-muted-foreground">
                         当前尚无更新状态，应用启动后会在后台自动检查。
                       </p>
                     )}
@@ -1138,7 +1179,7 @@ const SettingsPage: React.FC = () => {
                   <div className="flex flex-wrap items-center gap-3">
                     <Button
                       type="button"
-                      variant="settings-secondary"
+                      variant="outline"
                       onClick={() => void downloadDesktopEnv()}
                       disabled={desktopActionDisabled}
                       isLoading={isExportingEnv}
@@ -1148,7 +1189,7 @@ const SettingsPage: React.FC = () => {
                     </Button>
                     <Button
                       type="button"
-                      variant="settings-primary"
+                      variant="primary"
                       onClick={beginDesktopImport}
                       disabled={desktopActionDisabled}
                       isLoading={isImportingEnv}
@@ -1166,7 +1207,7 @@ const SettingsPage: React.FC = () => {
                       }}
                     />
                   </div>
-                  <p className="text-xs leading-6 text-muted-text">
+                  <p className="text-xs leading-6 text-muted-foreground">
                     导出内容仅包含当前已保存配置，不包含页面上尚未保存的本地草稿。
                   </p>
                   {desktopActionError ? (
@@ -1188,38 +1229,37 @@ const SettingsPage: React.FC = () => {
                 description="维护持仓明细中可选的全局产品标签，用于按标签查看资产分布。"
               >
                 <div className="space-y-4">
-                  <form className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_120px]" onSubmit={(event) => void createPortfolioTag(event)}>
-                    <input
-                      value={portfolioTagForm.name}
-                      onChange={(event) => setPortfolioTagForm((current) => ({ ...current, name: event.target.value }))}
-                      placeholder="例如 长期核心"
-                      className="input-surface input-focus-glow h-10 w-full rounded-xl border bg-transparent px-3 text-sm outline-none"
-                      maxLength={32}
-                    />
-                    <select
-                      value={portfolioTagForm.color}
-                      onChange={(event) => setPortfolioTagForm((current) => ({ ...current, color: event.target.value }))}
-                      className="input-surface input-focus-glow h-10 w-full appearance-none rounded-xl border bg-transparent px-3 pr-8 text-sm outline-none"
-                    >
-                      {PORTFOLIO_TAG_COLORS.map((color, index) => (
-                        <option key={color} value={color}>颜色 {index + 1}</option>
-                      ))}
-                    </select>
-                    <Button
-                      type="submit"
-                      variant="settings-primary"
-                      size="md"
-                      isLoading={portfolioTagActionLoading === 'create'}
-                    >
-                      新增标签
-                    </Button>
+                  <form
+                    className="rounded-lg border border-dashed border-border bg-muted/30 p-3"
+                    onSubmit={(event) => void createPortfolioTag(event)}
+                  >
+                    <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_160px_108px] md:items-center">
+                      <Input
+                        value={portfolioTagForm.name}
+                        onChange={(event) => setPortfolioTagForm((current) => ({ ...current, name: event.target.value }))}
+                        placeholder="例如 长期核心"
+                        maxLength={32}
+                        aria-label="新标签名称"
+                      />
+                      <PortfolioTagColorSelect
+                        value={portfolioTagForm.color}
+                        onValueChange={(color) => setPortfolioTagForm((current) => ({ ...current, color }))}
+                        ariaLabel="新标签颜色"
+                      />
+                      <ShadcnButton
+                        type="submit"
+                        disabled={portfolioTagActionLoading === 'create'}
+                      >
+                        {portfolioTagActionLoading === 'create' ? '新增中' : '新增标签'}
+                      </ShadcnButton>
+                    </div>
                   </form>
                   {portfolioTagsError ? <ApiErrorAlert error={portfolioTagsError} /> : null}
                   {!portfolioTagsError && portfolioTagsSuccess ? (
                     <SettingsAlert title="操作成功" message={portfolioTagsSuccess} variant="success" />
                   ) : null}
                   {portfolioTagsLoading ? (
-                    <p className="text-xs text-muted-text">正在加载持仓标签...</p>
+                    <p className="text-xs text-muted-foreground">正在加载持仓标签...</p>
                   ) : portfolioTags.length === 0 ? (
                     <EmptyState
                       title="暂无持仓标签"
@@ -1228,38 +1268,50 @@ const SettingsPage: React.FC = () => {
                     />
                   ) : (
                     <div className="space-y-2">
-                      {portfolioTags.map((tag) => (
-                        <div key={tag.id} className="grid gap-2 rounded-xl border settings-border bg-background/30 p-3 md:grid-cols-[minmax(0,1fr)_180px_auto]">
-                          <input
-                            defaultValue={tag.name}
-                            className="input-surface input-focus-glow h-9 w-full rounded-lg border bg-transparent px-3 text-sm outline-none"
-                            maxLength={32}
-                            onBlur={(event) => {
-                              const nextName = event.target.value.trim();
-                              if (nextName && nextName !== tag.name) {
-                                void updatePortfolioTag(tag, { name: nextName });
-                              }
-                            }}
-                          />
-                          <select
-                            value={tag.color}
-                            onChange={(event) => void updatePortfolioTag(tag, { color: event.target.value })}
-                            className="input-surface input-focus-glow h-9 w-full appearance-none rounded-lg border bg-transparent px-3 pr-8 text-sm outline-none"
-                            disabled={portfolioTagActionLoading === tag.id}
-                          >
-                            {PORTFOLIO_TAG_COLORS.map((color, index) => (
-                              <option key={color} value={color}>颜色 {index + 1}</option>
-                            ))}
-                          </select>
-                          <Button
-                            type="button"
-                            variant="danger-subtle"
-                            size="sm"
-                            onClick={() => void deletePortfolioTag(tag)}
-                            disabled={portfolioTagActionLoading === tag.id}
-                          >
-                            删除
-                          </Button>
+                      {portfolioTags.map((tag, index) => (
+                        <div
+                          key={tag.id}
+                          className="flex flex-col gap-2 rounded-lg border border-border bg-background px-3 py-2 md:flex-row md:items-center md:justify-between"
+                        >
+                          <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+                            <ShadcnBadge
+                              variant="secondary"
+                              className="max-w-full text-foreground sm:max-w-[12rem]"
+                              style={{ backgroundColor: resolvePortfolioTagColor(tag.color, index) }}
+                            >
+                              <span className="truncate">{tag.name}</span>
+                            </ShadcnBadge>
+                            <Input
+                              defaultValue={tag.name}
+                              className="sm:max-w-xs"
+                              maxLength={32}
+                              aria-label={`编辑 ${tag.name} 标签名称`}
+                              onBlur={(event) => {
+                                const nextName = event.target.value.trim();
+                                if (nextName && nextName !== tag.name) {
+                                  void updatePortfolioTag(tag, { name: nextName });
+                                }
+                              }}
+                            />
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <PortfolioTagColorSelect
+                              value={resolvePortfolioTagColor(tag.color, index) || PORTFOLIO_TAG_COLORS[0]}
+                              onValueChange={(color) => void updatePortfolioTag(tag, { color })}
+                              disabled={portfolioTagActionLoading === tag.id}
+                              className="w-36"
+                              ariaLabel={`选择 ${tag.name} 标签颜色`}
+                            />
+                            <ShadcnButton
+                              type="button"
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => void deletePortfolioTag(tag)}
+                              disabled={portfolioTagActionLoading === tag.id}
+                            >
+                              删除
+                            </ShadcnButton>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1312,34 +1364,34 @@ const SettingsPage: React.FC = () => {
                     const result = state.result;
                     const connected = Boolean(result?.success);
                     return (
-                      <div key={item.source} className="rounded-2xl border settings-border bg-background/35 px-4 py-4">
+                      <div key={item.source} className="rounded-xl border border-border bg-background/35 px-4 py-4">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <p className="text-sm font-medium text-foreground">{item.label}</p>
-                            <p className="mt-1 text-xs leading-5 text-muted-text">{item.description}</p>
+                            <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.description}</p>
                           </div>
                           <span
                             className={`inline-flex min-w-[4rem] shrink-0 items-center justify-center rounded-full border px-2.5 py-0.5 text-xs leading-5 whitespace-nowrap ${
                               result
                                 ? connected
-                                  ? 'border-success/20 bg-success/10 text-success'
-                                  : 'border-danger/20 bg-danger/10 text-danger'
-                                : 'border-border/50 bg-background/40 text-muted-text'
+                                  ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600'
+                                  : 'border-destructive/20 bg-destructive/10 text-destructive'
+                                : 'border-border/50 bg-background/40 text-muted-foreground'
                             }`}
                           >
                             {result ? (connected ? '已连接' : '未连接') : '未测试'}
                           </span>
                         </div>
                         {result || state.error ? (
-                          <p className={`mt-3 text-xs leading-5 ${connected ? 'text-success' : 'text-danger'}`}>
+                          <p className={`mt-3 text-xs leading-5 ${connected ? 'text-emerald-600' : 'text-destructive'}`}>
                             {result?.message || state.error?.message}
                             {result?.latencyMs != null ? ` · ${result.latencyMs}ms` : ''}
                           </p>
                         ) : null}
-                        {result?.error ? <p className="mt-1 break-all text-xs leading-5 text-muted-text">{result.error}</p> : null}
+                        {result?.error ? <p className="mt-1 break-all text-xs leading-5 text-muted-foreground">{result.error}</p> : null}
                         <Button
                           type="button"
-                          variant="settings-secondary"
+                          variant="outline"
                           size="sm"
                           className="mt-4 w-full"
                           onClick={() => void testDataSource(item.source)}
@@ -1366,34 +1418,34 @@ const SettingsPage: React.FC = () => {
                     const result = state.result;
                     const connected = Boolean(result?.success);
                     return (
-                      <div key={item.source} className="rounded-2xl border settings-border bg-background/35 px-4 py-4">
+                      <div key={item.source} className="rounded-xl border border-border bg-background/35 px-4 py-4">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <p className="text-sm font-medium text-foreground">{item.label}</p>
-                            <p className="mt-1 text-xs leading-5 text-muted-text">{item.description}</p>
+                            <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.description}</p>
                           </div>
                           <span
                             className={`inline-flex min-w-[4rem] shrink-0 items-center justify-center rounded-full border px-2.5 py-0.5 text-xs leading-5 whitespace-nowrap ${
                               result
                                 ? connected
-                                  ? 'border-success/20 bg-success/10 text-success'
-                                  : 'border-danger/20 bg-danger/10 text-danger'
-                                : 'border-border/50 bg-background/40 text-muted-text'
+                                  ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600'
+                                  : 'border-destructive/20 bg-destructive/10 text-destructive'
+                                : 'border-border/50 bg-background/40 text-muted-foreground'
                             }`}
                           >
                             {result ? (connected ? '已连接' : '未连接') : '未测试'}
                           </span>
                         </div>
                         {result || state.error ? (
-                          <p className={`mt-3 text-xs leading-5 ${connected ? 'text-success' : 'text-danger'}`}>
+                          <p className={`mt-3 text-xs leading-5 ${connected ? 'text-emerald-600' : 'text-destructive'}`}>
                             {result?.message || state.error?.message}
                             {result?.latencyMs != null ? ` · ${result.latencyMs}ms` : ''}
                           </p>
                         ) : null}
-                        {result?.error ? <p className="mt-1 break-all text-xs leading-5 text-muted-text">{result.error}</p> : null}
+                        {result?.error ? <p className="mt-1 break-all text-xs leading-5 text-muted-foreground">{result.error}</p> : null}
                         <Button
                           type="button"
-                          variant="settings-secondary"
+                          variant="outline"
                           size="sm"
                           className="mt-4 w-full"
                           onClick={() => void testDataSource(item.source)}
@@ -1438,7 +1490,7 @@ const SettingsPage: React.FC = () => {
             {activeCategory === 'system' && passwordChangeable ? (
               <ChangePasswordCard />
             ) : null}
-            {activeCategory !== 'agent' && activeCategory !== 'portfolio_analysis' && activeItems.length ? (
+            {activeCategory !== 'portfolio_analysis' && activeItems.length ? (
               <SettingsSectionCard
                 title="当前分类配置项"
                 description={getCategoryDescriptionZh(activeCategory as SystemConfigCategory, '') || '使用统一字段卡片维护当前分类的系统配置。'}
@@ -1454,11 +1506,11 @@ const SettingsPage: React.FC = () => {
                   />
                 ))}
               </SettingsSectionCard>
-            ) : activeCategory !== 'agent' && activeCategory !== 'portfolio_analysis' ? (
+            ) : activeCategory !== 'portfolio_analysis' ? (
               <EmptyState
                 title="当前分类下暂无配置项"
                 description="当前分类没有可编辑字段；可切换左侧分类继续查看其它系统配置。"
-                className="settings-surface-panel settings-border-strong border-none bg-transparent shadow-none"
+                className="bg-card border-border border-none bg-transparent shadow-none"
               />
             ) : null}
           </section>

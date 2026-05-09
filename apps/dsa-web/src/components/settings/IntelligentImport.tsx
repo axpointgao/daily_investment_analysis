@@ -4,6 +4,7 @@ import { getParsedApiError } from '../../api/error';
 import { stocksApi, type ExtractItem } from '../../api/stocks';
 import { systemConfigApi, SystemConfigConflictError } from '../../api/systemConfig';
 import { Badge, Button, InlineAlert } from '../common';
+import { cn } from '@/lib/utils';
 
 const IMG_EXT = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
 const IMG_MAX = 5 * 1024 * 1024; // 5MB
@@ -291,9 +292,9 @@ export const IntelligentImport: React.FC<IntelligentImportProps> = ({
 
   return (
     <div className="space-y-4">
-      <div className="settings-surface-panel settings-border-strong rounded-xl border p-4 shadow-soft-card">
+      <div className="bg-card border-border rounded-xl border p-4 shadow-none">
         <p className="text-sm font-medium text-foreground">支持图片、CSV/Excel 文件与剪贴板文本</p>
-        <p className="mt-1 text-xs leading-5 text-secondary-text">
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
           图片识别需预先配置 Vision 模型。建议先人工核对解析结果，再合并到自选股。
         </p>
       </div>
@@ -303,13 +304,13 @@ export const IntelligentImport: React.FC<IntelligentImportProps> = ({
         onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
         onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }}
         className={`flex min-h-[96px] flex-col gap-4 rounded-xl border border-dashed  p-4 transition-colors ${
-          isDragging ? 'settings-drag-active' : 'settings-border-strong settings-surface-overlay-soft'
+          isDragging ? 'border-primary bg-primary/5' : 'border-border bg-muted'
         } ${disabled || isLoading ? 'cursor-not-allowed opacity-60' : ''}`}
       >
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
-            variant="settings-secondary"
+            variant="outline"
             disabled={disabled || isLoading}
             onClick={() => openFilePicker(imageInputRef)}
           >
@@ -325,7 +326,7 @@ export const IntelligentImport: React.FC<IntelligentImportProps> = ({
           />
           <Button
             type="button"
-            variant="settings-secondary"
+            variant="outline"
             disabled={disabled || isLoading}
             onClick={() => openFilePicker(dataFileInputRef)}
           >
@@ -343,14 +344,14 @@ export const IntelligentImport: React.FC<IntelligentImportProps> = ({
         <div className="flex flex-col gap-2 sm:flex-row">
           <textarea
             placeholder="或粘贴 CSV/Excel 复制的文本..."
-            className="input-surface settings-surface-strong settings-border-strong min-h-[72px] w-full rounded-xl border px-3 py-2 text-sm text-foreground shadow-none transition-colors placeholder:text-muted-text focus:outline-none"
+            className=" bg-card border-border min-h-[72px] w-full rounded-xl border px-3 py-2 text-sm text-foreground shadow-none transition-colors placeholder:text-muted-foreground focus:outline-none"
             value={pasteText}
             onChange={(e) => setPasteText(e.target.value)}
             disabled={disabled || isLoading}
           />
           <Button
             type="button"
-            variant="settings-secondary"
+            variant="outline"
             className="shrink-0 sm:self-start"
             onClick={handlePasteParse}
             disabled={disabled || isLoading || !pasteText.trim()}
@@ -360,7 +361,7 @@ export const IntelligentImport: React.FC<IntelligentImportProps> = ({
         </div>
       </div>
 
-      {isLoading && <p className="text-sm text-secondary-text">处理中...</p>}
+      {isLoading && <p className="text-sm text-muted-foreground">处理中...</p>}
       {error && (
         <InlineAlert
           variant="danger"
@@ -377,22 +378,22 @@ export const IntelligentImport: React.FC<IntelligentImportProps> = ({
             className="rounded-xl px-3 py-2 text-xs shadow-none"
           />
           <div className="flex items-center justify-between">
-            <span className="text-xs text-secondary-text">
+            <span className="text-xs text-muted-foreground">
               共 {validCount} 条可合并，已勾选 {checkedCount} 条
             </span>
             <div className="flex gap-2">
-              <button type="button" className="text-xs text-secondary-text transition-colors hover:text-foreground" onClick={() => toggleAll(true)}>
+              <button type="button" className="text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={() => toggleAll(true)}>
                 全选
               </button>
-              <button type="button" className="text-xs text-secondary-text transition-colors hover:text-foreground" onClick={() => toggleAll(false)}>
+              <button type="button" className="text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={() => toggleAll(false)}>
                 取消
               </button>
-              <button type="button" className="text-xs text-secondary-text transition-colors hover:text-foreground" onClick={clearAll}>
+              <button type="button" className="text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={clearAll}>
                 清空
               </button>
             </div>
           </div>
-          <div className="max-h-[220px] space-y-1 overflow-y-auto rounded-xl border settings-border-strong settings-surface-overlay-soft p-2">
+          <div className="max-h-[220px] space-y-1 overflow-y-auto rounded-xl border border-border bg-muted p-2">
             {items.map((it) => {
               const confidence = normalizeConfidence(it.confidence);
               const confidenceMeta = getConfidenceMeta(confidence);
@@ -400,28 +401,29 @@ export const IntelligentImport: React.FC<IntelligentImportProps> = ({
               return (
                 <div
                   key={it.id}
-                  className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-sm ${
-                    it.code ? 'settings-border bg-[var(--settings-surface-strong)]' : 'border-danger/25 bg-danger/10'
-                  }`}
+                  className={cn(
+                    'flex items-center gap-2 rounded-xl border px-3 py-2 text-sm',
+                    it.code ? 'border-border bg-card' : 'border-destructive/25 bg-destructive/10',
+                  )}
                 >
                   <input
                     type="checkbox"
                     checked={it.checked}
                     onChange={() => toggleChecked(it.id)}
                     disabled={!it.code || disabled}
-                    className="settings-input-checkbox h-4 w-4 rounded border-border/70 bg-base"
+                    className="accent-primary h-4 w-4 rounded border-border/70 bg-background"
                   />
-                  <span className={it.code ? 'font-medium text-foreground' : 'font-medium text-danger'}>
+                  <span className={it.code ? 'font-medium text-foreground' : 'font-medium text-destructive'}>
                     {it.code || '解析失败'}
                   </span>
-                  {it.name && <span className="text-secondary-text">({it.name})</span>}
+                  {it.name && <span className="text-muted-foreground">({it.name})</span>}
                   <div className="ml-auto flex items-center gap-2">
                     <Badge variant={confidenceMeta.badge} size="sm">
                       {confidenceMeta.label}
                     </Badge>
                     <button
                       type="button"
-                      className="text-secondary-text transition-colors hover:text-foreground"
+                      className="text-muted-foreground transition-colors hover:text-foreground"
                       onClick={() => removeItem(it.id)}
                       disabled={disabled}
                     >

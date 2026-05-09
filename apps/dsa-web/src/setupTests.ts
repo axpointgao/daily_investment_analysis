@@ -51,3 +51,49 @@ Object.defineProperty(globalThis, 'IntersectionObserver', {
   writable: true,
   value: IntersectionObserverMock,
 });
+
+class ResizeObserverMock implements ResizeObserver {
+  disconnect() {}
+
+  observe() {}
+
+  unobserve() {}
+}
+
+Object.defineProperty(globalThis, 'ResizeObserver', {
+  writable: true,
+  value: ResizeObserverMock,
+});
+
+if (typeof window !== 'undefined') {
+  if (!window.HTMLElement.prototype.scrollIntoView) {
+    window.HTMLElement.prototype.scrollIntoView = () => {};
+  }
+  if (!window.HTMLElement.prototype.hasPointerCapture) {
+    window.HTMLElement.prototype.hasPointerCapture = () => false;
+  }
+  if (!window.HTMLElement.prototype.releasePointerCapture) {
+    window.HTMLElement.prototype.releasePointerCapture = () => {};
+  }
+  if (!window.HTMLElement.prototype.setPointerCapture) {
+    window.HTMLElement.prototype.setPointerCapture = () => {};
+  }
+
+  const realGetComputedStyle = window.getComputedStyle.bind(window);
+
+  Object.defineProperty(window, 'getComputedStyle', {
+    configurable: true,
+    value: (element: Element, pseudoElement?: string | null) => {
+      try {
+        return realGetComputedStyle(element, pseudoElement);
+      } catch {
+        return {
+          display: 'block',
+          visibility: 'visible',
+          opacity: '1',
+          getPropertyValue: () => '',
+        } as unknown as CSSStyleDeclaration;
+      }
+    },
+  });
+}

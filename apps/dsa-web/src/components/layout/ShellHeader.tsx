@@ -32,7 +32,7 @@ export const ShellHeader: React.FC<ShellHeaderProps> = ({
         <button
           type="button"
           onClick={onOpenMobileNav}
-          className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border/70 bg-card/70 text-secondary-text transition-colors hover:bg-hover hover:text-foreground lg:hidden"
+          className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border/70 bg-card/70 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:hidden"
           aria-label="打开导航菜单"
         >
           <Menu className="h-5 w-5" />
@@ -41,7 +41,7 @@ export const ShellHeader: React.FC<ShellHeaderProps> = ({
         <button
           type="button"
           onClick={onToggleSidebar}
-          className="hidden h-10 w-10 items-center justify-center rounded-xl border border-border/70 bg-card/70 text-secondary-text transition-colors hover:bg-hover hover:text-foreground lg:inline-flex"
+          className="hidden h-10 w-10 items-center justify-center rounded-xl border border-border/70 bg-card/70 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:inline-flex"
           aria-label={collapsed ? '展开侧边栏' : '折叠侧边栏'}
         >
           {collapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
@@ -49,7 +49,7 @@ export const ShellHeader: React.FC<ShellHeaderProps> = ({
 
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-foreground">{current.title}</p>
-          <p className="truncate text-xs text-secondary-text">{current.description}</p>
+          <p className="truncate text-xs text-muted-foreground">{current.description}</p>
         </div>
 
         <ThemeToggle />

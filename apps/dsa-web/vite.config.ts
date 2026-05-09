@@ -36,4 +36,9 @@ export default defineConfig({
     outDir: path.resolve(__dirname, '../../static'),
     emptyOutDir: true,
   },
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
 })

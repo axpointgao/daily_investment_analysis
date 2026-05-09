@@ -60,22 +60,22 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
   const badgeLabel = getOperationBadgeLabel(item.operationAdvice);
 
   return (
-    <div className="flex items-start gap-2 group">
+    <div className="flex min-w-0 items-start gap-2 group">
       <div className="pt-6">
         <input
           type="checkbox"
           checked={isChecked}
           onChange={() => onToggleChecked(item.id)}
           disabled={isDeleting}
-          className="h-3.5 w-3.5 cursor-pointer rounded border-subtle-hover bg-transparent accent-primary focus:ring-primary/30 disabled:opacity-50"
+          className="h-3.5 w-3.5 cursor-pointer rounded border-border bg-transparent accent-primary focus:ring-primary/30 disabled:opacity-50"
         />
       </div>
       <button
         type="button"
         onClick={() => onClick(item.id)}
         title={displayName}
-        className={`home-history-item min-w-0 flex-1 text-left p-2.5 group/item ${
-          isViewing ? 'home-history-item-selected' : ''
+        className={`w-full min-w-0 flex-1 overflow-hidden rounded-lg border bg-card p-2.5 text-left group/item ${
+          isViewing ? 'bg-muted' : ''
         }`}
       >
         <div className="relative z-10 flex min-w-0 items-stretch gap-2.5">
@@ -110,14 +110,14 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
               )}
             </div>
             <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="min-w-[4.25rem] text-[11px] text-secondary-text font-mono">
+              <span className="min-w-[4.25rem] text-[11px] text-muted-foreground font-mono">
                 {displayCode}
               </span>
-              <span className="home-board-pill inline-flex shrink-0 rounded-full px-1.5 py-0.5 text-[10px] leading-4">
+              <span className="inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-[10px] leading-4 text-muted-foreground">
                 {itemType === 'fund' ? '基金' : '股票'}
               </span>
             </div>
-            <div className="mt-1 text-[11px] leading-4 text-muted-text">
+            <div className="mt-1 text-[11px] leading-4 text-muted-foreground">
               {formatDateTime(item.createdAt)}
             </div>
           </div>

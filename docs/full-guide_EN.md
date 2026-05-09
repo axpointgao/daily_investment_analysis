@@ -870,7 +870,7 @@ Backtesting triggers automatically after the daily analysis flow completes (non-
 
 ## Local WebUI Management Interface
 
-The WebUI and FastAPI API share the same service process. After startup, use the browser workspace for configuration management, manual analysis, task progress, historical reports, backtesting, portfolio management, and smart import. Authentication, cloud-server access, and API usage details are covered below.
+The WebUI and FastAPI API share the same service process. After startup, use the browser workspace for configuration management, manual analysis, task progress, historical reports, backtesting, portfolio management, and smart import. The frontend uses the default light shadcn/ui component style; authentication, cloud-server access, and API usage details are covered below.
 
 ### FastAPI API Service
 

@@ -10,6 +10,16 @@ import HomePage from '../HomePage';
 
 const navigateMock = vi.fn();
 
+const openSelect = (trigger: HTMLElement) => {
+  fireEvent.pointerDown(trigger);
+  fireEvent.click(trigger);
+};
+
+const chooseSelectOption = async (trigger: HTMLElement, optionName: string | RegExp) => {
+  openSelect(trigger);
+  fireEvent.click(await screen.findByRole('option', { name: optionName }));
+};
+
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
   return {
@@ -150,10 +160,10 @@ describe('HomePage', () => {
 
     const dashboard = await screen.findByTestId('home-dashboard');
     expect(dashboard).toBeInTheDocument();
-    expect(dashboard.className).toContain('h-[calc(100vh-5rem)]');
-    expect(dashboard.className).toContain('lg:h-[calc(100vh-2rem)]');
-    expect(dashboard.firstElementChild?.className).toContain('min-h-0');
-    expect(dashboard.querySelector('.flex-1.flex.min-h-0.overflow-hidden')).toBeTruthy();
+    expect(dashboard.className).toContain('min-h-[calc(100vh-5rem)]');
+    expect(dashboard.className).toContain('lg:min-h-[calc(100vh-2rem)]');
+    expect(dashboard.className).not.toContain('overflow-hidden');
+    expect(dashboard.querySelector('section')?.className).not.toContain('overflow-y-auto');
     expect(screen.getByPlaceholderText('输入股票代码或名称，如 600519、贵州茅台、AAPL')).toBeInTheDocument();
     expect(await screen.findByText('趋势维持强势')).toBeInTheDocument();
     expect(
@@ -286,7 +296,7 @@ describe('HomePage', () => {
     fireEvent.click(trigger);
 
     expect(container.querySelector('.page-drawer-overlay')).toBeTruthy();
-    expect(container.querySelector('.dashboard-card')).toBeTruthy();
+    expect(container.querySelector('[class*="rounded-r-xl"]')).toBeTruthy();
 
     fireEvent.click(container.querySelector('.fixed.inset-0.z-40') as HTMLElement);
 
@@ -384,7 +394,7 @@ describe('HomePage', () => {
       </MemoryRouter>,
     );
 
-    fireEvent.change(await screen.findByLabelText('分析类型'), { target: { value: 'fund' } });
+    await chooseSelectOption(await screen.findByLabelText('分析类型'), '场外基金');
     const input = screen.getByPlaceholderText('输入基金代码或名称，如 000001、华夏成长');
     fireEvent.change(input, { target: { value: '000001' } });
     fireEvent.click(screen.getByRole('button', { name: '分析' }));

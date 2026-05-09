@@ -56,7 +56,7 @@ const TaskItem: React.FC<TaskItemProps> = ({ task }) => {
   const displayInfo = getTaskDisplayInfo(task);
 
   return (
-    <div className="home-subpanel flex items-center gap-3 px-3 py-2.5">
+    <div className="rounded-lg border bg-card flex items-center gap-3 px-3 py-2.5">
       <div className="shrink-0">
         {task.status === 'processing' ? (
           <StatusDot tone="info" pulse className="h-2.5 w-2.5" aria-label="任务进行中" />
@@ -70,23 +70,23 @@ const TaskItem: React.FC<TaskItemProps> = ({ task }) => {
           <span className="text-sm font-medium text-foreground truncate">
             {displayInfo.name || displayInfo.code}
           </span>
-          <span className="text-xs text-muted-text">
+          <span className="text-xs text-muted-foreground">
             {displayInfo.code}
           </span>
         </div>
         {(task.message || task.notificationError) && (
-          <p className="text-xs text-secondary-text truncate mt-0.5">
+          <p className="text-xs text-muted-foreground truncate mt-0.5">
             {task.notificationError ? `通知失败：${task.notificationError}` : task.message}
           </p>
         )}
         <div className="mt-2 flex items-center gap-2">
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/8">
+          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
             <div
-              className="h-full rounded-full bg-cyan transition-[width] duration-300 ease-out"
+              className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
               style={{ width: `${progress}%` }}
             />
           </div>
-          <span className="shrink-0 text-[11px] text-muted-text tabular-nums">
+          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
             {progress}%
           </span>
         </div>
@@ -141,17 +141,16 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
 
   return (
     <Card
-      variant="bordered"
       padding="none"
-      className={`home-panel-card overflow-hidden ${className}`}
+      className={`overflow-hidden ${className}`}
     >
-      <div className="border-b border-subtle px-3 py-3">
+      <div className="border-b border-border px-3 py-3">
         <DashboardPanelHeader
           className="mb-0"
           title={title}
           titleClassName="text-sm font-medium"
           leading={(
-            <svg className="h-4 w-4 text-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="h-4 w-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -162,7 +161,7 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
           )}
           headingClassName="items-center"
           actions={(
-            <div className="flex items-center gap-2 text-xs text-muted-text">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
               {processingCount > 0 && (
                 <span className="flex items-center gap-1">
                   <StatusDot tone="info" pulse className="h-1.5 w-1.5" aria-label="进行中任务" />

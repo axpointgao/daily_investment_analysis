@@ -1,7 +1,7 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ApiErrorAlert, ConfirmDialog, Button, EmptyState, InlineAlert } from '../components/common';
+import { ApiErrorAlert, ConfirmDialog, Button, EmptyState, InlineAlert, SelectCompat } from '../components/common';
 import { DashboardStateBlock } from '../components/dashboard';
 import { FundAutocomplete } from '../components/FundAutocomplete';
 import { StockAutocomplete } from '../components/StockAutocomplete';
@@ -173,7 +173,7 @@ const HomePage: React.FC = () => {
 
   const sidebarContent = useMemo(
     () => (
-      <div className="flex min-h-0 h-full flex-col gap-3 overflow-hidden">
+      <div className="flex h-full min-h-0 min-w-0 flex-col gap-3">
         <TaskPanel tasks={activeTasks} />
         <HistoryList
           items={historyItems}
@@ -188,7 +188,7 @@ const HomePage: React.FC = () => {
           onToggleItemSelection={toggleHistorySelection}
           onToggleSelectAll={toggleSelectAllVisible}
           onDeleteSelected={() => setShowDeleteConfirm(true)}
-          className="flex-1 overflow-hidden"
+          className="min-w-0 flex-1"
         />
       </div>
     ),
@@ -211,30 +211,30 @@ const HomePage: React.FC = () => {
   return (
     <div
       data-testid="home-dashboard"
-      className="flex h-[calc(100vh-5rem)] w-full flex-col overflow-hidden md:flex-row sm:h-[calc(100vh-5.5rem)] lg:h-[calc(100vh-2rem)]"
+      className="flex min-h-[calc(100vh-5rem)] w-full flex-col md:flex-row sm:min-h-[calc(100vh-5.5rem)] lg:min-h-[calc(100vh-2rem)]"
     >
-      <div className="flex-1 flex flex-col min-h-0 min-w-0 max-w-full w-full">
-        <header className="flex min-w-0 flex-shrink-0 items-center overflow-hidden px-3 py-3 md:px-4 md:py-4">
+      <div className="flex-1 flex flex-col min-w-0 max-w-full w-full">
+        <header className="flex min-w-0 flex-shrink-0 items-center overflow-hidden pb-3 md:pb-4">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5 md:flex-nowrap">
             <button
               onClick={() => setSidebarOpen(true)}
-              className="md:hidden -ml-1 flex-shrink-0 rounded-lg p-1.5 text-secondary-text transition-colors hover:bg-hover hover:text-foreground"
+              className="md:hidden -ml-1 flex-shrink-0 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               aria-label="历史记录"
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            <select
+            <SelectCompat
               value={entryType}
               onChange={(event) => setEntryType(event.target.value as 'stock' | 'fund')}
               disabled={isAnalyzing}
-              className="input-surface input-focus-glow h-10 w-28 shrink-0 appearance-none rounded-xl border bg-transparent px-3 pr-8 text-sm font-medium text-foreground outline-none transition-all disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-28 shrink-0"
               aria-label="分析类型"
             >
               <option value="stock">股票</option>
               <option value="fund">场外基金</option>
-            </select>
+            </SelectCompat>
             <div className="relative min-w-0 flex-1">
               {entryType === 'stock' ? (
                 <StockAutocomplete
@@ -245,7 +245,7 @@ const HomePage: React.FC = () => {
                   }}
                   placeholder="输入股票代码或名称，如 600519、贵州茅台、AAPL"
                   disabled={isAnalyzing}
-                  className={`!h-10 ${inputError ? 'border-danger/50' : ''}`}
+                  className={inputError ? 'border-destructive/50' : ''}
                 />
               ) : (
                 <FundAutocomplete
@@ -256,11 +256,11 @@ const HomePage: React.FC = () => {
                   }}
                   placeholder="输入基金代码或名称，如 000001、华夏成长"
                   disabled={isAnalyzing}
-                  className={`!h-10 ${inputError ? 'border-danger/50' : ''}`}
+                  className={inputError ? 'border-destructive/50' : ''}
                 />
               )}
             </div>
-            <label className="flex h-10 flex-shrink-0 cursor-pointer items-center gap-1.5 rounded-xl border border-subtle bg-surface/60 px-3 text-xs text-secondary-text select-none transition-colors hover:border-subtle-hover hover:text-foreground">
+            <label className="flex h-8 flex-shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-xs text-muted-foreground select-none transition-colors hover:bg-muted hover:text-foreground">
               <input
                 type="checkbox"
                 checked={notify}
@@ -273,7 +273,7 @@ const HomePage: React.FC = () => {
               type="button"
               onClick={() => handleSubmitAnalysis()}
               disabled={!query || isAnalyzing}
-              className="btn-primary flex h-10 flex-shrink-0 items-center gap-1.5 whitespace-nowrap"
+              className="inline-flex h-8 w-28 flex-shrink-0 items-center justify-center gap-1.5 rounded-lg bg-primary px-2.5 text-sm font-medium text-primary-foreground whitespace-nowrap transition-colors disabled:pointer-events-none disabled:opacity-50"
             >
               {isAnalyzing ? (
                 <>
@@ -291,7 +291,7 @@ const HomePage: React.FC = () => {
         </header>
 
         {inputError || duplicateError ? (
-          <div className="px-3 pb-2 md:px-4">
+          <div className="pb-2">
             {inputError ? (
               <InlineAlert
                 variant="danger"
@@ -311,8 +311,8 @@ const HomePage: React.FC = () => {
           </div>
         ) : null}
 
-        <div className="flex-1 flex min-h-0 overflow-hidden">
-          <div className="hidden min-h-0 w-64 shrink-0 flex-col overflow-hidden pl-4 pb-4 md:flex lg:w-72">
+        <div className="flex-1 flex gap-4">
+          <div className="hidden max-h-[calc(100vh-5.5rem)] w-72 shrink-0 flex-col md:sticky md:top-4 md:flex lg:w-80">
             {sidebarContent}
           </div>
 
@@ -320,7 +320,7 @@ const HomePage: React.FC = () => {
             <div className="fixed inset-0 z-40 md:hidden" onClick={() => setSidebarOpen(false)}>
               <div className="page-drawer-overlay absolute inset-0" />
               <div
-                className="dashboard-card absolute bottom-0 left-0 top-0 flex w-72 flex-col overflow-hidden !rounded-none !rounded-r-xl p-3 shadow-2xl"
+                className="absolute bottom-0 left-0 top-0 flex w-72 flex-col overflow-hidden !rounded-none !rounded-r-xl p-3 shadow-none"
                 onClick={(event) => event.stopPropagation()}
               >
                 {sidebarContent}
@@ -328,7 +328,7 @@ const HomePage: React.FC = () => {
             </div>
           ) : null}
 
-          <section className="flex-1 min-w-0 min-h-0 overflow-x-auto overflow-y-auto px-3 pb-4 md:px-6 touch-pan-y">
+          <section className="flex-1 min-w-0 touch-pan-y">
             {error ? (
               <ApiErrorAlert
                 error={error}
@@ -344,8 +344,8 @@ const HomePage: React.FC = () => {
               <div className="w-full space-y-4 pb-8">
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   <Button
-                    variant="home-action-ai"
-                    size="sm"
+                    variant="primary"
+                    size="xsm"
                     disabled={isAnalyzing || selectedReport.meta.id === undefined}
                     onClick={handleReanalyze}
                   >
@@ -355,8 +355,8 @@ const HomePage: React.FC = () => {
                     {reportText.reanalyze}
                   </Button>
                   <Button
-                    variant="home-action-ai"
-                    size="sm"
+                    variant="primary"
+                    size="xsm"
                     disabled={selectedReport.meta.id === undefined || (selectedReportType === 'fund' && !selectedReport.meta.fundCode)}
                     onClick={handleAskFollowUp}
                   >
@@ -366,8 +366,8 @@ const HomePage: React.FC = () => {
                     追问 AI
                   </Button>
                   <Button
-                    variant="home-action-ai"
-                    size="sm"
+                    variant="primary"
+                    size="xsm"
                     disabled={selectedReport.meta.id === undefined}
                     onClick={openMarkdownDrawer}
                   >

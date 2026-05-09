@@ -1,5 +1,16 @@
-import React, { useId } from 'react';
-import { cn } from '../../utils/cn';
+import type React from 'react';
+import { useId } from 'react';
+import {
+  Select as ShadcnSelect,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils';
+
+const EMPTY_OPTION_VALUE = '__empty_option__';
 
 interface SelectOption {
   value: string;
@@ -15,14 +26,8 @@ interface SelectProps {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
-  searchable?: boolean;
-  searchPlaceholder?: string;
-  emptyText?: string;
 }
 
-/**
- * Select component with terminal-inspired styling.
- */
 export const Select: React.FC<SelectProps> = ({
   id,
   value,
@@ -31,38 +36,30 @@ export const Select: React.FC<SelectProps> = ({
   label,
   placeholder = '请选择',
   disabled = false,
-  className = '',
+  className,
 }) => {
-  const selectId = useId();
-  const resolvedId = id ?? selectId;
+  const generatedId = useId();
+  const resolvedId = id ?? generatedId;
 
   return (
-    <div className={cn('flex flex-col', className)}>
-      {label ? <label htmlFor={resolvedId} className="mb-2 text-sm font-medium text-foreground">{label}</label> : null}
-      <div>
-        <select
-          id={resolvedId}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          disabled={disabled}
-          className={cn(
-            'input-surface input-focus-glow h-11 w-full appearance-none rounded-xl border bg-transparent px-4 py-2.5 pr-10 text-sm text-foreground',
-            'transition-all duration-200 focus:outline-none',
-            disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
-          )}
-        >
-          {placeholder && (
-            <option value="" disabled>
-              {placeholder}
-            </option>
-          )}
+    <div className={cn('grid gap-2', className)}>
+      {label ? <Label htmlFor={resolvedId}>{label}</Label> : null}
+      <ShadcnSelect
+        value={value || undefined}
+        onValueChange={(nextValue) => onChange(nextValue === EMPTY_OPTION_VALUE ? '' : nextValue)}
+        disabled={disabled}
+      >
+        <SelectTrigger id={resolvedId} className="w-full">
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
           {options.map((option) => (
-            <option key={option.value} value={option.value} className="bg-elevated text-foreground">
+            <SelectItem key={option.value || EMPTY_OPTION_VALUE} value={option.value || EMPTY_OPTION_VALUE}>
               {option.label}
-            </option>
+            </SelectItem>
           ))}
-        </select>
-      </div>
+        </SelectContent>
+      </ShadcnSelect>
     </div>
   );
 };

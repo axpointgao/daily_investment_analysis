@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cn } from '../cn';
+import { cn } from '@/lib/utils';
 
 describe('cn utility', () => {
   it('should merge basic tailwind classes', () => {
@@ -13,11 +13,10 @@ describe('cn utility', () => {
     expect(cn('base-class', isTrue && 'active-class', isFalse && 'hidden-class')).toBe('base-class active-class');
   });
 
-  it('should preserve custom extracted component classes alongside utilities', () => {
-    // Tests our Phase 0 extracted classes
-    expect(cn('terminal-card border-subtle', 'border-primary/50')).toBe('terminal-card border-primary/50');
-    expect(cn('glass-card p-4', 'p-6')).toBe('glass-card p-6');
-    expect(cn('btn-primary bg-blue-500', 'bg-red-500')).toBe('btn-primary bg-red-500');
+  it('should preserve shadcn data-slot classes alongside utilities', () => {
+    expect(cn('rounded-lg border-border', 'border-input')).toBe('rounded-lg border-input');
+    expect(cn('bg-card p-4', 'p-6')).toBe('bg-card p-6');
+    expect(cn('text-muted-foreground bg-blue-500', 'bg-red-500')).toBe('text-muted-foreground bg-red-500');
   });
 
   it('should handle undefined and null gracefully', () => {

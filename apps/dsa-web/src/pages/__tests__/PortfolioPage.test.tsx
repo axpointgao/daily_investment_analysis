@@ -3,6 +3,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApiError, createParsedApiError } from '../../api/error';
 import PortfolioPage from '../PortfolioPage';
 
+const openSelect = (trigger: HTMLElement) => {
+  fireEvent.pointerDown(trigger);
+  fireEvent.click(trigger);
+};
+
+const chooseSelectOption = async (trigger: HTMLElement, optionName: string | RegExp, optionIndex = 0) => {
+  openSelect(trigger);
+  const options = await screen.findAllByRole('option', { name: optionName });
+  fireEvent.click(options[optionIndex]);
+};
+
 const {
   getAccounts,
   getSnapshot,
@@ -298,10 +309,24 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
-    expect(screen.getByText('组合快照、手工录入、CSV 导入与资产分析（支持全组合 / 单账户切换）')).toBeInTheDocument();
+    expect(screen.getByText('组合快照、手工录入与资产分析（支持全组合 / 单账户切换）')).toBeInTheDocument();
+    expect(screen.queryByText('券商 CSV 导入')).not.toBeInTheDocument();
     expect(screen.queryByText(/风险分析/)).not.toBeInTheDocument();
     expect(await screen.findByText('过期')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '刷新汇率' })).toBeInTheDocument();
+  });
+
+  it('uses the primary button style for portfolio ledger submit actions', async () => {
+    render(<PortfolioPage />);
+
+    await waitForInitialLoad();
+    await chooseSelectOption(screen.getAllByRole('combobox')[0], 'Main (#1)');
+    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', refreshPrices: false }));
+
+    expect(screen.queryByText('券商 CSV 导入')).not.toBeInTheDocument();
+    const submitButton = screen.getByRole('button', { name: '提交交易' });
+    expect(submitButton).toHaveClass('bg-primary');
+    expect(submitButton).toHaveClass('text-primary-foreground');
   });
 
   it('localizes stock and cash labels in asset distribution', async () => {
@@ -316,9 +341,10 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
-    const assetDistribution = screen.getByText('资产分布').closest('.terminal-card');
+    const assetDistribution = screen.getByText('资产分布').closest('[data-slot="card"]');
     expect(assetDistribution).not.toBeNull();
     fireEvent.click(within(assetDistribution as HTMLElement).getByRole('button', { name: '资产类型' }));
+    expect(within(assetDistribution as HTMLElement).getByLabelText('资产分布饼图')).toBeInTheDocument();
     expect(within(assetDistribution as HTMLElement).getByText('股票')).toBeInTheDocument();
     expect(within(assetDistribution as HTMLElement).getByText('现金')).toBeInTheDocument();
     expect(within(assetDistribution as HTMLElement).queryByText('stock')).not.toBeInTheDocument();
@@ -336,7 +362,7 @@ describe('PortfolioPage FX refresh', () => {
     await waitForInitialLoad();
 
     const accountSelect = screen.getAllByRole('combobox')[0];
-    fireEvent.change(accountSelect, { target: { value: '1' } });
+    await chooseSelectOption(accountSelect, 'Main (#1)');
 
     await waitFor(() => {
       expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', refreshPrices: false });
@@ -401,7 +427,7 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
-    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: '1' } });
+    await chooseSelectOption(screen.getAllByRole('combobox')[0], 'Main (#1)');
     await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', refreshPrices: false }));
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }));
@@ -422,7 +448,7 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
-    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: '1' } });
+    await chooseSelectOption(screen.getAllByRole('combobox')[0], 'Main (#1)');
     await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', refreshPrices: false }));
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }));
@@ -498,7 +524,7 @@ describe('PortfolioPage FX refresh', () => {
     render(<PortfolioPage />);
     await waitForInitialLoad();
 
-    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: '1' } });
+    await chooseSelectOption(screen.getAllByRole('combobox')[0], '源账户 (#1)');
     await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', refreshPrices: false }));
 
     fireEvent.click(screen.getByRole('button', { name: '转移资产' }));
@@ -560,8 +586,11 @@ describe('PortfolioPage FX refresh', () => {
   });
 
   it('renders backend-provided position valuation fields, Chinese pnl colors and stale missing-price hint', async () => {
+    listTags.mockResolvedValueOnce({
+      tags: [{ id: 10, name: '长期核心', color: '#FDF4BF', sortOrder: 0, createdAt: '2026-03-19T00:00:00Z', updatedAt: '2026-03-19T00:00:00Z' }],
+    });
     getSnapshot.mockResolvedValueOnce(makeSnapshot({ fxStale: true, positions: [
-      { symbol: 'HK00700', displayName: '腾讯控股', market: 'hk', currency: 'HKD', quantity: 10, avgCost: 400, totalCost: 4000, lastPrice: 420, marketValueBase: 4200, unrealizedPnlBase: 200, unrealizedPnlPct: 5, valuationCurrency: 'HKD', priceSource: 'history_close', priceDate: '2026-03-18', priceStale: true, priceAvailable: true },
+      { symbol: 'HK00700', displayName: '腾讯控股', market: 'hk', currency: 'HKD', quantity: 10, avgCost: 1400, totalCost: 14000, lastPrice: 1420, marketValueBase: 14200, unrealizedPnlBase: 200, unrealizedPnlPct: 5, valuationCurrency: 'HKD', priceSource: 'history_close', priceDate: '2026-03-18', priceStale: true, priceAvailable: true, tagId: 10, tagName: '长期核心' },
       { symbol: 'AAPL', market: 'us', currency: 'USD', quantity: 5, avgCost: 100, totalCost: 500, lastPrice: 90, marketValueBase: 450, unrealizedPnlBase: -50, unrealizedPnlPct: -10, valuationCurrency: 'USD', priceSource: 'realtime_quote', priceDate: '2026-03-19', priceStale: false, priceAvailable: true },
       { symbol: 'MSFT', market: 'us', currency: 'USD', quantity: 5, avgCost: 100, totalCost: 500, lastPrice: 0, marketValueBase: 0, unrealizedPnlBase: 0, unrealizedPnlPct: null, valuationCurrency: 'USD', priceSource: 'missing', priceDate: null, priceStale: true, priceAvailable: false },
     ] }));
@@ -573,10 +602,13 @@ describe('PortfolioPage FX refresh', () => {
     expect(await screen.findByText('HK00700')).toBeInTheDocument();
     expect(screen.getByText('港股')).toBeInTheDocument();
     expect(screen.getByText('腾讯控股')).toBeInTheDocument();
-    expect(screen.getByText('420.0000')).toBeInTheDocument();
-    expect(screen.getByText('HKD 4,200.00')).toBeInTheDocument();
+    expect(screen.getByText('1,400.0000')).toBeInTheDocument();
+    expect(screen.getByText('1,420.0000')).toBeInTheDocument();
+    expect(screen.getByText('HKD 14,200.00')).toBeInTheDocument();
+    expect(screen.getByText('HKD 200.00')).toBeInTheDocument();
     expect(screen.getByText('+5.00%')).toBeInTheDocument();
     expect(screen.getByText('-10.00%')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '设置 HK00700 的标签' })).toHaveStyle({ backgroundColor: '#FDF4BF' });
     expect(screen.getByText('收盘价 · 2026-03-18')).toBeInTheDocument();
     expect(screen.getByText('缺价')).toBeInTheDocument();
     expect(screen.getAllByText('--').length).toBeGreaterThanOrEqual(2);
@@ -591,11 +623,11 @@ describe('PortfolioPage FX refresh', () => {
     const hkRowCells = within(hkRow as HTMLTableRowElement).getAllByRole('cell');
     const aaplRowCells = within(aaplRow as HTMLTableRowElement).getAllByRole('cell');
     const msftRowCells = within(msftRow as HTMLTableRowElement).getAllByRole('cell');
-    expect(hkRowCells.at(-3)).toHaveClass('text-danger');
-    expect(hkRowCells.at(-2)).toHaveClass('text-danger');
-    expect(aaplRowCells.at(-3)).toHaveClass('text-success');
-    expect(aaplRowCells.at(-2)).toHaveClass('text-success');
-    expect(msftRowCells.at(-2)).toHaveClass('text-secondary');
+    expect(hkRowCells.at(-3)).toHaveClass('text-destructive');
+    expect(hkRowCells.at(-2)).toHaveClass('text-destructive');
+    expect(aaplRowCells.at(-3)).toHaveClass('text-emerald-600');
+    expect(aaplRowCells.at(-2)).toHaveClass('text-emerald-600');
+    expect(msftRowCells.at(-2)).toHaveClass('text-muted-foreground');
   });
 
   it('keeps crypto quantities at up to 8 decimals in display and entry controls', async () => {
@@ -629,7 +661,7 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitForInitialLoad();
 
-    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: '1' } });
+    await chooseSelectOption(screen.getAllByRole('combobox')[0], 'Crypto (#1)');
 
     expect(await screen.findByText('0.12345678')).toBeInTheDocument();
     expect(screen.getByText(/数量=0.12345678/)).toBeInTheDocument();
@@ -699,17 +731,14 @@ describe('PortfolioPage FX refresh', () => {
     render(<PortfolioPage />);
 
     await waitForInitialLoad();
-    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: '1' } });
+    await chooseSelectOption(screen.getAllByRole('combobox')[0], 'Advisory (#1)');
     await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', refreshPrices: false }));
 
     expect(screen.getByText('稳稳幸福')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByDisplayValue('买入'), { target: { value: 'append_buy' } });
-    const comboSelect = screen.getByDisplayValue('选择投顾组合');
-    expect(within(comboSelect).getByText(/稳稳幸福/)).toBeInTheDocument();
-    expect(within(comboSelect).queryByText(/长赢计划/)).not.toBeInTheDocument();
-
-    fireEvent.change(comboSelect, { target: { value: 'ADV:COMBO000001' } });
+    await chooseSelectOption(screen.getByRole('combobox', { name: '操作类型' }), '追加买入');
+    const comboSelect = screen.getByRole('combobox', { name: '投顾产品' });
+    await chooseSelectOption(comboSelect, /稳稳幸福/);
     fireEvent.change(screen.getByPlaceholderText('投入金额'), { target: { value: '1000' } });
     fireEvent.click(screen.getByRole('button', { name: '提交投顾投入' }));
 
@@ -720,11 +749,10 @@ describe('PortfolioPage FX refresh', () => {
       amount: 1000,
     })));
 
-    fireEvent.change(screen.getByDisplayValue('投顾组合'), { target: { value: 'dca_plan' } });
-    fireEvent.change(screen.getByDisplayValue('首次买入'), { target: { value: 'follow_buy' } });
-    const dcaSelect = screen.getByDisplayValue('选择定投计划');
-    expect(within(dcaSelect).getByText(/长赢计划/)).toBeInTheDocument();
-    expect(within(dcaSelect).queryByText(/稳稳幸福/)).not.toBeInTheDocument();
+    await chooseSelectOption(screen.getByRole('combobox', { name: '产品类型' }), '定投计划');
+    await chooseSelectOption(screen.getByRole('combobox', { name: '操作类型' }), '跟投');
+    const dcaSelect = screen.getByRole('combobox', { name: '投顾产品' });
+    await chooseSelectOption(dcaSelect, /长赢计划/);
   });
 
   it('generates portfolio analysis only from the explicit analysis button and shows report drawer', async () => {
@@ -892,13 +920,13 @@ describe('PortfolioPage FX refresh', () => {
     await waitForInitialLoad();
 
     const accountSelect = screen.getAllByRole('combobox')[0];
-    fireEvent.change(accountSelect, { target: { value: '1' } });
+    await chooseSelectOption(accountSelect, 'Main (#1)');
     await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', refreshPrices: false }));
 
     fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }));
     expect(await screen.findByRole('button', { name: '刷新中...' })).toBeDisabled();
 
-    fireEvent.change(accountSelect, { target: { value: '2' } });
+    await chooseSelectOption(accountSelect, 'Alt (#2)');
     await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 2, costMethod: 'fifo', refreshPrices: false }));
     await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).not.toBeDisabled());
 
@@ -940,7 +968,7 @@ describe('PortfolioPage FX refresh', () => {
     fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }));
     expect(await screen.findByRole('button', { name: '刷新中...' })).toBeDisabled();
 
-    fireEvent.change(costMethodSelect, { target: { value: 'avg' } });
+    await chooseSelectOption(costMethodSelect, '均价成本（AVG）');
     await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: undefined, costMethod: 'avg', refreshPrices: false }));
     await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).not.toBeDisabled());
 

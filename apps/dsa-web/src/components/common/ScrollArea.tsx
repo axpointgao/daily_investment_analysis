@@ -1,5 +1,6 @@
 import type React from 'react';
-import { cn } from '../../utils/cn';
+import { ScrollArea as ShadcnScrollArea } from '@/components/ui/scroll-area';
+import { cn } from '@/lib/utils';
 
 interface ScrollAreaProps {
   children: React.ReactNode;
@@ -19,15 +20,15 @@ export const ScrollArea: React.FC<ScrollAreaProps> = ({
   onScroll,
 }) => {
   return (
-    <div className={cn('min-h-0 flex-1 overflow-hidden', className)}>
+    <ShadcnScrollArea className={cn('min-h-0 flex-1', className)}>
       <div
         ref={viewportRef}
         data-testid={testId}
         onScroll={onScroll}
-        className={cn('h-full overflow-y-auto custom-scrollbar', viewportClassName)}
+        className={cn('h-full', viewportClassName)}
       >
         {children}
       </div>
-    </div>
+    </ShadcnScrollArea>
   );
 };

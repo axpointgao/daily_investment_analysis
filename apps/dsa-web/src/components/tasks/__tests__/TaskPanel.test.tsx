@@ -38,8 +38,8 @@ describe('TaskPanel', () => {
     expect(screen.getByText('贵州茅台')).toBeInTheDocument();
     expect(screen.getByText('AAPL')).toBeInTheDocument();
     expect(screen.getByLabelText('任务状态：分析中')).toBeInTheDocument();
-    expect(container.querySelector('.home-panel-card')).toBeTruthy();
-    expect(container.querySelector('.home-subpanel')).toBeTruthy();
+    expect(container.querySelector('[data-slot="card"]')).toBeTruthy();
+    expect(container.querySelector('[data-slot="badge"]')).toBeTruthy();
   });
 
   it('does not render when there are no active tasks', () => {

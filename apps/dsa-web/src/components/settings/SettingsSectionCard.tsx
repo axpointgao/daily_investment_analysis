@@ -1,5 +1,5 @@
 import type React from 'react';
-import { cn } from '../../utils/cn';
+import { cn } from '@/lib/utils';
 
 interface SettingsSectionCardProps {
   title: string;
@@ -17,11 +17,11 @@ export const SettingsSectionCard: React.FC<SettingsSectionCardProps> = ({
   className = '',
 }) => {
   return (
-    <div className={cn('rounded-[1.5rem] border settings-border bg-card/94 p-5 shadow-soft-card-strong backdrop-blur-sm', className)}>
+    <div className={cn('rounded-[1.5rem] border border-border bg-card/94 p-5 shadow-none backdrop-blur-sm', className)}>
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1">
           <h2 className="text-sm font-semibold tracking-tight text-foreground uppercase tracking-wider">{title}</h2>
-          {description ? <p className="text-xs leading-6 text-muted-text">{description}</p> : null}
+          {description ? <p className="text-xs leading-6 text-muted-foreground">{description}</p> : null}
         </div>
         {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
       </div>

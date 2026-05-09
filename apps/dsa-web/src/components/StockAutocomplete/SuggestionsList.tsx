@@ -8,7 +8,7 @@
 import type { CSSProperties } from 'react';
 import type { StockSuggestion } from '../../types/stockIndex';
 import { Badge } from '../common';
-import { cn } from '../../utils/cn';
+import { cn } from '@/lib/utils';
 
 export interface SuggestionsListProps {
   /** Suggestion list */
@@ -37,13 +37,8 @@ export function SuggestionsList({
   return (
     <ul
       id="suggestions-list"
-      className="z-[100] border-x border-b rounded-b-lg rounded-t-none max-h-60 overflow-auto"
-      style={{
-        ...style,
-        backgroundColor: 'hsl(var(--card) / 0.85)',
-        borderColor: 'var(--border-accent)',
-        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3), -4px 0 15px -3px rgba(0, 0, 0, 0.2), 4px 0 15px -3px rgba(0, 0, 0, 0.2)'
-      }}
+      className="z-[100] max-h-60 overflow-auto rounded-b-lg rounded-t-none border-x border-b border-border bg-card/95 shadow-lg backdrop-blur"
+      style={style}
       role="listbox"
     >
       {suggestions.map((suggestion, index) => (
@@ -52,9 +47,9 @@ export function SuggestionsList({
           role="option"
           aria-selected={index === highlightedIndex}
           className={cn(
-            "px-4 py-1 cursor-pointer flex items-center justify-between",
-            "hover:bg-[var(--autocomplete-hover-bg)]/25",
-            index === highlightedIndex && "bg-[var(--autocomplete-hover-bg)]/25"
+            'flex cursor-pointer items-center justify-between px-4 py-1',
+            'hover:bg-muted',
+            index === highlightedIndex && 'bg-muted',
           )}
           onClick={() => onSelect(suggestion)}
           onMouseEnter={() => onMouseEnter(index)}
@@ -65,10 +60,10 @@ export function SuggestionsList({
 
             {/* Name and code */}
             <div className="flex flex-col">
-              <span className="text-sm font-medium text-primary-text">
+              <span className="text-sm font-medium text-foreground">
                 {suggestion.nameZh}
               </span>
-              <span className="text-sm text-secondary-text">
+              <span className="text-sm text-muted-foreground">
                 {suggestion.displayCode}
               </span>
             </div>
@@ -84,11 +79,11 @@ export function SuggestionsList({
 
 // Helper component: Market badge
 const MARKET_BADGE_CONFIG = {
-  CN: { label: 'A股', className: 'border-danger/25 bg-danger/10 text-danger' },
-  HK: { label: '港股', className: 'border-success/25 bg-success/10 text-success' },
-  US: { label: '美股', className: 'border-cyan/25 bg-cyan/10 text-cyan' },
-  INDEX: { label: '指数', className: 'border-purple/25 bg-purple/10 text-purple' },
-  ETF: { label: 'ETF', className: 'border-warning/25 bg-warning/10 text-warning' },
+  CN: { label: 'A股', className: 'border-destructive/25 bg-destructive/10 text-destructive' },
+  HK: { label: '港股', className: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600' },
+  US: { label: '美股', className: 'border-primary/25 bg-primary/10 text-primary' },
+  INDEX: { label: '指数', className: 'border-muted/25 bg-muted/10 text-muted-foreground' },
+  ETF: { label: 'ETF', className: 'border-amber-500/25 bg-amber-500/10 text-amber-600' },
   BSE: { label: '北交所', className: 'border-orange-500/25 bg-orange-500/10 text-orange-500' },
 } as const;
 
@@ -109,10 +104,10 @@ function MarketBadge({ market }: { market: string }) {
 // Helper component: Match type badge
 function MatchTypeBadge({ matchType }: { matchType: string }) {
   const configMap = {
-    exact: { label: '精确', className: 'border-cyan/25 bg-cyan/10 text-cyan' },
-    prefix: { label: '前缀', className: 'border-purple/25 bg-purple/10 text-purple' },
-    contains: { label: '包含', className: 'border-warning/25 bg-warning/10 text-warning' },
-    fuzzy: { label: '模糊', className: 'border-border/55 bg-elevated/75 text-muted-text' },
+    exact: { label: '精确', className: 'border-primary/25 bg-primary/10 text-primary' },
+    prefix: { label: '前缀', className: 'border-muted/25 bg-muted/10 text-muted-foreground' },
+    contains: { label: '包含', className: 'border-amber-500/25 bg-amber-500/10 text-amber-600' },
+    fuzzy: { label: '模糊', className: 'border-border/55 bg-card/75 text-muted-foreground' },
   };
 
   const config = configMap[matchType as keyof typeof configMap] || configMap.fuzzy;

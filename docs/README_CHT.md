@@ -213,7 +213,7 @@ python main.py --serve-only
 
 ![FastAPI Web UI](../sources/fastapi_server.png)
 
-Web 工作台提供配置管理、任務監控、手動分析、歷史報告、回測、持倉管理、智能匯入和淺色 / 深色主題。啟動方式：
+Web 工作台提供配置管理、任務監控、手動分析、歷史報告、回測、持倉管理和智能匯入，介面採用 shadcn/ui 預設淺色元件樣式。啟動方式：
 
 ```bash
 python main.py --webui
