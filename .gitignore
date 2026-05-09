@@ -23,6 +23,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+!apps/dsa-web/src/lib/
+!apps/dsa-web/src/lib/**
 lib64/
 parts/
 sdist/
