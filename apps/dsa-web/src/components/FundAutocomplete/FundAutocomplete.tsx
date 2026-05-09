@@ -3,7 +3,7 @@ import type { ErrorInfo, KeyboardEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useFundAutocomplete } from '../../hooks/useFundAutocomplete';
 import { useFundIndex } from '../../hooks/useFundIndex';
-import { cn } from '../../utils/cn';
+import { cn } from '@/lib/utils';
 import { FundSuggestionsList } from './FundSuggestionsList';
 
 const AUTOCOMPLETE_INPUT_CLASS =

@@ -2989,19 +2989,19 @@ const PortfolioPage: React.FC = () => {
       ) : null}
 
       <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-        <Card variant="gradient" padding="md">
+        <Card padding="md">
           <p className="text-xs text-muted-foreground">总权益</p>
           <p className="mt-1 text-xl font-semibold text-foreground">{formatAggregateMoney(snapshot, snapshot?.totalEquity)}</p>
         </Card>
-        <Card variant="gradient" padding="md">
+        <Card padding="md">
           <p className="text-xs text-muted-foreground">总市值</p>
           <p className="mt-1 text-xl font-semibold text-foreground">{formatAggregateMoney(snapshot, snapshot?.totalMarketValue)}</p>
         </Card>
-        <Card variant="gradient" padding="md">
+        <Card padding="md">
           <p className="text-xs text-muted-foreground">总现金</p>
           <p className="mt-1 text-xl font-semibold text-foreground">{formatAggregateMoney(snapshot, snapshot?.totalCash)}</p>
         </Card>
-        <Card variant="gradient" padding="md">
+        <Card padding="md">
           <div className="flex items-start justify-between gap-3">
             <p className="text-xs text-muted-foreground">汇率状态</p>
             <ShadcnButton

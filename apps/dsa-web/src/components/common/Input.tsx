@@ -12,7 +12,6 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   hint?: string;
   error?: string;
   trailingAction?: React.ReactNode;
-  appearance?: 'default' | 'login';
   allowTogglePassword?: boolean;
   iconType?: 'password' | 'key' | 'none';
   passwordVisible?: boolean;
@@ -30,11 +29,8 @@ export const Input = ({
   iconType = 'none',
   passwordVisible,
   onPasswordVisibleChange,
-  appearance,
   ...props
 }: InputProps) => {
-  void appearance;
-
   const generatedId = useId();
   const inputId = id ?? props.name ?? generatedId;
   const hintId = hint ? `${inputId}-hint` : undefined;

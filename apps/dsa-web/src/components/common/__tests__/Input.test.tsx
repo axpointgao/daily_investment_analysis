@@ -69,12 +69,10 @@ describe('Input', () => {
     expect(onPasswordVisibleChange).toHaveBeenCalledWith(false);
   });
 
-  it('ignores the legacy login appearance without affecting password toggle behavior', () => {
-    render(<Input label="登录密码" type="password" allowTogglePassword appearance="login" />);
+  it('keeps password toggle behavior independent of presentation styling', () => {
+    render(<Input label="登录密码" type="password" allowTogglePassword />);
 
     const input = screen.getByLabelText('登录密码');
-    expect(input).not.toHaveAttribute('data-appearance');
-    expect(input).not.toHaveClass('input-appearance-login');
     expect(input).toHaveAttribute('type', 'password');
 
     fireEvent.click(screen.getByRole('button', { name: '显示内容' }));

@@ -8,14 +8,10 @@ import {
 } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
-interface CardProps {
+interface CardProps extends Omit<React.ComponentProps<typeof ShadcnCard>, 'title'> {
   title?: string;
   subtitle?: string;
   children: React.ReactNode;
-  className?: string;
-  style?: React.CSSProperties;
-  variant?: 'default' | 'bordered' | 'gradient';
-  hoverable?: boolean;
   padding?: 'none' | 'sm' | 'md' | 'lg';
 }
 
@@ -33,11 +29,12 @@ export const Card: React.FC<CardProps> = ({
   className,
   style,
   padding = 'md',
+  ...props
 }) => {
   const hasHeader = Boolean(title || subtitle);
 
   return (
-    <ShadcnCard className={cn(className)} style={style}>
+    <ShadcnCard className={cn(className)} style={style} {...props}>
       {hasHeader ? (
         <CardHeader>
           {subtitle ? <CardDescription>{subtitle}</CardDescription> : null}

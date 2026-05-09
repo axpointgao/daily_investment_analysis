@@ -127,7 +127,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
         {/* 左侧：股票信息与结论 */}
         <div className="lg:col-span-2 space-y-5">
           {/* 股票头部 */}
-          <Card variant="gradient" padding="md" className="">
+          <Card padding="md">
             <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-3">
@@ -171,12 +171,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
           {/* 操作建议和趋势预测 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* 操作建议 */}
-            <Card
-              variant="bordered"
-              padding="sm"
-              hoverable
-              className=" "
-            >
+            <Card padding="sm">
               <div className="flex items-start gap-3">
                 <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border bg-muted">
                   <svg className="h-4 w-4 text-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -193,12 +188,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
             </Card>
 
             {/* 趋势预测 */}
-            <Card
-              variant="bordered"
-              padding="sm"
-              hoverable
-              className=" "
-            >
+            <Card padding="sm">
               <div className="flex items-start gap-3">
                 <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border bg-muted">
                   <svg className="h-4 w-4 text-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -216,7 +206,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
           </div>
 
           {relatedBoards.length > 0 && (
-            <Card variant="bordered" padding="sm" className=" text-left">
+            <Card padding="sm" className="text-left">
               <div className="mb-3 flex items-baseline gap-2">
                 <span className="text-xs font-medium uppercase text-muted-foreground">{text.boardLinkage}</span>
                 <h3 className="mt-0.5 text-base font-semibold text-foreground">{text.relatedBoards}</h3>
@@ -265,7 +255,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
 
         {/* 右侧：情绪指标 - 填满格子高度，消除与 STRATEGY POINTS 之间的空隙 */}
         <div className="flex flex-col self-stretch min-h-full">
-          <Card variant="bordered" padding="md" className="  !overflow-visible flex-1 flex flex-col min-h-0">
+          <Card padding="md" className="!overflow-visible flex-1 flex flex-col min-h-0">
             <div className="text-center flex-1 flex flex-col justify-center">
               <h3 className="mb-5 text-sm font-medium tracking-wide text-foreground">{text.marketSentiment}</h3>
               <ScoreGauge score={summary.sentimentScore ?? 50} size="lg" language={reportLanguage} />

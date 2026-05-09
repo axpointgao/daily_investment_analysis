@@ -27,9 +27,9 @@ function outcomeBadge(outcome?: string) {
   if (!outcome) return <Badge variant="default">--</Badge>;
   switch (outcome) {
     case 'win':
-      return <Badge variant="success" glow>盈利</Badge>;
+      return <Badge variant="success">盈利</Badge>;
     case 'loss':
-      return <Badge variant="danger" glow>亏损</Badge>;
+      return <Badge variant="danger">亏损</Badge>;
     case 'neutral':
       return <Badge variant="warning">持平</Badge>;
     default:
@@ -131,7 +131,7 @@ const MetricRow: React.FC<{ label: string; value: string; accent?: boolean }> = 
 // ============ Performance Card ============
 
 const PerformanceCard: React.FC<{ metrics: PerformanceMetrics; title: string }> = ({ metrics, title }) => (
-  <Card variant="gradient" padding="md" className="animate-fade-in">
+  <Card padding="md" className="animate-fade-in">
     <div className="mb-3">
       <span className="text-xs font-medium uppercase text-muted-foreground">{title}</span>
     </div>

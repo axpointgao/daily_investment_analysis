@@ -3,7 +3,7 @@ import { BarChart3, BriefcaseBusiness, FileSearch, Home, LogOut, MessageSquareQu
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAgentChatStore } from '../../stores/agentChatStore';
-import { cn } from '../../utils/cn';
+import { cn } from '@/lib/utils';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { StatusDot } from '../common/StatusDot';
 import { Button } from '@/components/ui/button';

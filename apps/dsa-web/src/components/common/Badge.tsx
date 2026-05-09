@@ -8,7 +8,6 @@ interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
   children: React.ReactNode;
   variant?: BadgeVariant;
   size?: 'sm' | 'md';
-  glow?: boolean;
   className?: string;
   style?: React.CSSProperties;
 }
@@ -27,11 +26,8 @@ export const Badge: React.FC<BadgeProps> = ({
   variant = 'default',
   size = 'sm',
   className,
-  glow,
   ...rest
 }) => {
-  void glow;
-
   return (
     <ShadcnBadge
       {...rest}

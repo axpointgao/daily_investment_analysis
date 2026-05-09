@@ -92,7 +92,7 @@ export const ReportDetails: React.FC<ReportDetailsProps> = ({
   };
 
   return (
-    <Card variant="bordered" padding="md" className=" text-left">
+    <Card padding="md" className="text-left">
       <DashboardPanelHeader
         eyebrow={text.transparency}
         title={text.traceability}
@@ -117,7 +117,7 @@ export const ReportDetails: React.FC<ReportDetailsProps> = ({
             <button
               type="button"
               onClick={() => setShowRaw(!showRaw)}
-              className=" home-trace-toggle flex w-full items-center justify-between rounded-lg p-2.5"
+              className="home-trace-toggle flex w-full items-center justify-between rounded-lg p-2.5"
             >
               <span className="text-xs text-foreground">{text.rawResult}</span>
               <svg
@@ -143,7 +143,7 @@ export const ReportDetails: React.FC<ReportDetailsProps> = ({
             <button
               type="button"
               onClick={() => setShowSnapshot(!showSnapshot)}
-              className=" home-trace-toggle flex w-full items-center justify-between rounded-lg p-2.5"
+              className="home-trace-toggle flex w-full items-center justify-between rounded-lg p-2.5"
             >
               <span className="text-xs text-foreground">{text.analysisSnapshot}</span>
               <svg

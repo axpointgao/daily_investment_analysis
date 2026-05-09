@@ -3,7 +3,7 @@ import type React from 'react';
 import { Badge, Button, Select, Input, Tooltip } from '../common';
 import type { ConfigValidationIssue, SystemConfigFieldSchema, SystemConfigItem } from '../../types/systemConfig';
 import { getFieldDescriptionZh, getFieldTitleZh } from '../../utils/systemConfigI18n';
-import { cn } from '../../utils/cn';
+import { cn } from '@/lib/utils';
 
 function normalizeSelectOptions(options: SystemConfigFieldSchema['options'] = []) {
   return options.map((option) => {
@@ -58,6 +58,15 @@ function renderFieldControl(
   const commonClass = 'h-11 w-full rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
   const controlType = schema?.uiControl ?? 'text';
   const isMultiValue = isMultiValueField(item);
+  const inputType = (() => {
+    switch (controlType) {
+      case 'number':
+      case 'time':
+        return controlType;
+      default:
+        return 'text';
+    }
+  })();
 
   if (controlType === 'textarea') {
     return (
@@ -174,8 +183,6 @@ function renderFieldControl(
     );
   }
 
-  const inputType = controlType === 'number' ? 'number' : controlType === 'time' ? 'time' : 'text';
-
   return (
     <input
       id={controlId}
@@ -206,9 +213,9 @@ export const SettingsField: React.FC<SettingsFieldProps> = ({
   return (
     <div
       className={cn(
-        'rounded-[1.15rem] border bg-[var(--bg-card)] p-4 shadow-none transition-[background-color,border-color,box-shadow] duration-200',
-        hasError ? 'border-destructive/40 hover:border-destructive/55' : 'border-[var(--border)] hover:border-[var(--border)]',
-        'hover:bg-[var(--muted)]',
+        'rounded-[1.15rem] border bg-card p-4 shadow-none transition-[background-color,border-color,box-shadow] duration-200',
+        hasError ? 'border-destructive/40 hover:border-destructive/55' : 'border-border hover:border-border',
+        'hover:bg-muted',
       )}
     >
       <div className="mb-2 flex flex-wrap items-center gap-2">

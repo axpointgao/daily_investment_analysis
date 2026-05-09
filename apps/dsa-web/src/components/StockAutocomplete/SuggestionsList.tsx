@@ -8,7 +8,7 @@
 import type { CSSProperties } from 'react';
 import type { StockSuggestion } from '../../types/stockIndex';
 import { Badge } from '../common';
-import { cn } from '../../utils/cn';
+import { cn } from '@/lib/utils';
 
 export interface SuggestionsListProps {
   /** Suggestion list */
@@ -37,13 +37,8 @@ export function SuggestionsList({
   return (
     <ul
       id="suggestions-list"
-      className="z-[100] border-x border-b rounded-b-lg rounded-t-none max-h-60 overflow-auto"
-      style={{
-        ...style,
-        backgroundColor: 'hsl(var(--card) / 0.85)',
-        borderColor: 'var(--border-accent)',
-        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3), -4px 0 15px -3px rgba(0, 0, 0, 0.2), 4px 0 15px -3px rgba(0, 0, 0, 0.2)'
-      }}
+      className="z-[100] max-h-60 overflow-auto rounded-b-lg rounded-t-none border-x border-b border-border bg-card/95 shadow-lg backdrop-blur"
+      style={style}
       role="listbox"
     >
       {suggestions.map((suggestion, index) => (
@@ -52,9 +47,9 @@ export function SuggestionsList({
           role="option"
           aria-selected={index === highlightedIndex}
           className={cn(
-            "px-4 py-1 cursor-pointer flex items-center justify-between",
-            "hover:bg-[var(--autocomplete-hover-bg)]/25",
-            index === highlightedIndex && "bg-[var(--autocomplete-hover-bg)]/25"
+            'flex cursor-pointer items-center justify-between px-4 py-1',
+            'hover:bg-muted',
+            index === highlightedIndex && 'bg-muted',
           )}
           onClick={() => onSelect(suggestion)}
           onMouseEnter={() => onMouseEnter(index)}
@@ -65,7 +60,7 @@ export function SuggestionsList({
 
             {/* Name and code */}
             <div className="flex flex-col">
-              <span className="text-sm font-medium text-primary-text">
+              <span className="text-sm font-medium text-foreground">
                 {suggestion.nameZh}
               </span>
               <span className="text-sm text-muted-foreground">

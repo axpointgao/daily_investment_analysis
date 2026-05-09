@@ -4,6 +4,7 @@ import { getParsedApiError } from '../../api/error';
 import { stocksApi, type ExtractItem } from '../../api/stocks';
 import { systemConfigApi, SystemConfigConflictError } from '../../api/systemConfig';
 import { Badge, Button, InlineAlert } from '../common';
+import { cn } from '@/lib/utils';
 
 const IMG_EXT = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
 const IMG_MAX = 5 * 1024 * 1024; // 5MB
@@ -400,9 +401,10 @@ export const IntelligentImport: React.FC<IntelligentImportProps> = ({
               return (
                 <div
                   key={it.id}
-                  className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-sm ${
-                    it.code ? 'border-border bg-[var(--bg-card)]' : 'border-destructive/25 bg-destructive/10'
-                  }`}
+                  className={cn(
+                    'flex items-center gap-2 rounded-xl border px-3 py-2 text-sm',
+                    it.code ? 'border-border bg-card' : 'border-destructive/25 bg-destructive/10',
+                  )}
                 >
                   <input
                     type="checkbox"

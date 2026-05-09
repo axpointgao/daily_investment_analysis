@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { FundSuggestion } from '../../types/fundIndex';
 import { Badge } from '../common';
-import { cn } from '../../utils/cn';
+import { cn } from '@/lib/utils';
 
 export interface FundSuggestionsListProps {
   suggestions: FundSuggestion[];
@@ -25,13 +25,8 @@ export function FundSuggestionsList({
   return (
     <ul
       id="fund-suggestions-list"
-      className="z-[100] max-h-60 overflow-auto rounded-b-lg rounded-t-none border-x border-b"
-      style={{
-        ...style,
-        backgroundColor: 'hsl(var(--card) / 0.85)',
-        borderColor: 'var(--border-accent)',
-        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3), -4px 0 15px -3px rgba(0, 0, 0, 0.2), 4px 0 15px -3px rgba(0, 0, 0, 0.2)',
-      }}
+      className="z-[100] max-h-60 overflow-auto rounded-b-lg rounded-t-none border-x border-b border-border bg-card/95 shadow-lg backdrop-blur"
+      style={style}
       role="listbox"
     >
       {suggestions.map((suggestion, index) => (
@@ -41,8 +36,8 @@ export function FundSuggestionsList({
           aria-selected={index === highlightedIndex}
           className={cn(
             'flex cursor-pointer items-center justify-between px-4 py-1',
-            'hover:bg-[var(--autocomplete-hover-bg)]/25',
-            index === highlightedIndex && 'bg-[var(--autocomplete-hover-bg)]/25',
+            'hover:bg-muted',
+            index === highlightedIndex && 'bg-muted',
           )}
           onClick={() => onSelect(suggestion)}
           onMouseEnter={() => onMouseEnter(index)}
@@ -52,7 +47,7 @@ export function FundSuggestionsList({
               基金
             </Badge>
             <div className="flex min-w-0 flex-col">
-              <span className="truncate text-sm font-medium text-primary-text">
+              <span className="truncate text-sm font-medium text-foreground">
                 {suggestion.fundName}
               </span>
               <span className="truncate text-sm text-muted-foreground">

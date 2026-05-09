@@ -11,7 +11,6 @@ import PortfolioPage from './pages/PortfolioPage';
 import { ApiErrorAlert, Button, Shell } from './components/common';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { useAgentChatStore } from './stores/agentChatStore';
-import './App.css';
 
 const AppContent: React.FC = () => {
   const location = useLocation();

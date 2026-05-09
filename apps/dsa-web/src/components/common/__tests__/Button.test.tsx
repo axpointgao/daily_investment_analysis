@@ -27,8 +27,8 @@ describe('Button', () => {
     expect(screen.getByText('Saving')).toBeInTheDocument();
   });
 
-  it('supports the danger-subtle variant', () => {
-    render(<Button variant="danger-subtle">Bulk Delete</Button>);
+  it('maps danger to the shadcn destructive variant', () => {
+    render(<Button variant="danger">Bulk Delete</Button>);
 
     const button = screen.getByRole('button', { name: 'Bulk Delete' });
     expect(button).toHaveAttribute('data-variant', 'destructive');
@@ -38,6 +38,7 @@ describe('Button', () => {
   it.each([
     ['primary', 'default'],
     ['outline', 'outline'],
+    ['link', 'link'],
   ] as const)('maps the common %s variant to the shadcn %s variant', (variant, expectedVariant) => {
     render(<Button variant={variant}>Quick Action</Button>);
 

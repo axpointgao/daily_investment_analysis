@@ -207,7 +207,7 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
           <button
             type="button"
             onClick={handleClose}
-            className=" mt-4 rounded-lg px-4 py-2 text-sm text-muted-foreground"
+            className="mt-4 rounded-lg px-4 py-2 text-sm text-muted-foreground"
           >
             {text.dismiss}
           </button>

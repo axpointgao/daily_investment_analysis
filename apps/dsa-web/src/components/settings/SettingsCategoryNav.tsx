@@ -2,7 +2,7 @@ import type React from 'react';
 import { Badge } from '../common';
 import { getCategoryDescriptionZh, getCategoryTitleZh } from '../../utils/systemConfigI18n';
 import type { SystemConfigCategorySchema, SystemConfigItem } from '../../types/systemConfig';
-import { cn } from '../../utils/cn';
+import { cn } from '@/lib/utils';
 
 interface SettingsCategoryNavProps {
   categories: SystemConfigCategorySchema[];
@@ -39,7 +39,7 @@ export const SettingsCategoryNav: React.FC<SettingsCategoryNavProps> = ({
                 'w-full rounded-[1.1rem] border px-3 py-3 text-left transition-[background-color,border-color,box-shadow,transform] duration-200',
                 isActive
                   ? 'bg-muted text-foreground'
-                  : 'border-[var(--border)] bg-[var(--bg-card)] hover:border-[hsl(var(--primary)/0.32)] hover:bg-[hsl(var(--primary)/0.045)]',
+                  : 'border-border bg-card hover:border-primary/35 hover:bg-primary/5',
               )}
               onClick={() => onSelect(category.category)}
             >
@@ -49,13 +49,13 @@ export const SettingsCategoryNav: React.FC<SettingsCategoryNavProps> = ({
                     {title}
                   </p>
                   {description ? (
-                    <p className={cn('mt-1 line-clamp-2 text-xs leading-5', isActive ? 'text-muted-foreground' : 'text-muted-foreground')}>{description}</p>
+                    <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{description}</p>
                   ) : null}
                 </div>
                 <Badge
                   variant={isActive ? 'info' : 'default'}
                   size="sm"
-                  className={isActive ? ' border-[hsl(var(--primary)/0.36)]' : 'border-[var(--border)] bg-[var(--muted)] text-muted-foreground'}
+                  className={isActive ? 'border-primary/35' : 'border-border bg-muted text-muted-foreground'}
                 >
                   {count}
                 </Badge>

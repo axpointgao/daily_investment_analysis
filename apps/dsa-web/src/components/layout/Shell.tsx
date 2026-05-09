@@ -4,7 +4,7 @@ import { Menu } from 'lucide-react';
 import { Outlet } from 'react-router-dom';
 import { Drawer } from '../common/Drawer';
 import { SidebarNav } from './SidebarNav';
-import { cn } from '../../utils/cn';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
 type ShellProps = {

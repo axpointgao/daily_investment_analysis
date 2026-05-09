@@ -1,7 +1,7 @@
 import type React from 'react';
 import { useState, useEffect, useRef } from 'react';
 import { getSentimentColor, getSentimentLabel, type ReportLanguage } from '../../types/analysis';
-import { cn } from '../../utils/cn';
+import { cn } from '@/lib/utils';
 import { normalizeReportLanguage, getReportText } from '../../utils/reportLanguage';
 
 interface ScoreGaugeProps {

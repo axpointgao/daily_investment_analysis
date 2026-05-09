@@ -58,7 +58,7 @@ const MetricCard: React.FC<{ label: string; value: string; muted?: string; tone?
   tone,
   tooltip,
 }) => (
-  <Card variant="bordered" padding="sm" className="">
+  <Card padding="sm">
     <span className="text-xs font-medium uppercase text-muted-foreground inline-flex items-center gap-1.5">
       {label}
       {tooltip ? <MetricHelp content={tooltip} /> : null}
@@ -73,7 +73,7 @@ const MetricCard: React.FC<{ label: string; value: string; muted?: string; tone?
 const SectionList: React.FC<{ title: string; items?: string[] }> = ({ title, items = [] }) => {
   if (!items.length) return null;
   return (
-    <Card variant="bordered" padding="sm" className="">
+    <Card padding="sm">
       <span className="text-xs font-medium uppercase text-muted-foreground">{title}</span>
       <ul className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
         {items.map((item, index) => (
@@ -91,7 +91,7 @@ const PerformanceTable: React.FC<{ items?: FundPerformanceItem[] }> = ({ items =
   const rows = items.filter((item) => item.period).slice(0, 8);
   if (!rows.length) return null;
   return (
-    <Card variant="bordered" padding="sm" className=" overflow-hidden">
+    <Card padding="sm" className="overflow-hidden">
       <span className="text-xs font-medium uppercase text-muted-foreground">阶段收益</span>
       <div className="mt-3 overflow-x-auto">
         <table className="min-w-full text-left text-xs">
@@ -141,7 +141,7 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
     <div className="space-y-5 pb-8 animate-fade-in">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-stretch">
         <div className="lg:col-span-2 space-y-5">
-          <Card variant="gradient" padding="md" className="">
+          <Card padding="md">
             <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
               <div className="flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-3">
@@ -182,12 +182,7 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
           </Card>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card
-              variant="bordered"
-              padding="sm"
-              hoverable
-              className=" "
-            >
+            <Card padding="sm">
               <div className="space-y-1.5">
                 <h4 className="text-xs font-medium uppercase text-muted-foreground">配置建议</h4>
                 <p className="text-sm leading-6">
@@ -198,12 +193,7 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
                 ) : null}
               </div>
             </Card>
-            <Card
-              variant="bordered"
-              padding="sm"
-              hoverable
-              className=" "
-            >
+            <Card padding="sm">
               <div className="space-y-1.5">
                 <h4 className="text-xs font-medium uppercase text-muted-foreground">风险说明</h4>
                 <p className="text-sm leading-6">
@@ -214,7 +204,7 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
           </div>
         </div>
 
-        <Card variant="bordered" padding="md" className=" flex flex-col items-center justify-center">
+        <Card padding="md" className="flex flex-col items-center justify-center">
           <span className="text-xs font-medium uppercase text-muted-foreground mb-3 text-muted-foreground">适配评分</span>
           <ScoreGauge score={summary.suitabilityScore ?? 50} size="lg" showLabel={false} />
           {summary.suitableFor ? (
@@ -231,7 +221,7 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
       </div>
 
       {risk.reason ? (
-        <Card variant="bordered" padding="sm" className=" border-amber-500/30 bg-amber-500/5 text-sm text-amber-600">
+        <Card padding="sm" className="border-amber-500/30 bg-amber-500/5 text-sm text-amber-600">
           {risk.reason}
         </Card>
       ) : null}
@@ -239,7 +229,7 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
       <PerformanceTable items={metrics?.performance} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card variant="bordered" padding="sm" className="">
+        <Card padding="sm">
           <span className="text-xs font-medium uppercase text-muted-foreground">基金资料</span>
           <div className="mt-3 grid grid-cols-1 gap-2 text-sm">
             <p><span className="text-muted-foreground">基金公司：</span>{formatValue(profile.fundCompany)}</p>
@@ -249,7 +239,7 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
             <p><span className="text-muted-foreground">业绩基准：</span>{formatValue(profile.benchmark)}</p>
           </div>
         </Card>
-        <Card variant="bordered" padding="sm" className="">
+        <Card padding="sm">
           <span className="text-xs font-medium uppercase text-muted-foreground">风险收益</span>
           <div className="mt-3 grid grid-cols-1 gap-2 text-sm">
             <p><span className="text-muted-foreground">区间：</span>{formatValue(risk.startDate)} 至 {formatValue(risk.endDate)}</p>

@@ -1,5 +1,5 @@
 import type React from 'react';
-import { cn } from '../../utils/cn';
+import { cn } from '@/lib/utils';
 
 interface StatCardProps {
   /** Metric label, such as "Total Return". */

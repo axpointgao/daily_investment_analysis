@@ -233,7 +233,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
         : 'default';
 
   return (
-    <div className="mb-2 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--bg-card)] shadow-none transition-[background-color,border-color,box-shadow] duration-200 hover:border-[var(--border)] hover:bg-[var(--muted)]">
+    <div className="mb-2 overflow-hidden rounded-xl border border-border bg-card shadow-none transition-[background-color,border-color,box-shadow] duration-200 hover:border-border hover:bg-muted">
       <div
         className="flex cursor-pointer select-none items-center gap-2.5 px-4 py-3 transition-colors"
         onClick={() => onToggleExpand(index)}
@@ -294,7 +294,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
           {!hasKey && channel.protocol !== 'ollama' ? <Badge variant="warning">未填 Key</Badge> : null}
           {testState?.status !== 'idle' ? (
             <Badge variant={statusVariant}>
-              {testState?.status === 'success' ? '连接正常' : testState?.status === 'error' ? '连接失败' : '测试中'}
+              {getChannelTestStatusLabel(testState?.status)}
             </Badge>
           ) : null}
         </span>
@@ -365,7 +365,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
             placeholder={channel.protocol === 'ollama' ? '本地 Ollama 可留空' : '支持多个 Key 逗号分隔'}
           />
 
-          <div className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--muted)] p-3">
+          <div className="space-y-3 rounded-xl border border-border bg-muted p-3">
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
@@ -397,7 +397,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
             {discoveredModels.length > 0 ? (
               <div>
                 <label className="mb-2 block text-sm font-medium text-foreground">可选模型（可多选）</label>
-                <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-3">
+                <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-border bg-card p-3">
                   {discoveredModels.map((model) => (
                     <label key={model} className="flex items-center gap-2 text-sm text-muted-foreground">
                       <input
@@ -752,7 +752,12 @@ function resolveTemperatureFromItems(itemMap: Map<string, string>): string {
   if (unified) return unified;
 
   const primaryModel = itemMap.get('LITELLM_MODEL') || '';
-  const provider = primaryModel.includes('/') ? primaryModel.split('/')[0] : (primaryModel ? 'openai' : '');
+  let provider = '';
+  if (primaryModel.includes('/')) {
+    provider = primaryModel.split('/')[0];
+  } else if (primaryModel) {
+    provider = 'openai';
+  }
   const providerTemperatureEnv: Record<string, string> = {
     gemini: 'GEMINI_TEMPERATURE',
     vertex_ai: 'GEMINI_TEMPERATURE',
@@ -783,6 +788,27 @@ function normalizeAgentPrimaryModel(model: string): string {
     return trimmedModel;
   }
   return `openai/${trimmedModel}`;
+}
+
+function getChannelTestStatusLabel(status?: ChannelTestState['status']): string {
+  switch (status) {
+    case 'success':
+      return '连接正常';
+    case 'error':
+      return '连接失败';
+    case 'loading':
+      return '测试中';
+    default:
+      return '';
+  }
+}
+
+function getSaveButtonLabel(isSaving: boolean, managesRuntimeConfig: boolean): string {
+  if (isSaving) {
+    return '保存中...';
+  }
+
+  return managesRuntimeConfig ? '保存 AI 配置' : '保存渠道配置';
 }
 
 function parseRuntimeConfigFromItems(items: Array<{ key: string; value: string }>): RuntimeConfig {
@@ -1281,13 +1307,13 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
     <div className="space-y-4">
       <button
         type="button"
-        className="flex w-full items-center justify-between rounded-[1.35rem] border border-[var(--border)] bg-[var(--bg-card)] px-5 py-4 text-left shadow-none transition-[background-color,border-color,box-shadow] duration-200 hover:border-[var(--border)] hover:bg-[var(--muted)]"
+        className="flex w-full items-center justify-between rounded-[1.35rem] border border-border bg-card px-5 py-4 text-left shadow-none transition-[background-color,border-color,box-shadow] duration-200 hover:border-border hover:bg-muted"
         onClick={() => setIsCollapsed((previous) => !previous)}
       >
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <h3 className="text-base font-semibold text-foreground">AI 模型配置</h3>
-            <Badge variant="info" className="">渠道管理</Badge>
+            <Badge variant="info">渠道管理</Badge>
           </div>
           <p className="text-xs text-muted-foreground">
             添加服务商渠道后可自动获取模型列表并多选，也可继续手动填写。配置会自动同步到 .env 文件。
@@ -1298,13 +1324,13 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
 
       {!isCollapsed ? (
         <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-          <div className="rounded-[1.35rem] border border-[var(--border)] bg-[var(--bg-card)] p-4 shadow-none">
+          <div className="rounded-[1.35rem] border border-border bg-card p-4 shadow-none">
             <div className="mb-3 flex items-center justify-between">
               <div>
                 <h4 className="text-sm font-medium text-foreground">快速添加渠道</h4>
                 <p className="mt-1 text-xs text-muted-foreground">先选择预设服务商，再一键创建配置草稿。</p>
               </div>
-              <Badge variant="default" className="border-[var(--border)] bg-[var(--muted)] text-muted-foreground">{channels.length} 个渠道</Badge>
+              <Badge variant="default" className="border-border bg-muted text-muted-foreground">{channels.length} 个渠道</Badge>
             </div>
             <div className="flex items-center gap-2">
               <Button type="button" variant="primary" className="whitespace-nowrap" disabled={busy} onClick={addChannel}>
@@ -1358,13 +1384,13 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
           </div>
 
           {managesRuntimeConfig ? (
-            <div className="rounded-[1.35rem] border border-[var(--border)] bg-[var(--bg-card)] p-4 shadow-none">
+            <div className="rounded-[1.35rem] border border-border bg-card p-4 shadow-none">
               <div className="mb-4 flex items-center justify-between">
                 <div>
                   <span className="text-primary text-xs font-medium uppercase tracking-wider">运行时参数</span>
                   <p className="mt-1 text-[11px] text-muted-foreground">主模型、备选模型、Vision 与 Temperature 会直接写入运行时配置。</p>
                 </div>
-                <Badge variant="default" className="border-[var(--border)] bg-[var(--muted)] text-muted-foreground">Runtime</Badge>
+                <Badge variant="default" className="border-border bg-muted text-muted-foreground">Runtime</Badge>
               </div>
               <div className="mb-4">
                 <label className="mb-1 block text-xs text-muted-foreground">Temperature</label>
@@ -1466,11 +1492,10 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
             <Button
               type="button"
               variant="primary"
-              glow
               disabled={busy || !hasChanges}
               onClick={() => void handleSave()}
             >
-              {isSaving ? '保存中...' : managesRuntimeConfig ? '保存 AI 配置' : '保存渠道配置'}
+              {getSaveButtonLabel(isSaving, managesRuntimeConfig)}
             </Button>
             {!hasChanges ? <span className="text-xs text-muted-foreground">当前没有未保存的改动</span> : null}
           </div>

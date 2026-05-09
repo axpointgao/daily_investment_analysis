@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { cn } from '../../utils/cn';
+import { cn } from '@/lib/utils';
 
 interface CollapsibleProps {
   title: string;
@@ -25,7 +25,7 @@ export const Collapsible: React.FC<CollapsibleProps> = ({
     <div
       className={cn(
         'overflow-hidden rounded-xl border border-border bg-card/70 shadow-none transition-all duration-300',
-        'hover:border-accent',
+        'hover:border-primary/35',
         className,
       )}
     >

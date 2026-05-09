@@ -26,9 +26,6 @@ interface SelectProps {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
-  searchable?: boolean;
-  searchPlaceholder?: string;
-  emptyText?: string;
 }
 
 export const Select: React.FC<SelectProps> = ({

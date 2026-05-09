@@ -8,9 +8,8 @@ type LegacyButtonVariant =
   | 'secondary'
   | 'outline'
   | 'ghost'
-  | 'gradient'
   | 'danger'
-  | 'danger-subtle';
+  | 'link';
 
 type LegacyButtonSize = 'xsm' | 'sm' | 'md' | 'lg' | 'xl';
 
@@ -19,7 +18,6 @@ interface ButtonProps extends Omit<React.ComponentProps<typeof ShadcnButton>, 'v
   size?: LegacyButtonSize;
   isLoading?: boolean;
   loadingText?: string;
-  glow?: boolean;
 }
 
 const variantMap: Record<LegacyButtonVariant, React.ComponentProps<typeof ShadcnButton>['variant']> = {
@@ -27,9 +25,8 @@ const variantMap: Record<LegacyButtonVariant, React.ComponentProps<typeof Shadcn
   secondary: 'secondary',
   outline: 'outline',
   ghost: 'ghost',
-  gradient: 'default',
   danger: 'destructive',
-  'danger-subtle': 'destructive',
+  link: 'link',
 };
 
 const sizeMap: Record<LegacyButtonSize, React.ComponentProps<typeof ShadcnButton>['size']> = {
@@ -49,11 +46,8 @@ export const Button: React.FC<ButtonProps> = ({
   className,
   disabled,
   type = 'button',
-  glow,
   ...props
 }) => {
-  void glow;
-
   return (
     <ShadcnButton
       type={type}
