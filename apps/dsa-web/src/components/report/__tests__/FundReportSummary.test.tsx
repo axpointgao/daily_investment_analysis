@@ -16,6 +16,7 @@ describe('FundReportSummary', () => {
         createdAt: '2026-05-03T10:00:00',
         latestNav: 1.2038,
         navDate: '2026-04-29',
+        dailyReturnPct: 0.35,
       },
       summary: {
         analysisSummary: '谨慎观察',
@@ -51,6 +52,9 @@ describe('FundReportSummary', () => {
         fundName: '华夏成长混合',
         reportType: 'detailed',
         createdAt: '2026-05-03T10:00:00',
+        latestNav: 1.2038,
+        navDate: '2026-04-29',
+        dailyReturnPct: 0.35,
       },
       summary: {
         analysisSummary: '适合观察',
@@ -75,6 +79,8 @@ describe('FundReportSummary', () => {
     expect(screen.getByText('区间收益')).toBeInTheDocument();
     expect(screen.queryByText('累计收益')).not.toBeInTheDocument();
     expect(screen.getByText('+12.34%')).toBeInTheDocument();
+    expect(screen.getByText('1.2038')).toHaveClass('text-red-600');
+    expect(screen.getByText('2026-04-29 +0.35%')).toHaveClass('text-red-600');
     expect(screen.getAllByRole('button', { name: '指标说明' })).toHaveLength(4);
   });
 });

@@ -623,10 +623,10 @@ describe('PortfolioPage FX refresh', () => {
     const hkRowCells = within(hkRow as HTMLTableRowElement).getAllByRole('cell');
     const aaplRowCells = within(aaplRow as HTMLTableRowElement).getAllByRole('cell');
     const msftRowCells = within(msftRow as HTMLTableRowElement).getAllByRole('cell');
-    expect(hkRowCells.at(-3)).toHaveClass('text-destructive');
-    expect(hkRowCells.at(-2)).toHaveClass('text-destructive');
-    expect(aaplRowCells.at(-3)).toHaveClass('text-emerald-600');
-    expect(aaplRowCells.at(-2)).toHaveClass('text-emerald-600');
+    expect(hkRowCells.at(-3)).toHaveClass('text-red-600');
+    expect(hkRowCells.at(-2)).toHaveClass('text-red-600');
+    expect(aaplRowCells.at(-3)).toHaveClass('text-green-600');
+    expect(aaplRowCells.at(-2)).toHaveClass('text-green-600');
     expect(msftRowCells.at(-2)).toHaveClass('text-muted-foreground');
   });
 

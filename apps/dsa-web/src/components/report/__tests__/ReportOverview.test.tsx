@@ -43,8 +43,10 @@ describe('ReportOverview', () => {
     expect(screen.getByText('行业')).toBeInTheDocument();
     expect(screen.getByText('领涨')).toBeInTheDocument();
     expect(screen.getByText('+2.31%')).toBeInTheDocument();
+    expect(screen.getByText('+2.31%')).toHaveClass('text-red-600');
     expect(screen.getByText('领跌')).toBeInTheDocument();
     expect(screen.getByText('-1.20%')).toBeInTheDocument();
+    expect(screen.getByText('-1.20%')).toHaveClass('text-green-600');
     expect(screen.queryByText('中性')).not.toBeInTheDocument();
   });
 

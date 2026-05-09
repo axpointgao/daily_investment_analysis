@@ -2,6 +2,7 @@ import type React from 'react';
 import { CircleHelp } from 'lucide-react';
 import type { AnalysisReport, FundPerformanceItem } from '../../types/analysis';
 import { Badge, Card, ScoreGauge, Tooltip } from '../common';
+import { getChangeToneClass } from '../../utils/changeTone';
 import { formatDateTime } from '../../utils/format';
 import { formatFundPeriodLabel } from '../../utils/fundPeriod';
 
@@ -18,13 +19,6 @@ const formatPercent = (value?: number): string => {
 const formatValue = (value: unknown): string => {
   if (value === undefined || value === null || value === '') return '--';
   return String(value);
-};
-
-const valueColor = (value?: number): React.CSSProperties | undefined => {
-  if (value === undefined || value === null) return undefined;
-  if (value > 0) return { color: 'var(--foreground)' };
-  if (value < 0) return { color: 'var(--destructive)' };
-  return undefined;
 };
 
 const formatRiskRange = (startDate?: string, endDate?: string): string => {
@@ -51,11 +45,11 @@ const MetricHelp: React.FC<{ content: string }> = ({ content }) => (
   </Tooltip>
 );
 
-const MetricCard: React.FC<{ label: string; value: string; muted?: string; tone?: React.CSSProperties; tooltip?: string }> = ({
+const MetricCard: React.FC<{ label: string; value: string; muted?: string; toneClass?: string; tooltip?: string }> = ({
   label,
   value,
   muted,
-  tone,
+  toneClass,
   tooltip,
 }) => (
   <Card padding="sm">
@@ -63,7 +57,7 @@ const MetricCard: React.FC<{ label: string; value: string; muted?: string; tone?
       {label}
       {tooltip ? <MetricHelp content={tooltip} /> : null}
     </span>
-    <p className="mt-2 text-xl font-semibold text-foreground font-mono" style={tone}>
+    <p className={`mt-2 text-xl font-semibold text-foreground font-mono ${toneClass ?? ''}`}>
       {value}
     </p>
     {muted ? <p className="mt-1 text-xs text-muted-foreground">{muted}</p> : null}
@@ -108,7 +102,7 @@ const PerformanceTable: React.FC<{ items?: FundPerformanceItem[] }> = ({ items =
             {rows.map((item, index) => (
               <tr key={`${item.period}-${index}`} className="border-b border-border/60 last:border-0">
                 <td className="py-2 pr-4 text-foreground">{formatFundPeriodLabel(item.period)}</td>
-                <td className="py-2 pr-4 font-mono" style={valueColor(item.returnPct)}>
+                <td className={`py-2 pr-4 font-mono ${getChangeToneClass(item.returnPct)}`}>
                   {formatPercent(item.returnPct)}
                 </td>
                 <td className="py-2 pr-4 font-mono">{formatPercent(item.peerAvgPct)}</td>
@@ -164,10 +158,10 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
               </div>
               <div className="text-right">
                 <p className="text-xs text-muted-foreground">最新净值</p>
-                <p className="mt-1 text-xl font-bold font-mono text-foreground">
+                <p className={`mt-1 text-xl font-bold font-mono text-foreground ${getChangeToneClass(meta.dailyReturnPct)}`}>
                   {meta.latestNav !== undefined ? meta.latestNav.toFixed(4) : '--'}
                 </p>
-                <p className="text-xs font-mono" style={valueColor(meta.dailyReturnPct)}>
+                <p className={`text-xs font-mono ${getChangeToneClass(meta.dailyReturnPct)}`}>
                   {meta.navDate || '--'} {formatPercent(meta.dailyReturnPct)}
                 </p>
               </div>
@@ -214,9 +208,9 @@ export const FundReportSummary: React.FC<FundReportSummaryProps> = ({ report }) 
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard label="区间收益" value={formatPercent(risk.totalReturnPct)} tone={valueColor(risk.totalReturnPct)} tooltip={riskRangeTip} />
-        <MetricCard label="年化收益" value={formatPercent(risk.annualReturnPct)} tone={valueColor(risk.annualReturnPct)} tooltip={ANNUAL_RETURN_TIP} />
-        <MetricCard label="最大回撤" value={formatPercent(risk.maxDrawdownPct)} tone={valueColor(risk.maxDrawdownPct)} tooltip={MAX_DRAWDOWN_TIP} />
+        <MetricCard label="区间收益" value={formatPercent(risk.totalReturnPct)} toneClass={getChangeToneClass(risk.totalReturnPct)} tooltip={riskRangeTip} />
+        <MetricCard label="年化收益" value={formatPercent(risk.annualReturnPct)} toneClass={getChangeToneClass(risk.annualReturnPct)} tooltip={ANNUAL_RETURN_TIP} />
+        <MetricCard label="最大回撤" value={formatPercent(risk.maxDrawdownPct)} toneClass={getChangeToneClass(risk.maxDrawdownPct)} tooltip={MAX_DRAWDOWN_TIP} />
         <MetricCard label="年化波动" value={formatPercent(risk.annualVolatilityPct)} muted={`${risk.sampleCount || 0} 条净值样本`} tooltip={ANNUAL_VOLATILITY_TIP} />
       </div>
 

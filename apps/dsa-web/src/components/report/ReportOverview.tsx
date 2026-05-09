@@ -5,6 +5,7 @@ import type {
   ReportSummary as ReportSummaryType,
 } from '../../types/analysis';
 import { Badge, Card, ScoreGauge } from '../common';
+import { getChangeToneClass } from '../../utils/changeTone';
 import { formatDateTime } from '../../utils/format';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
 
@@ -68,22 +69,6 @@ const buildBoardSignalMap = (details?: ReportDetailsType): Map<string, BoardSign
   });
 
   return signalMap;
-};
-
-const getPriceChangeStyle = (changePct: number | undefined): React.CSSProperties | undefined => {
-  if (changePct === undefined || changePct === null) {
-    return undefined;
-  }
-
-  if (changePct > 0) {
-    return { color: 'var(--foreground)' };
-  }
-
-  if (changePct < 0) {
-    return { color: 'var(--destructive)' };
-  }
-
-  return undefined;
 };
 
 const formatChangePct = (changePct: number | undefined): string => {
@@ -150,10 +135,10 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
               </div>
               <div className="text-right">
                 <p className="text-xs text-muted-foreground">收盘价</p>
-                <p className="mt-1 text-xl font-bold font-mono text-foreground" style={getPriceChangeStyle(meta.changePct)}>
+                <p className={`mt-1 text-xl font-bold font-mono text-foreground ${getChangeToneClass(meta.changePct)}`}>
                   {meta.currentPrice != null ? meta.currentPrice.toFixed(2) : '--'}
                 </p>
-                <p className="text-xs font-mono" style={getPriceChangeStyle(meta.changePct)}>
+                <p className={`text-xs font-mono ${getChangeToneClass(meta.changePct)}`}>
                   {formatChangePct(meta.changePct)}
                 </p>
               </div>
@@ -239,8 +224,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                       )}
                       {signal && signal.changePct !== undefined && signal.changePct !== null && (
                         <span
-                          className="text-xs font-mono"
-                          style={getPriceChangeStyle(signal.changePct)}
+                          className={`text-xs font-mono ${getChangeToneClass(signal.changePct)}`}
                         >
                           {formatChangePct(signal.changePct)}
                         </span>

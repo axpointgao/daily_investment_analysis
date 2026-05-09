@@ -19,6 +19,7 @@ import {
 import { useFundIndex } from '../hooks/useFundIndex';
 import { useStockIndex } from '../hooks/useStockIndex';
 import { toDateInputValue } from '../utils/format';
+import { getChangeToneClass } from '../utils/changeTone';
 import { resolvePortfolioTagColor } from '../utils/portfolioTagColors';
 import { Label, Pie, PieChart } from 'recharts';
 import type {
@@ -339,7 +340,7 @@ function formatPositionMoney(value: number, row: PortfolioPositionItem): string 
 
 function getChinaPnlColorClass(value: number | undefined | null, hasValue: boolean): string {
   if (!hasValue || value == null || Number.isNaN(value) || value === 0) return 'text-muted-foreground';
-  return value > 0 ? 'text-destructive' : 'text-emerald-600';
+  return getChangeToneClass(value);
 }
 
 function getPositionPriceLabel(row: PortfolioPositionItem): string {
