@@ -4,6 +4,9 @@ import type {
   PortfolioAccountItem,
   PortfolioAccountCreateRequest,
   PortfolioAccountListResponse,
+  PortfolioAccountUpdateRequest,
+  PortfolioAssetTransferRequest,
+  PortfolioAssetTransferResponse,
   PortfolioAdvisoryLedgerCreateRequest,
   PortfolioAdvisoryLedgerListResponse,
   PortfolioAdvisoryNavResponse,
@@ -197,6 +200,44 @@ export const portfolioApi = {
       owner_id: payload.ownerId,
     });
     return toCamelCase<PortfolioAccountItem>(response.data);
+  },
+
+  async updateAccount(accountId: number, payload: PortfolioAccountUpdateRequest): Promise<PortfolioAccountItem> {
+    const response = await apiClient.put<Record<string, unknown>>(`/api/v1/portfolio/accounts/${accountId}`, {
+      name: payload.name,
+      broker: payload.broker,
+    });
+    return toCamelCase<PortfolioAccountItem>(response.data);
+  },
+
+  async previewAssetTransfer(accountId: number, payload: PortfolioAssetTransferRequest): Promise<PortfolioAssetTransferResponse> {
+    const response = await apiClient.post<Record<string, unknown>>(`/api/v1/portfolio/accounts/${accountId}/asset-transfers/preview`, {
+      target_account_id: payload.targetAccountId,
+      asset: {
+        market: payload.asset.market,
+        symbol: payload.asset.symbol,
+        currency: payload.asset.currency,
+        display_name: payload.asset.displayName,
+        linked_entry_id: payload.asset.linkedEntryId,
+        policy_id: payload.asset.policyId,
+      },
+    });
+    return toCamelCase<PortfolioAssetTransferResponse>(response.data);
+  },
+
+  async transferAsset(accountId: number, payload: PortfolioAssetTransferRequest): Promise<PortfolioAssetTransferResponse> {
+    const response = await apiClient.post<Record<string, unknown>>(`/api/v1/portfolio/accounts/${accountId}/asset-transfers`, {
+      target_account_id: payload.targetAccountId,
+      asset: {
+        market: payload.asset.market,
+        symbol: payload.asset.symbol,
+        currency: payload.asset.currency,
+        display_name: payload.asset.displayName,
+        linked_entry_id: payload.asset.linkedEntryId,
+        policy_id: payload.asset.policyId,
+      },
+    });
+    return toCamelCase<PortfolioAssetTransferResponse>(response.data);
   },
 
   async getSnapshot(query: SnapshotQuery = {}): Promise<PortfolioSnapshotResponse> {

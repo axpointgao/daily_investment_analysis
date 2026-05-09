@@ -769,6 +769,100 @@ class PortfolioApiTestCase(unittest.TestCase):
         self.assertIn("citic", brokers)
         self.assertIn("cmb", brokers)
 
+    def test_single_asset_transfer_api_preview_and_commit(self) -> None:
+        source_resp = self.client.post(
+            "/api/v1/portfolio/accounts",
+            json={"name": "源账户", "broker": "Demo", "market": "cn", "base_currency": "CNY"},
+        )
+        target_resp = self.client.post(
+            "/api/v1/portfolio/accounts",
+            json={"name": "目标账户", "broker": "Demo", "market": "cn", "base_currency": "CNY"},
+        )
+        self.assertEqual(source_resp.status_code, 200)
+        self.assertEqual(target_resp.status_code, 200)
+        source_id = source_resp.json()["id"]
+        target_id = target_resp.json()["id"]
+
+        trade_resp = self.client.post(
+            "/api/v1/portfolio/trades",
+            json={
+                "account_id": source_id,
+                "symbol": "600519",
+                "trade_date": "2026-01-01",
+                "side": "buy",
+                "quantity": 10,
+                "price": 100,
+                "market": "cn",
+                "currency": "CNY",
+                "trade_uid": "API-TRANSFER-001",
+            },
+        )
+        self.assertEqual(trade_resp.status_code, 200)
+
+        payload = {
+            "target_account_id": target_id,
+            "asset": {"market": "cn", "symbol": "600519", "currency": "CNY"},
+        }
+        preview_resp = self.client.post(
+            f"/api/v1/portfolio/accounts/{source_id}/asset-transfers/preview",
+            json=payload,
+        )
+        self.assertEqual(preview_resp.status_code, 200)
+        self.assertFalse(preview_resp.json()["transferred"])
+        self.assertEqual(preview_resp.json()["transferred_counts"]["trades"], 1)
+
+        transfer_resp = self.client.post(
+            f"/api/v1/portfolio/accounts/{source_id}/asset-transfers",
+            json=payload,
+        )
+        self.assertEqual(transfer_resp.status_code, 200)
+        self.assertTrue(transfer_resp.json()["transferred"])
+        self.assertEqual(transfer_resp.json()["target_account_id"], target_id)
+
+    def test_single_asset_transfer_api_rejects_cross_type_target(self) -> None:
+        source_resp = self.client.post(
+            "/api/v1/portfolio/accounts",
+            json={"name": "银行账户", "broker": "Demo", "market": "bank", "base_currency": "CNY"},
+        )
+        target_resp = self.client.post(
+            "/api/v1/portfolio/accounts",
+            json={"name": "基金账户", "broker": "Demo", "market": "fund", "base_currency": "CNY"},
+        )
+        self.assertEqual(source_resp.status_code, 200)
+        self.assertEqual(target_resp.status_code, 200)
+        source_id = source_resp.json()["id"]
+        target_id = target_resp.json()["id"]
+
+        ledger_resp = self.client.post(
+            "/api/v1/portfolio/bank-ledger",
+            json={
+                "account_id": source_id,
+                "event_date": "2026-01-01",
+                "asset_kind": "wealth",
+                "direction": "in",
+                "amount": 10000,
+                "currency": "CNY",
+                "bank_name": "示例银行",
+                "product_name": "稳健理财",
+            },
+        )
+        self.assertEqual(ledger_resp.status_code, 200)
+        entry_id = ledger_resp.json()["id"]
+
+        transfer_resp = self.client.post(
+            f"/api/v1/portfolio/accounts/{source_id}/asset-transfers",
+            json={
+                "target_account_id": target_id,
+                "asset": {
+                    "market": "bank",
+                    "symbol": f"BANK:W:{entry_id}",
+                    "currency": "CNY",
+                    "linked_entry_id": entry_id,
+                },
+            },
+        )
+        self.assertEqual(transfer_resp.status_code, 400)
+
     def test_event_list_invalid_page_size_returns_422(self) -> None:
         resp = self.client.get("/api/v1/portfolio/trades", params={"page_size": 101})
         self.assertEqual(resp.status_code, 422)

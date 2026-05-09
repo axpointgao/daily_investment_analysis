@@ -8,6 +8,7 @@ const {
   getSnapshot,
   refreshFx,
   analyzePortfolio,
+  listTags,
   listImportBrokers,
   listTrades,
   listCashLedger,
@@ -28,11 +29,15 @@ const {
   parseCsvImport,
   commitCsvImport,
   createAccount,
+  updateAccount,
+  previewAssetTransfer,
+  transferAsset,
 } = vi.hoisted(() => ({
   getAccounts: vi.fn(),
   getSnapshot: vi.fn(),
   refreshFx: vi.fn(),
   analyzePortfolio: vi.fn(),
+  listTags: vi.fn(),
   listImportBrokers: vi.fn(),
   listTrades: vi.fn(),
   listCashLedger: vi.fn(),
@@ -53,6 +58,9 @@ const {
   parseCsvImport: vi.fn(),
   commitCsvImport: vi.fn(),
   createAccount: vi.fn(),
+  updateAccount: vi.fn(),
+  previewAssetTransfer: vi.fn(),
+  transferAsset: vi.fn(),
 }));
 
 vi.mock('../../api/portfolio', () => ({
@@ -61,6 +69,7 @@ vi.mock('../../api/portfolio', () => ({
     getSnapshot,
     refreshFx,
     analyzePortfolio,
+    listTags,
     listImportBrokers,
     listTrades,
     listCashLedger,
@@ -81,13 +90,17 @@ vi.mock('../../api/portfolio', () => ({
     parseCsvImport,
     commitCsvImport,
     createAccount,
+    updateAccount,
+    previewAssetTransfer,
+    transferAsset,
   },
 }));
 
 type AccountItem = {
   id: number;
   name: string;
-  market?: 'cn' | 'hk' | 'us' | 'crypto' | 'advisory';
+  broker?: string;
+  market?: 'cn' | 'hk' | 'us' | 'fund' | 'crypto' | 'bank' | 'advisory' | 'insurance';
   baseCurrency?: string;
 };
 
@@ -96,7 +109,7 @@ function makeAccounts(items: AccountItem[] = [{ id: 1, name: 'Main' }]) {
     accounts: items.map((item) => ({
       id: item.id,
       name: item.name,
-      broker: 'Demo',
+      broker: item.broker ?? 'Demo',
       market: item.market ?? 'us',
       baseCurrency: item.baseCurrency ?? 'CNY',
       isActive: true,
@@ -216,6 +229,7 @@ describe('PortfolioPage FX refresh', () => {
       staleCount: 0,
       errorCount: 0,
     });
+    listTags.mockResolvedValue({ tags: [] });
     listImportBrokers.mockResolvedValue({
       brokers: [{ broker: 'huatai', aliases: [], displayName: '华泰' }],
     });
@@ -246,6 +260,33 @@ describe('PortfolioPage FX refresh', () => {
       errors: [],
     });
     createAccount.mockResolvedValue({ id: 1 });
+    updateAccount.mockResolvedValue({ id: 1, name: 'Main', broker: 'Demo', market: 'us', baseCurrency: 'CNY', isActive: true });
+    previewAssetTransfer.mockResolvedValue({
+      sourceAccountId: 1,
+      targetAccountId: 2,
+      sourceAccountName: 'Source',
+      targetAccountName: 'Target',
+      asset: { displayName: '600519' },
+      transferredCounts: { trades: 1 },
+      totalRecords: 1,
+      dateFrom: '2026-01-01',
+      dateTo: '2026-01-01',
+      warnings: [],
+      transferred: false,
+    });
+    transferAsset.mockResolvedValue({
+      sourceAccountId: 1,
+      targetAccountId: 2,
+      sourceAccountName: 'Source',
+      targetAccountName: 'Target',
+      asset: { displayName: '600519' },
+      transferredCounts: { trades: 1 },
+      totalRecords: 1,
+      dateFrom: '2026-01-01',
+      dateTo: '2026-01-01',
+      warnings: [],
+      transferred: true,
+    });
   });
 
   afterEach(() => {
@@ -277,6 +318,7 @@ describe('PortfolioPage FX refresh', () => {
 
     const assetDistribution = screen.getByText('资产分布').closest('.terminal-card');
     expect(assetDistribution).not.toBeNull();
+    fireEvent.click(within(assetDistribution as HTMLElement).getByRole('button', { name: '资产类型' }));
     expect(within(assetDistribution as HTMLElement).getByText('股票')).toBeInTheDocument();
     expect(within(assetDistribution as HTMLElement).getByText('现金')).toBeInTheDocument();
     expect(within(assetDistribution as HTMLElement).queryByText('stock')).not.toBeInTheDocument();
@@ -337,6 +379,166 @@ describe('PortfolioPage FX refresh', () => {
     expect(await screen.findByText('当前范围无可刷新的汇率对。')).toBeInTheDocument();
   });
 
+  it('edits only selected account name and broker from the current account strip', async () => {
+    getAccounts
+      .mockResolvedValueOnce(makeAccounts([{ id: 1, name: 'Main', broker: 'Demo', market: 'us', baseCurrency: 'USD' }]))
+      .mockResolvedValueOnce(makeAccounts([{ id: 1, name: '长桥账户', broker: '长桥', market: 'us', baseCurrency: 'USD' }]));
+    getSnapshot
+      .mockResolvedValueOnce(makeSnapshot({ accountId: 1, accountMarket: 'us' }))
+      .mockResolvedValueOnce(makeSnapshot({ accountId: 1, accountMarket: 'us' }))
+      .mockResolvedValueOnce(makeSnapshot({ accountId: 1, accountMarket: 'us' }));
+    updateAccount.mockResolvedValueOnce({
+      id: 1,
+      name: '长桥账户',
+      broker: '长桥',
+      market: 'us',
+      baseCurrency: 'USD',
+      cashTrackingMode: 'managed',
+      isActive: true,
+    });
+
+    render(<PortfolioPage />);
+
+    await waitForInitialLoad();
+
+    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: '1' } });
+    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', refreshPrices: false }));
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+    fireEvent.change(screen.getByLabelText('账户名称'), { target: { value: ' 长桥账户 ' } });
+    fireEvent.change(screen.getByLabelText('机构/平台'), { target: { value: ' 长桥 ' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(updateAccount).toHaveBeenCalledWith(1, { name: '长桥账户', broker: '长桥' }));
+    expect(updateAccount.mock.calls[0][1]).not.toHaveProperty('market');
+    expect(updateAccount.mock.calls[0][1]).not.toHaveProperty('baseCurrency');
+    await waitFor(() => expect(screen.getByText(/当前账户：/).textContent).toContain('长桥账户'));
+    expect(screen.getByText(/当前账户：/).textContent).toContain('长桥');
+    expect(screen.queryByText('保存')).not.toBeInTheDocument();
+  });
+
+  it('keeps account edit local when the name is blank', async () => {
+    render(<PortfolioPage />);
+
+    await waitForInitialLoad();
+
+    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: '1' } });
+    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', refreshPrices: false }));
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+    fireEvent.change(screen.getByLabelText('账户名称'), { target: { value: '   ' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(await screen.findByText('账户名称不能为空。')).toBeInTheDocument();
+    expect(updateAccount).not.toHaveBeenCalled();
+  });
+
+  it('transfers a selected asset from the portfolio header wizard', async () => {
+    getAccounts.mockResolvedValue(makeAccounts([
+      { id: 1, name: '源账户', broker: '券商A', market: 'us', baseCurrency: 'USD' },
+      { id: 2, name: '目标账户', broker: '券商B', market: 'us', baseCurrency: 'USD' },
+      { id: 3, name: '基金账户', broker: '平台C', market: 'fund', baseCurrency: 'CNY' },
+    ]));
+    getSnapshot.mockImplementation(async ({ accountId }: { accountId?: number } = {}) => makeSnapshot({
+      accountId: accountId ?? 1,
+      accountMarket: accountId === 3 ? 'fund' : 'us',
+      positions: accountId === 1 ? [{
+        symbol: 'AAPL',
+        market: 'us',
+        currency: 'USD',
+        quantity: 3,
+        avgCost: 100,
+        totalCost: 300,
+        lastPrice: 120,
+        marketValueBase: 360,
+        unrealizedPnlBase: 60,
+        valuationCurrency: 'USD',
+        priceSource: 'history_close',
+      }] : [],
+    }));
+    previewAssetTransfer.mockResolvedValueOnce({
+      sourceAccountId: 1,
+      targetAccountId: 2,
+      sourceAccountName: '源账户',
+      targetAccountName: '目标账户',
+      asset: { displayName: 'AAPL' },
+      transferredCounts: { trades: 1 },
+      totalRecords: 1,
+      dateFrom: '2026-01-01',
+      dateTo: '2026-01-01',
+      warnings: ['不迁移无产品归属的现金流水；现金余额如需调整，请单独录入现金流水。'],
+      transferred: false,
+    }).mockResolvedValueOnce({
+      sourceAccountId: 1,
+      targetAccountId: 2,
+      sourceAccountName: '源账户',
+      targetAccountName: '目标账户',
+      asset: { displayName: 'AAPL' },
+      transferredCounts: { trades: 1 },
+      totalRecords: 1,
+      dateFrom: '2026-01-01',
+      dateTo: '2026-01-01',
+      warnings: [],
+      transferred: false,
+    });
+    transferAsset.mockResolvedValueOnce({
+      sourceAccountId: 1,
+      targetAccountId: 2,
+      sourceAccountName: '源账户',
+      targetAccountName: '目标账户',
+      asset: { displayName: 'AAPL' },
+      transferredCounts: { trades: 1 },
+      totalRecords: 1,
+      dateFrom: '2026-01-01',
+      dateTo: '2026-01-01',
+      warnings: [],
+      transferred: true,
+    });
+
+    render(<PortfolioPage />);
+    await waitForInitialLoad();
+
+    fireEvent.change(screen.getAllByRole('combobox')[0], { target: { value: '1' } });
+    await waitFor(() => expect(getSnapshot).toHaveBeenLastCalledWith({ accountId: 1, costMethod: 'fifo', refreshPrices: false }));
+
+    fireEvent.click(screen.getByRole('button', { name: '转移资产' }));
+    const dialog = screen.getByRole('dialog', { name: '转移资产' });
+    expect(within(dialog).getByText('AAPL')).toBeInTheDocument();
+    expect(within(dialog).getAllByText(/目标账户/).length).toBeGreaterThan(0);
+    expect(within(dialog).queryByText(/基金账户/)).not.toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '下一步' }));
+    await waitFor(() => expect(previewAssetTransfer).toHaveBeenCalledWith(1, {
+      targetAccountId: 2,
+      asset: {
+        market: 'us',
+        symbol: 'AAPL',
+        currency: 'USD',
+        displayName: 'AAPL',
+      },
+    }));
+    expect(await within(dialog).findByText('确认将迁移的源数据。')).toBeInTheDocument();
+    expect(within(dialog).getByText(/共 1 条源数据/)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '上一步' }));
+    expect(within(dialog).getByText('选择当前账户中的一个资产和同类型目标账户。')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: '下一步' }));
+    await waitFor(() => expect(previewAssetTransfer).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(await within(dialog).findByRole('button', { name: '确定转移' }));
+    await waitFor(() => expect(transferAsset).toHaveBeenCalledWith(1, {
+      targetAccountId: 2,
+      asset: {
+        market: 'us',
+        symbol: 'AAPL',
+        currency: 'USD',
+        displayName: 'AAPL',
+      },
+    }));
+    expect(await within(dialog).findByText('资产转移完成')).toBeInTheDocument();
+    expect(within(dialog).getByText(/已迁移 1 条源数据到 目标账户/)).toBeInTheDocument();
+  });
+
   it('shows disabled feedback when FX online refresh is disabled even without a disabled reason', async () => {
     refreshFx.mockResolvedValueOnce({
       asOf: '2026-03-19',
@@ -389,11 +591,11 @@ describe('PortfolioPage FX refresh', () => {
     const hkRowCells = within(hkRow as HTMLTableRowElement).getAllByRole('cell');
     const aaplRowCells = within(aaplRow as HTMLTableRowElement).getAllByRole('cell');
     const msftRowCells = within(msftRow as HTMLTableRowElement).getAllByRole('cell');
+    expect(hkRowCells.at(-3)).toHaveClass('text-danger');
     expect(hkRowCells.at(-2)).toHaveClass('text-danger');
-    expect(hkRowCells.at(-1)).toHaveClass('text-danger');
+    expect(aaplRowCells.at(-3)).toHaveClass('text-success');
     expect(aaplRowCells.at(-2)).toHaveClass('text-success');
-    expect(aaplRowCells.at(-1)).toHaveClass('text-success');
-    expect(msftRowCells.at(-1)).toHaveClass('text-secondary');
+    expect(msftRowCells.at(-2)).toHaveClass('text-secondary');
   });
 
   it('keeps crypto quantities at up to 8 decimals in display and entry controls', async () => {

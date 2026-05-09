@@ -59,6 +59,39 @@ export interface PortfolioAccountCreateRequest {
   ownerId?: string;
 }
 
+export interface PortfolioAccountUpdateRequest {
+  name: string;
+  broker?: string;
+}
+
+export interface PortfolioAssetTransferAsset {
+  market: PortfolioMarket | string;
+  symbol?: string;
+  currency?: string;
+  displayName?: string;
+  linkedEntryId?: number | null;
+  policyId?: number | null;
+}
+
+export interface PortfolioAssetTransferRequest {
+  targetAccountId: number;
+  asset: PortfolioAssetTransferAsset;
+}
+
+export interface PortfolioAssetTransferResponse {
+  sourceAccountId: number;
+  targetAccountId: number;
+  sourceAccountName: string;
+  targetAccountName: string;
+  asset: Record<string, unknown>;
+  transferredCounts: Record<string, number>;
+  totalRecords: number;
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  warnings: string[];
+  transferred: boolean;
+}
+
 export interface PortfolioPositionItem {
   symbol: string;
   productKey?: string | null;

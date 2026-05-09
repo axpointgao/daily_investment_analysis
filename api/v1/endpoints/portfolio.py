@@ -15,6 +15,8 @@ from api.v1.schemas.portfolio import (
     PortfolioAccountItem,
     PortfolioAccountListResponse,
     PortfolioAccountUpdateRequest,
+    PortfolioAssetTransferRequest,
+    PortfolioAssetTransferResponse,
     PortfolioAdvisoryLedgerCreateRequest,
     PortfolioAdvisoryLedgerListResponse,
     PortfolioAdvisoryNavRequest,
@@ -108,6 +110,12 @@ def _serialize_import_record(item: dict) -> PortfolioImportTradeItem:
     else:
         payload["trade_date"] = str(trade_date)
     return PortfolioImportTradeItem(**payload)
+
+
+def _model_dump_excluding_none(model):
+    if hasattr(model, "model_dump"):
+        return model.model_dump(exclude_none=True)
+    return model.dict(exclude_none=True)
 
 
 @router.get(
@@ -302,6 +310,62 @@ def delete_account(account_id: int):
         raise
     except Exception as exc:
         raise _internal_error("Deactivate account failed", exc)
+
+
+@router.post(
+    "/accounts/{account_id}/asset-transfers/preview",
+    response_model=PortfolioAssetTransferResponse,
+    responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Preview a single asset transfer between same-type accounts",
+)
+def preview_account_asset_transfer(
+    account_id: int,
+    request: PortfolioAssetTransferRequest,
+) -> PortfolioAssetTransferResponse:
+    service = PortfolioService()
+    try:
+        data = service.preview_account_asset_transfer(
+            source_account_id=account_id,
+            target_account_id=request.target_account_id,
+            asset=_model_dump_excluding_none(request.asset),
+        )
+        return PortfolioAssetTransferResponse(**data)
+    except PortfolioBusyError as exc:
+        raise _conflict_error(error="portfolio_busy", message=str(exc))
+    except PortfolioConflictError as exc:
+        raise _conflict_error(error="portfolio_transfer_conflict", message=str(exc))
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Preview account asset transfer failed", exc)
+
+
+@router.post(
+    "/accounts/{account_id}/asset-transfers",
+    response_model=PortfolioAssetTransferResponse,
+    responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Transfer a single asset between same-type accounts",
+)
+def transfer_account_asset(
+    account_id: int,
+    request: PortfolioAssetTransferRequest,
+) -> PortfolioAssetTransferResponse:
+    service = PortfolioService()
+    try:
+        data = service.transfer_account_asset(
+            source_account_id=account_id,
+            target_account_id=request.target_account_id,
+            asset=_model_dump_excluding_none(request.asset),
+        )
+        return PortfolioAssetTransferResponse(**data)
+    except PortfolioBusyError as exc:
+        raise _conflict_error(error="portfolio_busy", message=str(exc))
+    except PortfolioConflictError as exc:
+        raise _conflict_error(error="portfolio_transfer_conflict", message=str(exc))
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Transfer account asset failed", exc)
 
 
 @router.post(

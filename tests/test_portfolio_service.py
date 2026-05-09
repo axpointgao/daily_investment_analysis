@@ -2087,6 +2087,202 @@ class PortfolioServiceTestCase(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "cannot be changed after ledger events exist"):
             self.service.update_insurance_policy(policy["id"], insurance_kind="whole_life")
 
+    def test_transfer_single_stock_asset_moves_source_events_only(self) -> None:
+        source = self.service.create_account(name="Source", broker="Demo", market="cn", base_currency="CNY")
+        target = self.service.create_account(name="Target", broker="Demo", market="cn", base_currency="CNY")
+        self._save_close("600519", date(2026, 1, 3), 110)
+        self.service.record_trade(
+            account_id=source["id"],
+            symbol="600519",
+            trade_date=date(2026, 1, 1),
+            side="buy",
+            quantity=10,
+            price=100,
+            market="cn",
+            currency="CNY",
+            trade_uid="SRC-001",
+        )
+
+        preview = self.service.preview_account_asset_transfer(
+            source_account_id=source["id"],
+            target_account_id=target["id"],
+            asset={"market": "cn", "symbol": "600519", "currency": "CNY"},
+        )
+        self.assertEqual(preview["transferred_counts"]["trades"], 1)
+        self.assertFalse(preview["transferred"])
+
+        result = self.service.transfer_account_asset(
+            source_account_id=source["id"],
+            target_account_id=target["id"],
+            asset={"market": "cn", "symbol": "600519", "currency": "CNY"},
+        )
+        self.assertTrue(result["transferred"])
+
+        source_snapshot = self.service.get_portfolio_snapshot(
+            account_id=source["id"],
+            as_of=date(2026, 1, 3),
+            refresh_prices=True,
+        )
+        target_snapshot = self.service.get_portfolio_snapshot(
+            account_id=target["id"],
+            as_of=date(2026, 1, 3),
+            refresh_prices=True,
+        )
+        self.assertEqual(source_snapshot["accounts"][0]["positions"], [])
+        self.assertEqual(target_snapshot["accounts"][0]["positions"][0]["symbol"], "600519")
+
+    def test_transfer_single_asset_rejects_trade_identity_conflict(self) -> None:
+        source = self.service.create_account(name="Source", broker="Demo", market="cn", base_currency="CNY")
+        target = self.service.create_account(name="Target", broker="Demo", market="cn", base_currency="CNY")
+        self.service.record_trade(
+            account_id=source["id"],
+            symbol="600519",
+            trade_date=date(2026, 1, 1),
+            side="buy",
+            quantity=10,
+            price=100,
+            market="cn",
+            currency="CNY",
+            trade_uid="DUP-001",
+        )
+        self.service.record_trade(
+            account_id=target["id"],
+            symbol="000001",
+            trade_date=date(2026, 1, 1),
+            side="buy",
+            quantity=1,
+            price=10,
+            market="cn",
+            currency="CNY",
+            trade_uid="DUP-001",
+        )
+
+        with self.assertRaises(PortfolioConflictError):
+            self.service.transfer_account_asset(
+                source_account_id=source["id"],
+                target_account_id=target["id"],
+                asset={"market": "cn", "symbol": "600519", "currency": "CNY"},
+            )
+
+        source_snapshot = self.service.get_portfolio_snapshot(
+            account_id=source["id"],
+            as_of=date(2026, 1, 1),
+            refresh_prices=True,
+        )
+        self.assertEqual(source_snapshot["accounts"][0]["positions"][0]["symbol"], "600519")
+
+    def test_transfer_fund_asset_creates_manual_price_fallback_from_latest_trade(self) -> None:
+        source = self.service.create_account(name="Source Fund", broker="Demo", market="fund", base_currency="CNY")
+        target = self.service.create_account(name="Target Fund", broker="Demo", market="fund", base_currency="CNY")
+        self.service.record_trade(
+            account_id=source["id"],
+            symbol="000290",
+            trade_date=date(2021, 1, 1),
+            side="buy",
+            quantity=100,
+            price=1.0795,
+            market="fund",
+            currency="CNY",
+        )
+        self.service.record_trade(
+            account_id=source["id"],
+            symbol="000290",
+            trade_date=date(2026, 5, 6),
+            side="buy",
+            quantity=10,
+            price=0.6465,
+            market="fund",
+            currency="CNY",
+        )
+
+        preview = self.service.preview_account_asset_transfer(
+            source_account_id=source["id"],
+            target_account_id=target["id"],
+            asset={"market": "fund", "symbol": "000290", "currency": "CNY"},
+        )
+        self.assertIn("最近交易价", " ".join(preview["warnings"]))
+
+        result = self.service.transfer_account_asset(
+            source_account_id=source["id"],
+            target_account_id=target["id"],
+            asset={"market": "fund", "symbol": "000290", "currency": "CNY"},
+        )
+        self.assertEqual(result["transferred_counts"]["manual_prices"], 1)
+
+        target_snapshot = self.service.get_portfolio_snapshot(
+            account_id=target["id"],
+            as_of=date(2026, 5, 9),
+            refresh_prices=False,
+        )
+        position = target_snapshot["accounts"][0]["positions"][0]
+        self.assertEqual(position["symbol"], "000290")
+        self.assertEqual(position["price_source"], "manual_price")
+        self.assertAlmostEqual(position["last_price"], 0.6465, places=6)
+        self.assertGreater(position["market_value_base"], 0)
+
+    def test_transfer_bank_wealth_asset_moves_linked_ledger_and_manual_value(self) -> None:
+        source = self.service.create_account(name="Source Bank", broker="BOC", market="bank", base_currency="CNY")
+        target = self.service.create_account(name="Target Bank", broker="BOC", market="bank", base_currency="CNY")
+        wealth_buy = self.service.record_bank_ledger(
+            account_id=source["id"],
+            event_date=date(2026, 1, 3),
+            asset_kind="wealth",
+            direction="in",
+            amount=100000,
+            bank_name="中银理财",
+            currency="CNY",
+            product_name="稳健理财",
+        )
+        self.service.record_bank_ledger(
+            account_id=source["id"],
+            event_date=date(2026, 1, 4),
+            asset_kind="wealth",
+            direction="in",
+            amount=20000,
+            bank_name="中银理财",
+            currency="CNY",
+            product_name="稳健理财",
+            linked_entry_id=wealth_buy["id"],
+        )
+        wealth_symbol = f"BANK:W:{wealth_buy['id']}"
+        self.service.upsert_manual_price(
+            account_id=source["id"],
+            symbol=wealth_symbol,
+            market="bank",
+            price_date=date(2026, 1, 5),
+            price=121000,
+            currency="CNY",
+        )
+
+        preview = self.service.preview_account_asset_transfer(
+            source_account_id=source["id"],
+            target_account_id=target["id"],
+            asset={"market": "bank", "symbol": wealth_symbol, "currency": "CNY", "linked_entry_id": wealth_buy["id"]},
+        )
+        self.assertEqual(preview["transferred_counts"]["bank_ledger"], 2)
+        self.assertEqual(preview["transferred_counts"]["manual_prices"], 1)
+
+        self.service.transfer_account_asset(
+            source_account_id=source["id"],
+            target_account_id=target["id"],
+            asset={"market": "bank", "symbol": wealth_symbol, "currency": "CNY", "linked_entry_id": wealth_buy["id"]},
+        )
+        source_snapshot = self.service.get_portfolio_snapshot(
+            account_id=source["id"],
+            as_of=date(2026, 1, 5),
+            refresh_prices=True,
+        )
+        target_snapshot = self.service.get_portfolio_snapshot(
+            account_id=target["id"],
+            as_of=date(2026, 1, 5),
+            refresh_prices=True,
+        )
+        self.assertEqual(source_snapshot["accounts"][0]["positions"], [])
+        wealth = target_snapshot["accounts"][0]["positions"][0]
+        self.assertEqual(wealth["symbol"], wealth_symbol)
+        self.assertEqual(wealth["price_source"], "bank_value_update")
+        self.assertAlmostEqual(wealth["market_value_base"], 121000.0, places=6)
+
 
 if __name__ == "__main__":
     unittest.main()

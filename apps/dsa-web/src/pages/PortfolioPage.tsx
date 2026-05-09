@@ -2,7 +2,7 @@ import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Tag } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ArrowRightLeft, CheckCircle2, Loader2, Pencil, Tag } from 'lucide-react';
 import { portfolioApi } from '../api/portfolio';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
@@ -16,6 +16,8 @@ import type {
   PortfolioAdvisoryLedgerListItem,
   PortfolioAdvisoryProductItem,
   PortfolioAdvisoryProductType,
+  PortfolioAssetTransferAsset,
+  PortfolioAssetTransferResponse,
   PortfolioAnalysisResponse,
   PortfolioBankAssetKind,
   PortfolioBankWealthProductItem,
@@ -101,10 +103,17 @@ type PortfolioToast = {
 };
 
 type AssetBreakdownView = 'tag' | 'type';
+type AssetTransferStep = 'select' | 'preview' | 'result';
 
 type ActiveTagTarget = {
   productKey: string;
   row: FlatPosition;
+};
+
+type AssetTransferOption = {
+  key: string;
+  row: FlatPosition;
+  asset: PortfolioAssetTransferAsset;
 };
 
 type InsuranceEventOption = {
@@ -206,7 +215,7 @@ function formatPositionListMoney(value: number | undefined | null, currency = 'C
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-  return currency === 'USD' ? `USD ${amount}` : amount;
+  return currency === 'CNY' ? amount : `${currency} ${amount}`;
 }
 
 function formatMissingFxPairs(snapshot: PortfolioSnapshotResponse | null): string {
@@ -287,7 +296,7 @@ function parsePositiveFormNumber(value: string): number | null {
 function formatPositionQuantity(row: PortfolioPositionItem): string {
   if (row.market === 'advisory') return '-';
   if (row.market === 'bank' && !isBankWealthNavPosition(row)) return '-';
-  return formatAssetQuantity(row.quantity, row.market, 2);
+  return formatAssetQuantity(row.quantity, row.market);
 }
 
 function formatPositionQuantityTitle(row: PortfolioPositionItem): string {
@@ -424,6 +433,60 @@ function getPositionDisplayName(row: PortfolioPositionItem): string {
     return row.productName || row.bankName || row.symbol;
   }
   return row.symbol;
+}
+
+function getAssetTransferKey(row: FlatPosition): string {
+  if (row.market === 'bank' && row.linkedEntryId) {
+    return `${row.accountId}:bank:${row.linkedEntryId}`;
+  }
+  if (row.market === 'insurance' && row.policyId) {
+    return `${row.accountId}:insurance:${row.policyId}`;
+  }
+  return `${row.accountId}:${row.market}:${row.symbol}:${row.currency}`;
+}
+
+function buildAssetTransferAsset(row: FlatPosition): PortfolioAssetTransferAsset | null {
+  const displayName = getPositionDisplayName(row);
+  if (row.market === 'bank') {
+    if (!row.linkedEntryId) return null;
+    return {
+      market: row.market,
+      symbol: row.symbol,
+      currency: row.currency,
+      displayName,
+      linkedEntryId: row.linkedEntryId,
+    };
+  }
+  if (row.market === 'insurance') {
+    if (!row.policyId) return null;
+    return {
+      market: row.market,
+      symbol: row.symbol,
+      currency: row.currency,
+      displayName,
+      policyId: row.policyId,
+    };
+  }
+  if (!row.symbol) return null;
+  return {
+    market: row.market,
+    symbol: row.symbol,
+    currency: row.currency,
+    displayName,
+  };
+}
+
+function formatTransferCountLabel(key: string): string {
+  const labels: Record<string, string> = {
+    trades: '交易流水',
+    corporate_actions: '公司行动',
+    manual_prices: '手工估值',
+    bank_ledger: '银行流水',
+    advisory_ledger: '投顾流水',
+    insurance_policies: '保单',
+    insurance_ledger: '保险流水',
+  };
+  return labels[key] || key;
 }
 
 function formatAdvisoryProductTypeLabel(value?: string | null): string {
@@ -911,6 +974,13 @@ const PortfolioPage: React.FC = () => {
     market: 'cn' as PortfolioMarket,
     baseCurrency: 'CNY',
   });
+  const [accountEditId, setAccountEditId] = useState<number | null>(null);
+  const [accountUpdating, setAccountUpdating] = useState(false);
+  const [accountEditError, setAccountEditError] = useState<string | null>(null);
+  const [accountEditForm, setAccountEditForm] = useState({
+    name: '',
+    broker: '',
+  });
   const [costMethod, setCostMethod] = useState<PortfolioCostMethod>('fifo');
   const [snapshot, setSnapshot] = useState<PortfolioSnapshotResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -925,6 +995,14 @@ const PortfolioPage: React.FC = () => {
   const [tagLoadError, setTagLoadError] = useState<ParsedApiError | null>(null);
   const [activeTagTarget, setActiveTagTarget] = useState<ActiveTagTarget | null>(null);
   const [tagUpdatingKey, setTagUpdatingKey] = useState<string | null>(null);
+  const [assetTransferOpen, setAssetTransferOpen] = useState(false);
+  const [assetTransferStep, setAssetTransferStep] = useState<AssetTransferStep>('select');
+  const [assetTransferAssetKey, setAssetTransferAssetKey] = useState('');
+  const [assetTransferTargetId, setAssetTransferTargetId] = useState('');
+  const [assetTransferPreview, setAssetTransferPreview] = useState<PortfolioAssetTransferResponse | null>(null);
+  const [assetTransferResult, setAssetTransferResult] = useState<PortfolioAssetTransferResponse | null>(null);
+  const [assetTransferLoading, setAssetTransferLoading] = useState(false);
+  const [assetTransferError, setAssetTransferError] = useState<string | null>(null);
   const [assetBreakdownView, setAssetBreakdownView] = useState<AssetBreakdownView>('tag');
   const [error, setError] = useState<ParsedApiError | null>(null);
   const [writeWarning, setWriteWarning] = useState<string | null>(null);
@@ -1086,6 +1164,7 @@ const PortfolioPage: React.FC = () => {
   const writableAccount = selectedAccount === 'all' ? undefined : accounts.find((item) => item.id === selectedAccount);
   const writableAccountId = writableAccount?.id;
   const writeBlocked = !writableAccountId;
+  const accountEditOpen = accountEditId != null && writableAccount?.id === accountEditId;
   const selectedMarket = writableAccount?.market;
   const isStockAccount = isStockMarket(selectedMarket);
   const isFundAccount = selectedMarket === 'fund';
@@ -1489,6 +1568,111 @@ const PortfolioPage: React.FC = () => {
     rows.sort((a, b) => Number(b.marketValueBase || 0) - Number(a.marketValueBase || 0));
     return rows;
   }, [snapshot]);
+
+  const assetTransferOptions: AssetTransferOption[] = useMemo(
+    () => positionRows
+      .filter((row) => row.accountId === writableAccountId)
+      .map((row) => {
+        const asset = buildAssetTransferAsset(row);
+        return asset ? { key: getAssetTransferKey(row), row, asset } : null;
+      })
+      .filter((item): item is AssetTransferOption => Boolean(item)),
+    [positionRows, writableAccountId],
+  );
+  const assetTransferTargets = useMemo(
+    () => accounts.filter((account) => (
+      writableAccount
+      && account.id !== writableAccount.id
+      && account.market === writableAccount.market
+      && account.isActive
+    )),
+    [accounts, writableAccount],
+  );
+  const selectedAssetTransferOption = assetTransferOptions.find((item) => item.key === assetTransferAssetKey) || null;
+  const selectedAssetTransferTarget = assetTransferTargets.find((item) => String(item.id) === assetTransferTargetId) || null;
+
+  const closeAssetTransfer = useCallback(() => {
+    if (assetTransferLoading) return;
+    setAssetTransferOpen(false);
+    setAssetTransferStep('select');
+    setAssetTransferAssetKey('');
+    setAssetTransferTargetId('');
+    setAssetTransferPreview(null);
+    setAssetTransferResult(null);
+    setAssetTransferError(null);
+  }, [assetTransferLoading]);
+
+  const openAssetTransfer = useCallback(() => {
+    setAssetTransferOpen(true);
+    setAssetTransferStep('select');
+    setAssetTransferPreview(null);
+    setAssetTransferResult(null);
+    setAssetTransferError(null);
+    setAssetTransferAssetKey((prev) => (
+      prev && assetTransferOptions.some((item) => item.key === prev)
+        ? prev
+        : assetTransferOptions[0]?.key || ''
+    ));
+    setAssetTransferTargetId((prev) => (
+      prev && assetTransferTargets.some((item) => String(item.id) === prev)
+        ? prev
+        : (assetTransferTargets[0]?.id != null ? String(assetTransferTargets[0].id) : '')
+    ));
+  }, [assetTransferOptions, assetTransferTargets]);
+
+  const handlePreviewAssetTransfer = useCallback(async () => {
+    if (!writableAccountId || !selectedAssetTransferOption || !selectedAssetTransferTarget) {
+      setAssetTransferError('请选择待转移资产和目标账户。');
+      return;
+    }
+    setAssetTransferLoading(true);
+    setAssetTransferError(null);
+    try {
+      const preview = await portfolioApi.previewAssetTransfer(writableAccountId, {
+        targetAccountId: selectedAssetTransferTarget.id,
+        asset: selectedAssetTransferOption.asset,
+      });
+      setAssetTransferPreview(preview);
+      setAssetTransferStep('preview');
+    } catch (err) {
+      setAssetTransferError(getParsedApiError(err).message || '转移预览失败，请稍后重试。');
+    } finally {
+      setAssetTransferLoading(false);
+    }
+  }, [selectedAssetTransferOption, selectedAssetTransferTarget, writableAccountId]);
+
+  const handleConfirmAssetTransfer = useCallback(async () => {
+    if (!writableAccountId || !selectedAssetTransferOption || !selectedAssetTransferTarget) {
+      setAssetTransferError('请选择待转移资产和目标账户。');
+      return;
+    }
+    setAssetTransferLoading(true);
+    setAssetTransferError(null);
+    try {
+      const result = await portfolioApi.transferAsset(writableAccountId, {
+        targetAccountId: selectedAssetTransferTarget.id,
+        asset: selectedAssetTransferOption.asset,
+      });
+      setAssetTransferResult(result);
+      setAssetTransferStep('result');
+      showPortfolioToast(
+        '资产已转移',
+        `${getPositionDisplayName(selectedAssetTransferOption.row)} 已移动到 ${selectedAssetTransferTarget.name}。`,
+      );
+      await refreshPortfolioData(eventPage, { refreshPrices: false });
+    } catch (err) {
+      setAssetTransferError(getParsedApiError(err).message || '资产转移失败，请稍后重试。');
+    } finally {
+      setAssetTransferLoading(false);
+    }
+  }, [
+    eventPage,
+    refreshPortfolioData,
+    selectedAssetTransferOption,
+    selectedAssetTransferTarget,
+    showPortfolioToast,
+    writableAccountId,
+  ]);
 
   const bankDepositOptions: BankPositionOption[] = useMemo(
     () => positionRows
@@ -2399,6 +2583,52 @@ const PortfolioPage: React.FC = () => {
     }
   };
 
+  const openAccountEdit = () => {
+    if (!writableAccount) return;
+    setAccountEditId(writableAccount.id);
+    setAccountEditForm({
+      name: writableAccount.name,
+      broker: writableAccount.broker || '',
+    });
+    setAccountEditError(null);
+  };
+
+  const closeAccountEdit = () => {
+    if (accountUpdating) return;
+    setAccountEditId(null);
+    setAccountEditError(null);
+  };
+
+  const handleUpdateAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!writableAccountId) {
+      setAccountEditError('请先选择具体账户。');
+      return;
+    }
+    const name = accountEditForm.name.trim();
+    if (!name) {
+      setAccountEditError('账户名称不能为空。');
+      return;
+    }
+    try {
+      setAccountUpdating(true);
+      setAccountEditError(null);
+      await portfolioApi.updateAccount(writableAccountId, {
+        name,
+        broker: accountEditForm.broker.trim(),
+      });
+      setAccountEditId(null);
+      setWriteWarning(null);
+      showPortfolioToast('账户已更新', `${name} 的账户信息已保存。`);
+      await Promise.all([loadAccounts(), loadSnapshot({ refreshPrices: false })]);
+    } catch (err) {
+      const parsed = getParsedApiError(err);
+      setAccountEditError(parsed.message || '更新账户失败，请稍后重试。');
+    } finally {
+      setAccountUpdating(false);
+    }
+  };
+
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     const name = accountForm.name.trim();
@@ -2572,7 +2802,11 @@ const PortfolioPage: React.FC = () => {
                 <p className="text-xs text-secondary mb-1">账户视图</p>
                 <select
                   value={String(selectedAccount)}
-                  onChange={(e) => setSelectedAccount(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                  onChange={(e) => {
+                    setSelectedAccount(e.target.value === 'all' ? 'all' : Number(e.target.value));
+                    setAccountEditId(null);
+                    setAccountEditError(null);
+                  }}
                   className={PORTFOLIO_SELECT_CLASS}
                 >
                   <option value="all">全部账户</option>
@@ -2727,7 +2961,65 @@ const PortfolioPage: React.FC = () => {
 
       {selectedAccount !== 'all' && writableAccount ? (
         <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-xs text-secondary">
-          当前账户：<span className="text-foreground">{writableAccount.name}</span> · {formatMarketLabel(writableAccount.market)} · {writableAccount.baseCurrency}
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              当前账户：<span className="text-foreground">{writableAccount.name}</span>
+              <span> · {writableAccount.broker || '未设置机构/平台'}</span>
+              <span> · {formatMarketLabel(writableAccount.market)}</span>
+              <span> · {writableAccount.baseCurrency}</span>
+            </div>
+            <button
+              type="button"
+              className="btn-secondary inline-flex h-8 shrink-0 items-center justify-center gap-1.5 !px-3 !py-1 !text-xs"
+              onClick={accountEditOpen ? closeAccountEdit : openAccountEdit}
+              disabled={accountUpdating}
+            >
+              <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+              {accountEditOpen ? '收起编辑' : '编辑'}
+            </button>
+          </div>
+          {accountEditOpen ? (
+            <form className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" onSubmit={handleUpdateAccount}>
+              {accountEditError ? (
+                <InlineAlert
+                  variant="danger"
+                  className="md:col-span-3 rounded-lg px-2 py-1 text-xs shadow-none"
+                  title="更新账户失败"
+                  message={accountEditError}
+                />
+              ) : null}
+              <PortfolioField label="账户名称">
+                <input
+                  className={PORTFOLIO_INPUT_CLASS}
+                  value={accountEditForm.name}
+                  onChange={(e) => setAccountEditForm((prev) => ({ ...prev, name: e.target.value }))}
+                  disabled={accountUpdating}
+                />
+              </PortfolioField>
+              <PortfolioField label="机构/平台">
+                <input
+                  className={PORTFOLIO_INPUT_CLASS}
+                  placeholder="可留空"
+                  value={accountEditForm.broker}
+                  onChange={(e) => setAccountEditForm((prev) => ({ ...prev, broker: e.target.value }))}
+                  disabled={accountUpdating}
+                />
+              </PortfolioField>
+              <div className="grid gap-1 self-end md:min-w-52">
+                <div className="text-[11px] leading-none text-secondary">
+                  账户类型 {formatMarketLabel(writableAccount.market)} · 基准币 {writableAccount.baseCurrency}
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" className="btn-secondary h-9 flex-1 !px-3 !py-1.5 text-sm" onClick={closeAccountEdit} disabled={accountUpdating}>
+                    取消
+                  </button>
+                  <button type="submit" className="btn-secondary h-9 flex-1 !px-3 !py-1.5 text-sm" disabled={accountUpdating}>
+                    {accountUpdating ? '保存中...' : '保存'}
+                  </button>
+                </div>
+              </div>
+            </form>
+          ) : null}
         </div>
       ) : null}
 
@@ -2774,7 +3066,21 @@ const PortfolioPage: React.FC = () => {
         <Card padding="md">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-foreground">持仓明细</h2>
-            <span className="text-xs text-secondary">共 {positionRows.length} 项</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-secondary">共 {positionRows.length} 项</span>
+              {selectedAccount !== 'all' ? (
+                <button
+                  type="button"
+                  className="btn-secondary inline-flex h-8 items-center gap-1.5 !px-2.5 !py-1 !text-xs"
+                  onClick={openAssetTransfer}
+                  disabled={!writableAccountId || assetTransferOptions.length === 0}
+                  title={assetTransferOptions.length === 0 ? '当前账户暂无可转移资产' : '转移当前账户中的单个资产'}
+                >
+                  <ArrowRightLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                  转移资产
+                </button>
+              ) : null}
+            </div>
           </div>
           {positionRows.length === 0 ? (
             <EmptyState
@@ -4262,6 +4568,217 @@ const PortfolioPage: React.FC = () => {
           }
         }}
       />
+      {assetTransferOpen ? (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-background/62 px-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="asset-transfer-title"
+          onClick={closeAssetTransfer}
+        >
+          <div
+            className="w-full max-w-2xl rounded-2xl border border-border/70 bg-card px-5 py-4 text-foreground shadow-soft-card-strong"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 id="asset-transfer-title" className="text-sm font-semibold text-foreground">
+                  转移资产
+                </h3>
+                <p className="mt-1 text-xs text-secondary">
+                  {assetTransferStep === 'select' ? '选择当前账户中的一个资产和同类型目标账户。' : null}
+                  {assetTransferStep === 'preview' ? '确认将迁移的源数据。' : null}
+                  {assetTransferStep === 'result' ? '转移已完成。' : null}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn-secondary shrink-0 !px-2.5 !py-1 !text-xs"
+                onClick={closeAssetTransfer}
+                disabled={assetTransferLoading}
+              >
+                关闭
+              </button>
+            </div>
+
+            <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
+              {(['select', 'preview', 'result'] as AssetTransferStep[]).map((step, index) => (
+                <div
+                  key={step}
+                  className={`rounded-lg border px-3 py-2 ${
+                    assetTransferStep === step ? 'border-primary/50 bg-primary/10 text-foreground' : 'border-border/60 text-secondary'
+                  }`}
+                >
+                  {index + 1}. {step === 'select' ? '选择资产' : step === 'preview' ? '数据概览' : '转移结果'}
+                </div>
+              ))}
+            </div>
+
+            {assetTransferError ? (
+              <InlineAlert
+                variant="danger"
+                className="mt-4 rounded-lg px-3 py-2 text-xs shadow-none"
+                title="资产转移失败"
+                message={assetTransferError}
+              />
+            ) : null}
+
+            {assetTransferStep === 'select' ? (
+              <div className="mt-4 grid gap-4">
+                <PortfolioField label="目标账户">
+                  <select
+                    className={PORTFOLIO_SELECT_CLASS}
+                    value={assetTransferTargetId}
+                    onChange={(event) => setAssetTransferTargetId(event.target.value)}
+                    disabled={assetTransferTargets.length === 0 || assetTransferLoading}
+                  >
+                    {assetTransferTargets.length === 0 ? (
+                      <option value="">暂无同类型账户</option>
+                    ) : null}
+                    {assetTransferTargets.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.name} · {account.broker || '未设置机构/平台'}
+                      </option>
+                    ))}
+                  </select>
+                </PortfolioField>
+
+                <div className="grid gap-2">
+                  <div className="text-xs font-medium text-secondary">选择资产</div>
+                  <div className="max-h-72 overflow-auto rounded-xl border border-border/70">
+                    {assetTransferOptions.map((option) => {
+                      const assetName = getPositionDisplayName(option.row);
+                      const checked = option.key === assetTransferAssetKey;
+                      return (
+                        <label
+                          key={option.key}
+                          className={`flex cursor-pointer items-start gap-3 border-b border-border/50 px-3 py-2.5 last:border-b-0 ${
+                            checked ? 'bg-primary/10' : 'hover:bg-white/[0.03]'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            className="mt-1"
+                            name="asset-transfer-option"
+                            value={option.key}
+                            checked={checked}
+                            onChange={(event) => setAssetTransferAssetKey(event.target.value)}
+                            disabled={assetTransferLoading}
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium text-foreground">{assetName}</span>
+                            <span className="mt-1 block truncate text-xs text-secondary">
+                              {getPositionAssetType(option.row, assetNameMaps)} · {option.row.currency} · 市值 {formatPositionMoney(option.row.marketValueBase, option.row)}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                    {assetTransferOptions.length === 0 ? (
+                      <div className="px-3 py-6 text-center text-xs text-secondary">
+                        当前账户暂无可转移资产。
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    className="btn-primary inline-flex h-9 items-center gap-1.5 !px-3 !py-1.5 text-sm"
+                    onClick={() => void handlePreviewAssetTransfer()}
+                    disabled={assetTransferLoading || !assetTransferAssetKey || !assetTransferTargetId}
+                  >
+                    {assetTransferLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <ArrowRight className="h-4 w-4" aria-hidden="true" />}
+                    下一步
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {assetTransferStep === 'preview' && assetTransferPreview ? (
+              <div className="mt-4 grid gap-4">
+                <div className="rounded-xl border border-border/70 px-3 py-3 text-sm">
+                  <div className="font-medium text-foreground">
+                    {String(assetTransferPreview.asset.displayName || selectedAssetTransferOption?.asset.displayName || selectedAssetTransferOption?.row.symbol || '选中资产')}
+                  </div>
+                  <div className="mt-1 text-xs text-secondary">
+                    {assetTransferPreview.sourceAccountName} <ArrowRight className="inline h-3.5 w-3.5 align-[-2px]" aria-hidden="true" /> {assetTransferPreview.targetAccountName}
+                  </div>
+                  <div className="mt-1 text-xs text-secondary">
+                    {assetTransferPreview.dateFrom || '--'} 至 {assetTransferPreview.dateTo || '--'} · 共 {assetTransferPreview.totalRecords} 条源数据
+                  </div>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {Object.entries(assetTransferPreview.transferredCounts || {}).map(([key, value]) => (
+                    <div key={key} className="rounded-lg border border-border/70 px-3 py-2 text-xs">
+                      <span className="text-secondary">{formatTransferCountLabel(key)}</span>
+                      <span className="ml-2 font-semibold text-foreground">{value}</span>
+                    </div>
+                  ))}
+                </div>
+                {assetTransferPreview.warnings?.length ? (
+                  <InlineAlert
+                    variant="warning"
+                    className="rounded-lg px-3 py-2 text-xs shadow-none"
+                    title="注意"
+                    message={assetTransferPreview.warnings.join(' ')}
+                  />
+                ) : null}
+                <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    className="btn-secondary inline-flex h-9 items-center justify-center gap-1.5 !px-3 !py-1.5 text-sm"
+                    onClick={() => {
+                      setAssetTransferStep('select');
+                      setAssetTransferPreview(null);
+                      setAssetTransferError(null);
+                    }}
+                    disabled={assetTransferLoading}
+                  >
+                    <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                    上一步
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary inline-flex h-9 items-center justify-center gap-1.5 !px-3 !py-1.5 text-sm"
+                    onClick={() => void handleConfirmAssetTransfer()}
+                    disabled={assetTransferLoading}
+                  >
+                    {assetTransferLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />}
+                    确定转移
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {assetTransferStep === 'result' && assetTransferResult ? (
+              <div className="mt-4 grid gap-4">
+                <div className="rounded-xl border border-success/40 bg-success/10 px-4 py-4 text-center">
+                  <CheckCircle2 className="mx-auto h-8 w-8 text-success" aria-hidden="true" />
+                  <div className="mt-2 text-sm font-semibold text-foreground">资产转移完成</div>
+                  <div className="mt-1 text-xs text-secondary">
+                    已迁移 {assetTransferResult.totalRecords} 条源数据到 {assetTransferResult.targetAccountName}
+                  </div>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {Object.entries(assetTransferResult.transferredCounts || {}).map(([key, value]) => (
+                    <div key={key} className="rounded-lg border border-border/70 px-3 py-2 text-xs">
+                      <span className="text-secondary">{formatTransferCountLabel(key)}</span>
+                      <span className="ml-2 font-semibold text-foreground">{value}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex justify-end">
+                  <button type="button" className="btn-primary h-9 !px-3 !py-1.5 text-sm" onClick={closeAssetTransfer}>
+                    完成
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       {activeTagTarget ? (
         <div
           className="fixed inset-0 z-[80] flex items-center justify-center bg-background/62 px-4 backdrop-blur-sm"

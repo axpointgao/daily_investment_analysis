@@ -286,6 +286,495 @@ class PortfolioService:
     def deactivate_account(self, account_id: int) -> bool:
         return self.repo.deactivate_account(account_id)
 
+    def preview_account_asset_transfer(
+        self,
+        *,
+        source_account_id: int,
+        target_account_id: int,
+        asset: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        with self.repo.portfolio_read_session() as session:
+            source_account = self._require_active_account_in_session(
+                session=session,
+                account_id=source_account_id,
+            )
+            target_account = self._require_active_account_in_session(
+                session=session,
+                account_id=target_account_id,
+            )
+            plan = self._build_account_asset_transfer_plan(
+                session=session,
+                source_account=source_account,
+                target_account=target_account,
+                asset=asset,
+            )
+            return self._transfer_plan_to_response(plan=plan, transferred=False)
+
+    def transfer_account_asset(
+        self,
+        *,
+        source_account_id: int,
+        target_account_id: int,
+        asset: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        with self.repo.portfolio_write_session() as session:
+            source_account = self._require_active_account_in_session(
+                session=session,
+                account_id=source_account_id,
+            )
+            target_account = self._require_active_account_in_session(
+                session=session,
+                account_id=target_account_id,
+            )
+            plan = self._build_account_asset_transfer_plan(
+                session=session,
+                source_account=source_account,
+                target_account=target_account,
+                asset=asset,
+            )
+            self._validate_account_asset_transfer_conflicts(
+                session=session,
+                plan=plan,
+                target_account_id=int(target_account.id),
+            )
+
+            for rows in plan["rows"].values():
+                for row in rows:
+                    row.account_id = int(target_account.id)
+
+            generated_price = self._ensure_transfer_price_fallback_in_session(
+                session=session,
+                plan=plan,
+                target_account_id=int(target_account.id),
+            )
+            if generated_price is not None:
+                plan["generated_manual_price"] = generated_price
+                plan["counts"]["manual_prices"] = int(plan["counts"].get("manual_prices", 0)) + 1
+
+            self.repo.invalidate_account_cache_in_session(
+                session=session,
+                account_id=int(source_account.id),
+                from_date=date.min,
+            )
+            self.repo.invalidate_account_cache_in_session(
+                session=session,
+                account_id=int(target_account.id),
+                from_date=date.min,
+            )
+            session.flush()
+            return self._transfer_plan_to_response(plan=plan, transferred=True)
+
+    def _build_account_asset_transfer_plan(
+        self,
+        *,
+        session: Any,
+        source_account: Any,
+        target_account: Any,
+        asset: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if int(source_account.id) == int(target_account.id):
+            raise ValueError("source and target accounts must be different")
+        if str(source_account.market or "").strip().lower() != str(target_account.market or "").strip().lower():
+            raise ValueError("target account must use the same account type")
+
+        asset_market = self._normalize_market(str(asset.get("market") or source_account.market))
+        account_market = self._normalize_market(str(source_account.market or ""))
+        if asset_market != account_market:
+            raise ValueError("asset market must match source account type")
+
+        if account_market == "bank":
+            plan = self._build_bank_asset_transfer_plan(
+                session=session,
+                source_account=source_account,
+                target_account=target_account,
+                asset=asset,
+            )
+        elif account_market == "advisory":
+            plan = self._build_advisory_asset_transfer_plan(
+                session=session,
+                source_account=source_account,
+                target_account=target_account,
+                asset=asset,
+            )
+        elif account_market == "insurance":
+            plan = self._build_insurance_asset_transfer_plan(
+                session=session,
+                source_account=source_account,
+                target_account=target_account,
+                asset=asset,
+            )
+        else:
+            plan = self._build_symbol_asset_transfer_plan(
+                session=session,
+                source_account=source_account,
+                target_account=target_account,
+                asset=asset,
+            )
+
+        if not any(plan["rows"].values()):
+            raise ValueError("No transferable data found for selected asset")
+        return plan
+
+    def _ensure_transfer_price_fallback_in_session(
+        self,
+        *,
+        session: Any,
+        plan: Dict[str, Any],
+        target_account_id: int,
+    ) -> Optional[Any]:
+        asset = plan.get("asset") or {}
+        market = str(asset.get("market") or "").strip().lower()
+        if market not in {"fund", "crypto"}:
+            return None
+        if plan["rows"].get("manual_prices"):
+            return None
+        trades = list(plan["rows"].get("trades") or [])
+        if not trades:
+            return None
+        latest_trade = max(trades, key=lambda row: (row.trade_date, row.id))
+        price = float(getattr(latest_trade, "price", 0.0) or 0.0)
+        if price <= 0:
+            return None
+        symbol = self._normalize_symbol_for_position(str(asset.get("symbol") or latest_trade.symbol))
+        currency = self._normalize_currency(str(asset.get("currency") or latest_trade.currency))
+        return self.repo.upsert_manual_price_in_session(
+            session=session,
+            account_id=target_account_id,
+            symbol=symbol,
+            market=market,
+            currency=currency,
+            price_date=latest_trade.trade_date,
+            price=price,
+            note="资产转移时由最近交易价生成的估值兜底",
+        )
+
+    def _build_symbol_asset_transfer_plan(
+        self,
+        *,
+        session: Any,
+        source_account: Any,
+        target_account: Any,
+        asset: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        market = self._normalize_market(str(asset.get("market") or source_account.market))
+        symbol = self._normalize_symbol_for_position(str(asset.get("symbol") or ""))
+        if not symbol:
+            raise ValueError("asset.symbol is required")
+        currency = self._normalize_currency(str(asset.get("currency") or source_account.base_currency))
+
+        trades = [
+            row for row in self.repo.list_trades_in_session(
+                session=session,
+                account_id=int(source_account.id),
+                as_of=date.max,
+            )
+            if (
+                self._normalize_symbol_for_position(row.symbol) == symbol
+                and self._normalize_market(row.market) == market
+                and self._normalize_currency(row.currency) == currency
+            )
+        ]
+        corporate_actions = [
+            row for row in self.repo.list_corporate_actions_in_session(
+                session=session,
+                account_id=int(source_account.id),
+                as_of=date.max,
+            )
+            if (
+                self._normalize_symbol_for_position(row.symbol) == symbol
+                and self._normalize_market(row.market) == market
+                and self._normalize_currency(row.currency) == currency
+            )
+        ]
+        manual_prices = [
+            row for row in self.repo.list_manual_prices_in_session(
+                session=session,
+                account_id=int(source_account.id),
+                market=market,
+            )
+            if (
+                self._normalize_symbol_for_position(row.symbol) == symbol
+                and self._normalize_currency(row.currency) == currency
+            )
+        ]
+        rows = {
+            "trades": trades,
+            "corporate_actions": corporate_actions,
+            "manual_prices": manual_prices,
+        }
+        warnings = ["不迁移无产品归属的现金流水；现金余额如需调整，请单独录入现金流水。"]
+        if market in {"fund", "crypto"} and trades and not manual_prices:
+            warnings.append("该资产没有手工价格记录；执行转移时会用最近交易价生成一条估值兜底。")
+        return self._make_asset_transfer_plan(
+            source_account=source_account,
+            target_account=target_account,
+            asset={
+                "market": market,
+                "symbol": symbol,
+                "currency": currency,
+                "display_name": str(asset.get("display_name") or asset.get("displayName") or symbol),
+            },
+            rows=rows,
+            warnings=warnings,
+        )
+
+    def _build_bank_asset_transfer_plan(
+        self,
+        *,
+        session: Any,
+        source_account: Any,
+        target_account: Any,
+        asset: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        raw_linked_entry_id = asset.get("linked_entry_id", asset.get("linkedEntryId"))
+        if raw_linked_entry_id is None:
+            raw_symbol = str(asset.get("symbol") or "").strip().upper()
+            if raw_symbol.startswith(BANK_WEALTH_SYMBOL_PREFIX):
+                raw_linked_entry_id = raw_symbol[len(BANK_WEALTH_SYMBOL_PREFIX):]
+        try:
+            linked_entry_id = int(raw_linked_entry_id)
+        except (TypeError, ValueError):
+            raise ValueError("asset.linked_entry_id is required for bank asset transfer")
+
+        root = self.repo.get_bank_ledger_by_id_in_session(session=session, entry_id=linked_entry_id)
+        if root is None or int(root.account_id) != int(source_account.id):
+            raise ValueError("Selected bank asset does not belong to source account")
+        asset_kind = self._normalize_bank_asset_kind(root.asset_kind)
+        if asset_kind == "demand":
+            raise ValueError("Demand deposit cash cannot be transferred as a single product")
+        root_id = int(root.linked_entry_id or root.id)
+        if root_id != int(root.id):
+            root = self.repo.get_bank_ledger_by_id_in_session(session=session, entry_id=root_id)
+            if root is None or int(root.account_id) != int(source_account.id):
+                raise ValueError("Selected bank asset root entry does not belong to source account")
+
+        bank_rows = [
+            row for row in self.repo.list_bank_ledger_in_session(
+                session=session,
+                account_id=int(source_account.id),
+            )
+            if int(row.id) == root_id or int(row.linked_entry_id or 0) == root_id
+        ]
+        manual_prices = []
+        if asset_kind == "wealth":
+            wealth_symbol = self._make_bank_wealth_symbol(root_id)
+            manual_prices = [
+                row for row in self.repo.list_manual_prices_in_session(
+                    session=session,
+                    account_id=int(source_account.id),
+                    market="bank",
+                )
+                if str(row.symbol or "").strip().upper() == wealth_symbol
+            ]
+        display_name = (
+            str(root.product_name or "").strip()
+            or str(root.registration_code or "").strip()
+            or str(root.product_code or "").strip()
+            or f"银行资产 #{root_id}"
+        )
+        rows = {
+            "bank_ledger": bank_rows,
+            "manual_prices": manual_prices,
+        }
+        return self._make_asset_transfer_plan(
+            source_account=source_account,
+            target_account=target_account,
+            asset={
+                "market": "bank",
+                "symbol": self._make_bank_wealth_symbol(root_id) if asset_kind == "wealth" else f"BANK:D:{root_id}",
+                "currency": self._normalize_currency(root.currency or source_account.base_currency),
+                "linked_entry_id": root_id,
+                "asset_kind": asset_kind,
+                "display_name": display_name,
+            },
+            rows=rows,
+            warnings=[],
+        )
+
+    def _build_advisory_asset_transfer_plan(
+        self,
+        *,
+        session: Any,
+        source_account: Any,
+        target_account: Any,
+        asset: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        symbol = self._normalize_symbol_for_position(str(asset.get("symbol") or ""))
+        if not symbol:
+            raise ValueError("asset.symbol is required for advisory asset transfer")
+        currency = self._normalize_currency(str(asset.get("currency") or source_account.base_currency))
+
+        advisory_rows = []
+        for row in self.repo.list_advisory_ledger_in_session(
+            session=session,
+            account_id=int(source_account.id),
+        ):
+            row_symbol = self._make_advisory_symbol(
+                str(row.product_code or "").strip().upper()
+                or f"{str(row.platform or '').strip()}:{str(row.product_name or '').strip()}"
+            )
+            if row_symbol == symbol and self._normalize_currency(row.currency) == currency:
+                advisory_rows.append(row)
+
+        manual_prices = [
+            row for row in self.repo.list_manual_prices_in_session(
+                session=session,
+                account_id=int(source_account.id),
+                market="advisory",
+            )
+            if (
+                self._normalize_symbol_for_position(row.symbol) == symbol
+                and self._normalize_currency(row.currency) == currency
+            )
+        ]
+        first = advisory_rows[0] if advisory_rows else None
+        rows = {
+            "advisory_ledger": advisory_rows,
+            "manual_prices": manual_prices,
+        }
+        return self._make_asset_transfer_plan(
+            source_account=source_account,
+            target_account=target_account,
+            asset={
+                "market": "advisory",
+                "symbol": symbol,
+                "currency": currency,
+                "display_name": str(
+                    asset.get("display_name")
+                    or asset.get("displayName")
+                    or (first.product_name if first is not None else "")
+                    or symbol
+                ),
+            },
+            rows=rows,
+            warnings=[],
+        )
+
+    def _build_insurance_asset_transfer_plan(
+        self,
+        *,
+        session: Any,
+        source_account: Any,
+        target_account: Any,
+        asset: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        raw_policy_id = asset.get("policy_id", asset.get("policyId"))
+        try:
+            policy_id = int(raw_policy_id)
+        except (TypeError, ValueError):
+            raise ValueError("asset.policy_id is required for insurance asset transfer")
+        policy = self.repo.get_insurance_policy_in_session(session=session, policy_id=policy_id)
+        if policy is None or int(policy.account_id) != int(source_account.id):
+            raise ValueError("Selected insurance policy does not belong to source account")
+        insurance_ledger = self.repo.list_insurance_ledger_by_policy_in_session(
+            session=session,
+            policy_id=policy_id,
+        )
+        rows = {
+            "insurance_policies": [policy],
+            "insurance_ledger": insurance_ledger,
+        }
+        return self._make_asset_transfer_plan(
+            source_account=source_account,
+            target_account=target_account,
+            asset={
+                "market": "insurance",
+                "symbol": f"INS:{policy_id}",
+                "currency": self._normalize_currency(policy.currency or source_account.base_currency),
+                "policy_id": policy_id,
+                "display_name": str(policy.policy_name or f"保单 #{policy_id}"),
+            },
+            rows=rows,
+            warnings=[],
+        )
+
+    def _make_asset_transfer_plan(
+        self,
+        *,
+        source_account: Any,
+        target_account: Any,
+        asset: Dict[str, Any],
+        rows: Dict[str, List[Any]],
+        warnings: List[str],
+    ) -> Dict[str, Any]:
+        event_dates = [
+            item
+            for values in rows.values()
+            for row in values
+            for item in [self._asset_transfer_row_date(row)]
+            if item is not None
+        ]
+        return {
+            "source_account": {
+                "id": int(source_account.id),
+                "name": source_account.name,
+                "market": source_account.market,
+                "base_currency": source_account.base_currency,
+            },
+            "target_account": {
+                "id": int(target_account.id),
+                "name": target_account.name,
+                "market": target_account.market,
+                "base_currency": target_account.base_currency,
+            },
+            "asset": asset,
+            "rows": rows,
+            "counts": {key: len(value) for key, value in rows.items() if value},
+            "date_from": min(event_dates).isoformat() if event_dates else None,
+            "date_to": max(event_dates).isoformat() if event_dates else None,
+            "warnings": warnings,
+        }
+
+    def _transfer_plan_to_response(self, *, plan: Dict[str, Any], transferred: bool) -> Dict[str, Any]:
+        counts = dict(plan["counts"])
+        return {
+            "source_account_id": plan["source_account"]["id"],
+            "target_account_id": plan["target_account"]["id"],
+            "source_account_name": plan["source_account"]["name"],
+            "target_account_name": plan["target_account"]["name"],
+            "asset": dict(plan["asset"]),
+            "transferred_counts": counts,
+            "total_records": sum(counts.values()),
+            "date_from": plan["date_from"],
+            "date_to": plan["date_to"],
+            "warnings": list(plan["warnings"]),
+            "transferred": transferred,
+        }
+
+    def _validate_account_asset_transfer_conflicts(
+        self,
+        *,
+        session: Any,
+        plan: Dict[str, Any],
+        target_account_id: int,
+    ) -> None:
+        for trade in plan["rows"].get("trades", []):
+            trade_uid = str(trade.trade_uid or "").strip()
+            if trade_uid and self.repo.has_trade_uid_in_session(
+                session=session,
+                account_id=target_account_id,
+                trade_uid=trade_uid,
+            ):
+                raise PortfolioConflictError(f"目标账户已存在相同 trade_uid: {trade_uid}")
+            dedup_hash = str(getattr(trade, "dedup_hash", "") or "").strip()
+            if dedup_hash and self.repo.has_trade_dedup_hash_in_session(
+                session=session,
+                account_id=target_account_id,
+                dedup_hash=dedup_hash,
+            ):
+                raise PortfolioConflictError(f"目标账户已存在相同 dedup_hash: {dedup_hash}")
+
+    @staticmethod
+    def _asset_transfer_row_date(row: Any) -> Optional[date]:
+        for key in ("trade_date", "effective_date", "event_date", "price_date", "first_payment_date"):
+            value = getattr(row, key, None)
+            if isinstance(value, date):
+                return value
+        created_at = getattr(row, "created_at", None)
+        if isinstance(created_at, datetime):
+            return created_at.date()
+        return None
+
     # ------------------------------------------------------------------
     # Event writes
     # ------------------------------------------------------------------

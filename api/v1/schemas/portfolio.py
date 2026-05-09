@@ -50,6 +50,34 @@ class PortfolioAccountListResponse(BaseModel):
     accounts: List[PortfolioAccountItem] = Field(default_factory=list)
 
 
+class PortfolioAssetTransferAsset(BaseModel):
+    market: PortfolioMarket
+    symbol: Optional[str] = Field(None, max_length=64)
+    currency: Optional[str] = Field(None, min_length=3, max_length=8)
+    display_name: Optional[str] = Field(None, max_length=128)
+    linked_entry_id: Optional[int] = Field(None, gt=0)
+    policy_id: Optional[int] = Field(None, gt=0)
+
+
+class PortfolioAssetTransferRequest(BaseModel):
+    target_account_id: int = Field(..., gt=0)
+    asset: PortfolioAssetTransferAsset
+
+
+class PortfolioAssetTransferResponse(BaseModel):
+    source_account_id: int
+    target_account_id: int
+    source_account_name: str
+    target_account_name: str
+    asset: Dict[str, Any]
+    transferred_counts: Dict[str, int] = Field(default_factory=dict)
+    total_records: int
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    warnings: List[str] = Field(default_factory=list)
+    transferred: bool = False
+
+
 class PortfolioTradeCreateRequest(BaseModel):
     account_id: int
     symbol: str = Field(..., min_length=1, max_length=32)

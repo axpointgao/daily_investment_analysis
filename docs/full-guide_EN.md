@@ -997,6 +997,9 @@ A: Check if Actions is enabled, and if cron expression is correct (note it's UTC
 
 ## Portfolio Web Notes
 
+- On `/portfolio`, users can create accounts directly. After switching to a single-account view, the current-account strip lets them edit only the account name and institution/platform; account type and base currency remain read-only in the Web UI.
+- In a single-account view, the Holdings header includes a small asset-transfer action. It moves one selected product/symbol to another account of the same type through a three-step flow: choose asset, preview the source data that will move, then confirm and view the result. The transfer rewrites the selected asset's source-data ownership instead of creating in/out transfer ledger rows, so the source account no longer keeps that asset's historical source records. Partial-quantity transfers, unassigned cash ledger rows, and bank demand/cash balances are not included in this first version.
+
 ### Manual FX refresh on `/portfolio`
 
 - The FX status card on the Web `/portfolio` page includes a manual refresh action.

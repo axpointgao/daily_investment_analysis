@@ -1235,7 +1235,9 @@ AGENT_EVENT_ALERT_RULES_JSON=[{"stock_code":"600519","alert_type":"price_cross",
 
 - 查看全量持仓或切换到单个账户视角。
 - 在 `fifo` / `avg` 两种成本法之间切换，查看快照 KPI、资产分布和资产分析。
-- 直接在 Web 页面新增账户，或录入交易、现金流水、公司行动等事件。
+- 直接在 Web 页面新增账户；切换到单账户视图后可编辑账户名称和机构/平台，账户类型和基准币保持只读。
+- 单账户视图的“持仓明细”标题栏提供“转移资产”入口，可在同类型账户之间按单产品/单标的移动完整源数据链路。流程分为选择资产、预览将迁移的数据、确认结果三步；转移不会生成转出/转入流水，源账户也不再保留该资产的历史源数据。当前不支持部分数量转移，也不迁移无产品归属的现金流水或银行活期余额。
+- 录入交易、现金流水、公司行动等事件。
 - 通过 CSV 导入持仓记录，支持先 `dry_run` 预览，再决定是否正式写入。
 - 在事件列表中按账户、日期、方向、代码等条件筛选，并对单账户事件做删除修正。
 
@@ -1243,6 +1245,10 @@ AGENT_EVENT_ALERT_RULES_JSON=[{"stock_code":"600519","alert_type":"price_cross",
 
 | 接口 | 方法 | 说明 |
 |------|------|------|
+| `/api/v1/portfolio/accounts` | GET/POST | 查询或新增持仓账户 |
+| `/api/v1/portfolio/accounts/{account_id}` | PUT/DELETE | 修改账户资料或停用账户；Web 编辑入口只提交名称和机构/平台 |
+| `/api/v1/portfolio/accounts/{account_id}/asset-transfers/preview` | POST | 预览单产品/单标的转移会迁移的源数据 |
+| `/api/v1/portfolio/accounts/{account_id}/asset-transfers` | POST | 在同类型账户之间执行单产品/单标的资产转移 |
 | `/api/v1/portfolio/snapshot` | GET | 查询持仓快照 |
 | `/api/v1/portfolio/risk` | GET | 查询风险摘要 |
 | `/api/v1/portfolio/trades` | GET | 分页查询交易记录 |

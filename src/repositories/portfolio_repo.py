@@ -263,6 +263,14 @@ class PortfolioRepository:
         finally:
             session.close()
 
+    @contextmanager
+    def portfolio_read_session(self):
+        session = self.db.get_session()
+        try:
+            yield session
+        finally:
+            session.close()
+
     def add_trade(
         self,
         *,
@@ -535,6 +543,55 @@ class PortfolioRepository:
             session.refresh(row)
             return row
 
+    def upsert_manual_price_in_session(
+        self,
+        *,
+        session: Any,
+        account_id: int,
+        symbol: str,
+        market: str,
+        currency: str,
+        price_date: date,
+        price: float,
+        note: Optional[str] = None,
+    ) -> PortfolioManualPrice:
+        row = session.execute(
+            select(PortfolioManualPrice)
+            .where(
+                and_(
+                    PortfolioManualPrice.account_id == account_id,
+                    PortfolioManualPrice.symbol == symbol,
+                    PortfolioManualPrice.market == market,
+                    PortfolioManualPrice.price_date == price_date,
+                )
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+        if row is None:
+            row = PortfolioManualPrice(
+                account_id=account_id,
+                symbol=symbol,
+                market=market,
+                currency=currency,
+                price_date=price_date,
+                price=price,
+                note=note,
+            )
+            session.add(row)
+        else:
+            row.currency = currency
+            row.price = price
+            row.note = note
+            row.updated_at = datetime.now()
+        self._invalidate_account_cache_in_session(
+            session=session,
+            account_id=account_id,
+            from_date=date.min,
+        )
+        session.flush()
+        session.refresh(row)
+        return row
+
     def get_latest_manual_price(
         self,
         *,
@@ -561,21 +618,36 @@ class PortfolioRepository:
 
     def list_manual_prices(self, *, account_id: int, market: str, as_of: date) -> List[PortfolioManualPrice]:
         with self.db.get_session() as session:
-            rows = session.execute(
-                select(PortfolioManualPrice)
-                .where(
-                    and_(
-                        PortfolioManualPrice.account_id == account_id,
-                        PortfolioManualPrice.market == market,
-                        PortfolioManualPrice.price_date <= as_of,
-                    )
-                )
-                .order_by(
-                    PortfolioManualPrice.price_date.asc(),
-                    PortfolioManualPrice.id.asc(),
-                )
-            ).scalars().all()
-            return list(rows)
+            return self.list_manual_prices_in_session(
+                session=session,
+                account_id=account_id,
+                market=market,
+                as_of=as_of,
+            )
+
+    def list_manual_prices_in_session(
+        self,
+        *,
+        session: Any,
+        account_id: int,
+        market: str,
+        as_of: Optional[date] = None,
+    ) -> List[PortfolioManualPrice]:
+        conditions = [
+            PortfolioManualPrice.account_id == account_id,
+            PortfolioManualPrice.market == market,
+        ]
+        if as_of is not None:
+            conditions.append(PortfolioManualPrice.price_date <= as_of)
+        rows = session.execute(
+            select(PortfolioManualPrice)
+            .where(and_(*conditions))
+            .order_by(
+                PortfolioManualPrice.price_date.asc(),
+                PortfolioManualPrice.id.asc(),
+            )
+        ).scalars().all()
+        return list(rows)
 
     def add_bank_ledger(
         self,
@@ -643,10 +715,13 @@ class PortfolioRepository:
 
     def get_bank_ledger_by_id(self, entry_id: int) -> Optional[PortfolioBankLedger]:
         with self.db.get_session() as session:
-            row = session.get(PortfolioBankLedger, entry_id)
+            row = self.get_bank_ledger_by_id_in_session(session=session, entry_id=entry_id)
             if row is not None:
                 session.expunge(row)
             return row
+
+    def get_bank_ledger_by_id_in_session(self, *, session: Any, entry_id: int) -> Optional[PortfolioBankLedger]:
+        return session.get(PortfolioBankLedger, entry_id)
 
     def query_bank_ledger(
         self,
@@ -687,17 +762,28 @@ class PortfolioRepository:
 
     def list_bank_ledger(self, account_id: int, as_of: date) -> List[PortfolioBankLedger]:
         with self.db.get_session() as session:
-            rows = session.execute(
-                select(PortfolioBankLedger)
-                .where(
-                    and_(
-                        PortfolioBankLedger.account_id == account_id,
-                        PortfolioBankLedger.event_date <= as_of,
-                    )
-                )
-                .order_by(PortfolioBankLedger.event_date.asc(), PortfolioBankLedger.id.asc())
-            ).scalars().all()
-            return list(rows)
+            return self.list_bank_ledger_in_session(
+                session=session,
+                account_id=account_id,
+                as_of=as_of,
+            )
+
+    def list_bank_ledger_in_session(
+        self,
+        *,
+        session: Any,
+        account_id: int,
+        as_of: Optional[date] = None,
+    ) -> List[PortfolioBankLedger]:
+        conditions = [PortfolioBankLedger.account_id == account_id]
+        if as_of is not None:
+            conditions.append(PortfolioBankLedger.event_date <= as_of)
+        rows = session.execute(
+            select(PortfolioBankLedger)
+            .where(and_(*conditions))
+            .order_by(PortfolioBankLedger.event_date.asc(), PortfolioBankLedger.id.asc())
+        ).scalars().all()
+        return list(rows)
 
     def delete_bank_ledger(self, entry_id: int) -> bool:
         with self.portfolio_write_session() as session:
@@ -838,10 +924,13 @@ class PortfolioRepository:
 
     def get_insurance_policy(self, policy_id: int) -> Optional[PortfolioInsurancePolicy]:
         with self.db.get_session() as session:
-            row = session.get(PortfolioInsurancePolicy, policy_id)
+            row = self.get_insurance_policy_in_session(session=session, policy_id=policy_id)
             if row is not None:
                 session.expunge(row)
             return row
+
+    def get_insurance_policy_in_session(self, *, session: Any, policy_id: int) -> Optional[PortfolioInsurancePolicy]:
+        return session.get(PortfolioInsurancePolicy, policy_id)
 
     def query_insurance_policies(
         self,
@@ -978,6 +1067,19 @@ class PortfolioRepository:
             ).scalars().all()
             return list(rows)
 
+    def list_insurance_ledger_by_policy_in_session(
+        self,
+        *,
+        session: Any,
+        policy_id: int,
+    ) -> List[PortfolioInsuranceLedger]:
+        rows = session.execute(
+            select(PortfolioInsuranceLedger)
+            .where(PortfolioInsuranceLedger.policy_id == policy_id)
+            .order_by(PortfolioInsuranceLedger.event_date.asc(), PortfolioInsuranceLedger.id.asc())
+        ).scalars().all()
+        return list(rows)
+
     def get_latest_insurance_terminal_event(
         self,
         *,
@@ -1090,17 +1192,35 @@ class PortfolioRepository:
 
     def list_advisory_ledger(self, account_id: int, as_of: date) -> List[PortfolioAdvisoryLedger]:
         with self.db.get_session() as session:
-            rows = session.execute(
-                select(PortfolioAdvisoryLedger)
-                .where(
-                    and_(
-                        PortfolioAdvisoryLedger.account_id == account_id,
-                        PortfolioAdvisoryLedger.event_date <= as_of,
-                    )
-                )
-                .order_by(PortfolioAdvisoryLedger.event_date.asc(), PortfolioAdvisoryLedger.id.asc())
-            ).scalars().all()
-            return list(rows)
+            return self.list_advisory_ledger_in_session(
+                session=session,
+                account_id=account_id,
+                as_of=as_of,
+            )
+
+    def list_advisory_ledger_in_session(
+        self,
+        *,
+        session: Any,
+        account_id: int,
+        as_of: Optional[date] = None,
+    ) -> List[PortfolioAdvisoryLedger]:
+        conditions = [PortfolioAdvisoryLedger.account_id == account_id]
+        if as_of is not None:
+            conditions.append(PortfolioAdvisoryLedger.event_date <= as_of)
+        rows = session.execute(
+            select(PortfolioAdvisoryLedger)
+            .where(and_(*conditions))
+            .order_by(PortfolioAdvisoryLedger.event_date.asc(), PortfolioAdvisoryLedger.id.asc())
+        ).scalars().all()
+        return list(rows)
+
+    def invalidate_account_cache_in_session(self, *, session: Any, account_id: int, from_date: date) -> None:
+        self._invalidate_account_cache_in_session(
+            session=session,
+            account_id=account_id,
+            from_date=from_date,
+        )
 
     def delete_advisory_ledger(self, entry_id: int) -> bool:
         with self.portfolio_write_session() as session:
