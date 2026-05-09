@@ -24,6 +24,7 @@ from src.repositories.portfolio_repo import (
     PortfolioBusyError as RepoPortfolioBusyError,
     PortfolioRepository,
 )
+from src.services.tiantian_fund_http import get_tiantian_fund_json
 
 logger = logging.getLogger(__name__)
 
@@ -3294,7 +3295,7 @@ class PortfolioService:
                             currency=currency,
                             item=None,
                         ),
-                        "display_name": self._resolve_position_display_name(symbol=symbol, market=market),
+                        "display_name": self._resolve_position_display_name_uncached(symbol=symbol, market=market),
                         "market": market,
                         "currency": currency,
                         "quantity": round(qty, 8),
@@ -3537,8 +3538,6 @@ class PortfolioService:
 
         if market == "crypto":
             return raw_symbol.upper()
-        if market == "fund":
-            return None
 
         normalized = normalize_stock_code(raw_symbol)
         static_name = STOCK_NAME_MAP.get(normalized)
@@ -3557,6 +3556,11 @@ class PortfolioService:
         if is_meaningful_stock_name(name, normalized):
             return str(name)
         return None
+
+    def _resolve_position_display_name_uncached(self, *, symbol: str, market: str) -> Optional[str]:
+        if market == "fund":
+            return self._fetch_fund_display_name(symbol)
+        return self._resolve_position_display_name(symbol=symbol, market=market)
 
     def _resolve_position_price(
         self,
@@ -3695,10 +3699,7 @@ class PortfolioService:
         candidates = [f"{base_url}/fundMNHisNetList?{query}"]
         for url in candidates:
             try:
-                response = requests.get(url, timeout=5)
-                if response.status_code >= 400:
-                    continue
-                payload = response.json()
+                payload = get_tiantian_fund_json(url, timeout=5)
             except Exception:
                 continue
             price, price_date = PortfolioService._extract_fund_nav_payload(payload)
@@ -3711,6 +3712,27 @@ class PortfolioService:
                     is_available=True,
                     provider="tiantianfund",
                 )
+        return None
+
+    @staticmethod
+    def _fetch_fund_display_name(symbol: str) -> Optional[str]:
+        base_url = (getattr(get_config(), "tiantian_fund_api_base_url", "") or "").strip().rstrip("/")
+        code = str(symbol or "").strip()
+        if not base_url or not code:
+            return None
+        url = f"{base_url}/fundMNDetailInformation"
+        try:
+            payload = get_tiantian_fund_json(url, params={"FCODE": code}, timeout=5)
+        except Exception as exc:
+            logger.info("Resolve fund display name failed for %s: %s", code, exc)
+            return None
+        data = payload.get("Datas") if isinstance(payload, dict) else None
+        if not isinstance(data, dict):
+            return None
+        for key in ("SHORTNAME", "FULLNAME"):
+            name = str(data.get(key) or "").strip()
+            if name and name != code:
+                return name
         return None
 
     @staticmethod

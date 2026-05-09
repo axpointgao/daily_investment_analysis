@@ -22,6 +22,7 @@ from src.config import (
     normalize_yingmi_fund_analysis_depth,
     normalize_yingmi_fund_data_strategy,
 )
+from src.services.tiantian_fund_http import get_tiantian_fund_json
 from src.storage import DatabaseManager
 
 logger = logging.getLogger(__name__)
@@ -55,13 +56,9 @@ class TiantianFundClient:
     def get(self, endpoint: str, params: Dict[str, Any]) -> Dict[str, Any]:
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         try:
-            response = requests.get(url, params=params, timeout=self.timeout)
-            response.raise_for_status()
-            payload = response.json()
+            payload = get_tiantian_fund_json(url, params=params, timeout=self.timeout)
         except Exception as exc:
             raise FundAnalysisError(f"TiantianFundApi 请求失败: {endpoint}: {exc}") from exc
-        if not isinstance(payload, dict):
-            raise FundAnalysisError(f"TiantianFundApi 返回格式异常: {endpoint}")
         return payload
 
 

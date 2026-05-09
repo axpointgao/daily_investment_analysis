@@ -39,6 +39,7 @@ from src.core.config_registry import (
     get_field_definition,
     get_registered_field_keys,
 )
+from src.services.tiantian_fund_http import get_tiantian_fund_json
 
 logger = logging.getLogger(__name__)
 
@@ -1808,10 +1809,8 @@ class SystemConfigService:
         url = f"{base_url}/fundMNHisNetList?{query}"
         try:
             started_at = time.perf_counter()
-            response = requests.get(url, timeout=timeout)
+            payload = get_tiantian_fund_json(url, timeout=timeout)
             latency_ms = int((time.perf_counter() - started_at) * 1000)
-            response.raise_for_status()
-            payload = response.json()
         except Exception as exc:
             return self._build_data_source_result(
                 success=False,
