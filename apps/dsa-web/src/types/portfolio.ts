@@ -325,6 +325,7 @@ export interface PortfolioAnalysisResponse {
   modelUsed?: string | null;
   analysisMode?: 'standard' | 'quick' | 'deep' | 'wealth_report';
   providerStatus?: Array<Record<string, unknown>>;
+  analysisSchemaVersion?: number | null;
 }
 
 export type PortfolioAnalysisTaskState = 'pending' | 'processing' | 'completed' | 'failed';

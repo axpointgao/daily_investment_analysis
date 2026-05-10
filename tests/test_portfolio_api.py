@@ -936,6 +936,7 @@ class PortfolioApiTestCase(unittest.TestCase):
             "model_used": "test",
             "analysis_mode": "standard",
             "provider_status": [],
+            "analysis_schema_version": 2,
         }
         with patch("api.v1.endpoints.portfolio.PortfolioAnalysisService") as service_cls:
             service_cls.return_value.get_saved_report.return_value = service_report
@@ -963,6 +964,7 @@ class PortfolioApiTestCase(unittest.TestCase):
             "model_used": "test",
             "analysis_mode": "standard",
             "provider_status": [],
+            "analysis_schema_version": 2,
         }
 
         service.save_report(

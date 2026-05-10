@@ -62,6 +62,7 @@ const DEFAULT_PAGE_SIZE = 20;
 const PORTFOLIO_ANALYSIS_CACHE_PREFIX = 'dsa_portfolio_analysis';
 const PORTFOLIO_ANALYSIS_TASK_PREFIX = 'dsa_portfolio_analysis_task';
 const PORTFOLIO_ANALYSIS_MODE = 'standard' as const;
+const PORTFOLIO_ANALYSIS_SIGNATURE_VERSION = 'v2';
 
 type AccountOption = 'all' | number;
 type EventType = 'trade' | 'cash' | 'corporate' | 'bank' | 'advisory' | 'insurance';
@@ -885,7 +886,7 @@ function buildSnapshotSignature(snapshot: PortfolioSnapshotResponse | null, sele
     hash ^= text.charCodeAt(index);
     hash = Math.imul(hash, 16777619);
   }
-  return `v1:${(hash >>> 0).toString(16)}`;
+  return `${PORTFOLIO_ANALYSIS_SIGNATURE_VERSION}:${(hash >>> 0).toString(16)}`;
 }
 
 function loadCachedPortfolioAnalysis(cacheKey: string, signature: string): PortfolioAnalysisResponse | null {
@@ -1563,7 +1564,14 @@ const PortfolioPage: React.FC = () => {
       mode: PORTFOLIO_ANALYSIS_MODE,
     })
       .then((response) => {
-        if (cancelled || !response.report) return;
+        if (cancelled) return;
+        if (!response.report) {
+          setPortfolioAnalysis(null);
+          if (portfolioAnalysisCacheKey) {
+            window.localStorage.removeItem(portfolioAnalysisCacheKey);
+          }
+          return;
+        }
         setPortfolioAnalysis(response.report);
         saveCachedPortfolioAnalysis(portfolioAnalysisCacheKey, response.report);
       })

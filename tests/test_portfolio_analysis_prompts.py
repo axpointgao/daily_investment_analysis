@@ -12,6 +12,8 @@ from tests.litellm_stub import ensure_litellm_stub
 ensure_litellm_stub()
 
 from src.services.portfolio_analysis_service import (  # noqa: E402
+    PORTFOLIO_ANALYSIS_SCHEMA_VERSION,
+    PortfolioAnalysisError,
     PortfolioAnalysisService,
     get_portfolio_analysis_default_prompt,
 )
@@ -145,6 +147,181 @@ class PortfolioAnalysisPromptTestCase(unittest.TestCase):
         self.assertAlmostEqual(eth["市值_报告币种"], 141429.05, places=0)
         self.assertEqual(payload["风险指标"]["主要持仓集中度"][0]["报告币种"], "CNY")
         self.assertAlmostEqual(payload["按市场汇总"][0]["value"], 141429.05, places=0)
+
+    def test_compact_payload_includes_four_bucket_diagnosis_without_mutating_tags(self) -> None:
+        snapshot = {
+            "as_of": "2026-05-05",
+            "currency": "CNY",
+            "cost_method": "fifo",
+            "account_count": 1,
+            "total_equity": 100000.0,
+            "total_market_value": 100000.0,
+            "total_cash": 0.0,
+            "asset_breakdown": {"crypto": 30000.0, "bank": 70000.0},
+            "accounts": [
+                {
+                    "account_id": 1,
+                    "account_name": "家庭账户",
+                    "market": "crypto",
+                    "base_currency": "CNY",
+                    "total_equity": 100000.0,
+                    "positions": [
+                        {
+                            "symbol": "ETH",
+                            "display_name": "ETH",
+                            "product_key": "crypto:ETH:CNY",
+                            "tag_id": 3,
+                            "tag_name": "稳健增强",
+                            "tag_color": "hsl(var(--primary))",
+                            "market": "crypto",
+                            "currency": "CNY",
+                            "quantity": 1,
+                            "total_cost": 20000.0,
+                            "market_value_base": 30000.0,
+                            "unrealized_pnl_base": 10000.0,
+                            "unrealized_pnl_pct": 50.0,
+                            "price_available": True,
+                        },
+                        {
+                            "symbol": "BANK001",
+                            "display_name": "活期现金",
+                            "product_key": "bank:BANK001:CNY",
+                            "tag_id": 1,
+                            "tag_name": "灵活备用",
+                            "tag_color": "hsl(var(--muted))",
+                            "market": "bank",
+                            "currency": "CNY",
+                            "quantity": 1,
+                            "total_cost": 60000.0,
+                            "market_value_base": 60000.0,
+                            "price_available": True,
+                        },
+                        {
+                            "symbol": "FUND001",
+                            "display_name": "普通基金",
+                            "product_key": "fund:FUND001:CNY",
+                            "tag_id": 99,
+                            "tag_name": "其他规划",
+                            "tag_color": "hsl(var(--accent))",
+                            "market": "fund",
+                            "currency": "CNY",
+                            "quantity": 1,
+                            "total_cost": 10000.0,
+                            "market_value_base": 10000.0,
+                            "price_available": True,
+                        },
+                    ],
+                }
+            ],
+        }
+        risk = {"concentration": {}, "sector_concentration": {}, "drawdown": {}, "stop_loss": {}}
+
+        payload = self._build_service()._build_compact_payload(
+            snapshot=snapshot,
+            risk=risk,
+            account_id=None,
+            snapshot_signature="sig",
+        )
+
+        eth = next(item for item in payload["主要持仓"] if item["symbol"] == "ETH")
+        self.assertEqual(eth["productKey"], "crypto:ETH:CNY")
+        self.assertEqual(eth["tagId"], 3)
+        self.assertEqual(eth["tagName"], "稳健增强")
+
+        diagnosis = payload["四笔钱配置诊断"]
+        self.assertEqual(diagnosis["mapping"], "按现有持仓标签名称精确识别，不修改标签和持仓归属")
+        enhanced = next(item for item in diagnosis["bucketSummary"] if item["name"] == "稳健增强")
+        self.assertEqual(enhanced["targetPct"], 17.0)
+        self.assertEqual(enhanced["status"], "偏多")
+        finding = diagnosis["fitFindings"][0]
+        self.assertEqual(finding["symbol"], "ETH")
+        self.assertEqual(finding["currentBucket"], "稳健增强")
+        self.assertEqual(finding["suggestedBucket"], "进取高增")
+        self.assertIn("波动", finding["mismatchReason"])
+        self.assertEqual(diagnosis["unclassifiedCount"], 1)
+        self.assertEqual(diagnosis["unclassifiedPositions"][0]["tagName"], "其他规划")
+
+    def test_four_bucket_prompt_requires_rationality_diagnosis_section(self) -> None:
+        prompt = self._build_service()._build_prompt(
+            {
+                "按账户汇总": [{"market": "fund"}],
+                "analysisMode": "standard",
+                "四笔钱配置诊断": {"bucketSummary": [], "fitFindings": []},
+            },
+            mode="standard",
+            account_id=None,
+        )
+
+        self.assertIn("## 四笔钱配置诊断", prompt)
+        self.assertIn("这是配置合理性诊断，不是简单占比复述", prompt)
+        self.assertIn("不得建议系统自动改标签", prompt)
+
+    def test_saved_report_requires_current_analysis_schema_version(self) -> None:
+        old_report = {"analysis_schema_version": PORTFOLIO_ANALYSIS_SCHEMA_VERSION - 1}
+        current_report = {"analysis_schema_version": PORTFOLIO_ANALYSIS_SCHEMA_VERSION, "full_markdown": "report"}
+        service = self._build_service()
+        service.portfolio_service = SimpleNamespace(
+            _normalize_cost_method=lambda method: method,
+            repo=SimpleNamespace(get_analysis_report=lambda **kwargs: old_report),
+        )
+
+        self.assertIsNone(service.get_saved_report(snapshot_signature="sig"))
+
+        service.portfolio_service.repo = SimpleNamespace(get_analysis_report=lambda **kwargs: current_report)
+        self.assertEqual(service.get_saved_report(snapshot_signature="sig"), current_report)
+
+    def test_all_account_analysis_fails_when_llm_omits_four_bucket_section(self) -> None:
+        snapshot = {
+            "as_of": "2026-05-05",
+            "cost_method": "fifo",
+            "currency": "CNY",
+            "account_count": 1,
+            "total_equity": 10000.0,
+            "total_market_value": 10000.0,
+            "total_cash": 0.0,
+            "asset_breakdown": {"bank": 10000.0},
+            "accounts": [
+                {
+                    "account_id": 1,
+                    "account_name": "测试账户",
+                    "market": "bank",
+                    "base_currency": "CNY",
+                    "total_equity": 10000.0,
+                    "positions": [
+                        {
+                            "symbol": "CASH",
+                            "display_name": "活期现金",
+                            "product_key": "bank:CASH:CNY",
+                            "tag_name": "灵活备用",
+                            "market": "bank",
+                            "currency": "CNY",
+                            "quantity": 1,
+                            "market_value_base": 10000.0,
+                            "price_available": True,
+                        }
+                    ],
+                }
+            ],
+        }
+        risk = {"concentration": {}, "sector_concentration": {}, "drawdown": {}, "stop_loss": {}}
+        analyzer = SimpleNamespace(
+            is_available=lambda: True,
+            generate_text=lambda prompt, **kwargs: (
+                '{"summary_points":["现金充足","结构防守","风险较低"],'
+                '"full_markdown":"## 数据覆盖与口径\\n本地快照可用。\\n\\n## 资产配置结构\\n现金为主。"}'
+            ),
+        )
+        service = PortfolioAnalysisService(
+            portfolio_service=SimpleNamespace(get_portfolio_snapshot=lambda **kwargs: snapshot),
+            risk_service=SimpleNamespace(get_risk_report=lambda **kwargs: risk),
+            analyzer=analyzer,
+            config=SimpleNamespace(yingmi_fund_data_strategy="basic_only"),
+        )
+        service.save_report = lambda **kwargs: kwargs["payload"]
+
+        with patch.object(service, "_build_asset_specialist_analysis", return_value={}):
+            with self.assertRaisesRegex(PortfolioAnalysisError, "四笔钱配置诊断"):
+                service.analyze(snapshot_signature="sig")
 
     def test_asset_specialist_analysis_includes_etf_trend_input(self) -> None:
         service = self._build_service()
@@ -308,7 +485,12 @@ class PortfolioAnalysisPromptTestCase(unittest.TestCase):
         analyzer = SimpleNamespace(
             is_available=lambda: True,
             generate_text=lambda prompt, **kwargs: calls.append(kwargs)
-            or '{"summary_points":["现金充足","权益为主","集中度可控"],"full_markdown":"## 资产配置结构\\n权益为主。"}',
+            or (
+                '{"summary_points":["现金充足","权益为主","集中度可控"],'
+                '"full_markdown":"## 数据覆盖与口径\\n本地快照可用。\\n\\n'
+                '## 资产配置结构\\n权益为主。\\n\\n'
+                '## 四笔钱配置诊断\\n当前标签下权益资产占比较高，需要结合四笔钱归属检查风险承受度。"}'
+            ),
         )
         service = PortfolioAnalysisService(
             portfolio_service=SimpleNamespace(get_portfolio_snapshot=lambda **kwargs: snapshot),
@@ -316,13 +498,16 @@ class PortfolioAnalysisPromptTestCase(unittest.TestCase):
             analyzer=analyzer,
             config=SimpleNamespace(),
         )
+        service.save_report = lambda **kwargs: kwargs["payload"]
 
-        result = service.analyze(snapshot_signature="sig")
+        with patch.object(service, "_build_asset_specialist_analysis", return_value={}):
+            result = service.analyze(snapshot_signature="sig")
 
         self.assertEqual(result["analysis_mode"], "standard")
+        self.assertEqual(result["analysis_schema_version"], PORTFOLIO_ANALYSIS_SCHEMA_VERSION)
         self.assertEqual(calls[0]["call_type"], "portfolio_analysis")
 
-    def test_analyze_accepts_markdown_fallback_when_llm_omits_json_wrapper(self) -> None:
+    def test_analyze_rejects_markdown_when_llm_omits_json_wrapper(self) -> None:
         snapshot = {
             "as_of": "2026-05-05",
             "cost_method": "fifo",
@@ -359,7 +544,9 @@ class PortfolioAnalysisPromptTestCase(unittest.TestCase):
             "## 数据口径一致性检查\n"
             "不同统计口径基本一致，现金和基金市值可以用于组合判断。\n\n"
             "## 资产配置结构\n"
-            "基金资产为主，现金提供一定流动性缓冲。"
+            "基金资产为主，现金提供一定流动性缓冲。\n\n"
+            "## 四笔钱配置诊断\n"
+            "当前基金资产需要结合四笔钱标签判断是否匹配稳健增强或长期压舱属性。"
         )
         analyzer = SimpleNamespace(
             is_available=lambda: True,
@@ -371,12 +558,11 @@ class PortfolioAnalysisPromptTestCase(unittest.TestCase):
             analyzer=analyzer,
             config=SimpleNamespace(yingmi_fund_data_strategy="basic_only"),
         )
+        service.save_report = lambda **kwargs: kwargs["payload"]
 
-        result = service.analyze(snapshot_signature="sig", mode="deep")
-
-        self.assertEqual(result["analysis_mode"], "standard")
-        self.assertIn("## 专业数据覆盖与可信度", result["full_markdown"])
-        self.assertEqual(len(result["summary_points"]), 3)
+        with patch.object(service, "_build_asset_specialist_analysis", return_value={}):
+            with self.assertRaisesRegex(PortfolioAnalysisError, "有效 JSON"):
+                service.analyze(snapshot_signature="sig", mode="deep")
 
 
 if __name__ == "__main__":

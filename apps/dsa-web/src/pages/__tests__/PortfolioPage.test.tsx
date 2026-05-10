@@ -18,7 +18,10 @@ const {
   getAccounts,
   getSnapshot,
   refreshFx,
-  analyzePortfolio,
+  getSavedPortfolioAnalysis,
+  startPortfolioAnalysisTask,
+  getPortfolioAnalysisTask,
+  getCurrentPortfolioAnalysisTask,
   listTags,
   listImportBrokers,
   listTrades,
@@ -47,7 +50,10 @@ const {
   getAccounts: vi.fn(),
   getSnapshot: vi.fn(),
   refreshFx: vi.fn(),
-  analyzePortfolio: vi.fn(),
+  getSavedPortfolioAnalysis: vi.fn(),
+  startPortfolioAnalysisTask: vi.fn(),
+  getPortfolioAnalysisTask: vi.fn(),
+  getCurrentPortfolioAnalysisTask: vi.fn(),
   listTags: vi.fn(),
   listImportBrokers: vi.fn(),
   listTrades: vi.fn(),
@@ -79,7 +85,10 @@ vi.mock('../../api/portfolio', () => ({
     getAccounts,
     getSnapshot,
     refreshFx,
-    analyzePortfolio,
+    getSavedPortfolioAnalysis,
+    startPortfolioAnalysisTask,
+    getPortfolioAnalysisTask,
+    getCurrentPortfolioAnalysisTask,
     listTags,
     listImportBrokers,
     listTrades,
@@ -222,14 +231,33 @@ describe('PortfolioPage FX refresh', () => {
 
     getAccounts.mockResolvedValue(makeAccounts());
     getSnapshot.mockImplementation(async ({ accountId }: { accountId?: number } = {}) => makeSnapshot({ accountId, fxStale: true }));
-    analyzePortfolio.mockResolvedValue({
+    getSavedPortfolioAnalysis.mockResolvedValue({ report: null });
+    const analysisResult = {
       asOf: '2026-03-19',
-      snapshotSignature: 'v1:test',
+      snapshotSignature: 'v2:test',
       generatedAt: '2026-03-19T10:00:00',
       summaryPoints: ['权益资产占比较高', '单一资产集中度可关注', '组合波动主要来自股票'],
       fullMarkdown: '## 资产配置结构\n权益资产占比较高。',
       modelUsed: 'test-model',
+      analysisSchemaVersion: 2,
+    };
+    startPortfolioAnalysisTask.mockResolvedValue({
+      taskId: 'portfolio-task-1',
+      status: 'completed',
+      message: '资产分析完成',
+      progress: 100,
+      existing: false,
+      canRetry: false,
     });
+    getPortfolioAnalysisTask.mockResolvedValue({
+      taskId: 'portfolio-task-1',
+      status: 'completed',
+      progress: 100,
+      message: '资产分析完成',
+      result: analysisResult,
+      canRetry: false,
+    });
+    getCurrentPortfolioAnalysisTask.mockResolvedValue({ task: null });
     refreshFx.mockResolvedValue({
       asOf: '2026-03-19',
       accountCount: 1,
@@ -770,13 +798,14 @@ describe('PortfolioPage FX refresh', () => {
     expect(screen.getAllByText('ETF').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('鹏华全球高收益债(QDII)')).toBeInTheDocument();
     expect(screen.getByText('场外基金')).toBeInTheDocument();
-    expect(analyzePortfolio).not.toHaveBeenCalled();
+    expect(startPortfolioAnalysisTask).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: '生成资产分析报告' }));
 
     expect(await screen.findByText('权益资产占比较高')).toBeInTheDocument();
-    expect(analyzePortfolio).toHaveBeenCalledTimes(1);
-    expect(analyzePortfolio).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'standard' }));
+    expect(startPortfolioAnalysisTask).toHaveBeenCalledTimes(1);
+    expect(startPortfolioAnalysisTask).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'standard' }));
+    expect(getPortfolioAnalysisTask).toHaveBeenCalledWith('portfolio-task-1');
 
     fireEvent.click(screen.getByRole('button', { name: '查看报告' }));
     expect(await screen.findByText('资产配置结构')).toBeInTheDocument();

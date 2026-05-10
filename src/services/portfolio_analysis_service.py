@@ -35,6 +35,43 @@ PORTFOLIO_ANALYSIS_PROMPT_KEYS = {
 
 logger = logging.getLogger(__name__)
 
+PORTFOLIO_ANALYSIS_SCHEMA_VERSION = 2
+
+FAMILY_ASSET_BUCKETS: Dict[str, Dict[str, Any]] = {
+    "灵活备用": {
+        "key": "emergency",
+        "targetPct": 14.0,
+        "minPct": 10.0,
+        "maxPct": 18.0,
+        "role": "家庭应急备用金",
+        "fit": "现金、活期、T+0/T+1 低风险银行理财、货币基金等高流动性资产",
+    },
+    "长期压舱": {
+        "key": "ballast",
+        "targetPct": 57.0,
+        "minPct": 50.0,
+        "maxPct": 64.0,
+        "role": "长期稳健压舱石账户",
+        "fit": "R2 纯固收、长期低波动固收、增额寿险/年金险等本金安全优先资产",
+    },
+    "稳健增强": {
+        "key": "enhanced",
+        "targetPct": 17.0,
+        "minPct": 12.0,
+        "maxPct": 22.0,
+        "role": "稳健收益增强账户",
+        "fit": "低波动固收+、含少量权益仓位的稳健组合、年度正收益概率较高的中低风险产品",
+    },
+    "进取高增": {
+        "key": "growth",
+        "targetPct": 11.0,
+        "minPct": 6.0,
+        "maxPct": 16.0,
+        "role": "超额收益与进取增长账户",
+        "fit": "股票、权益 ETF、偏股基金、数字货币、黄金 ETF 等高波动或进取型资产",
+    },
+}
+
 PORTFOLIO_ANALYSIS_DEFAULT_PROMPTS: Dict[str, str] = {
     "all_standard": (
         "以家庭总资产视角生成一份资产分析报告。先判断大类资产配置、现金/负债、账户和币种分布、"
@@ -104,7 +141,7 @@ class PortfolioAnalysisService:
         self.config = config or get_config()
         self.portfolio_service = portfolio_service or PortfolioService()
         self.risk_service = risk_service or PortfolioRiskService(portfolio_service=self.portfolio_service)
-        self.analyzer = analyzer or GeminiAnalyzer(config=self.config)
+        self.analyzer = analyzer
 
     def analyze(
         self,
@@ -115,7 +152,9 @@ class PortfolioAnalysisService:
         snapshot_signature: str = "",
         mode: str = "quick",
     ) -> Dict[str, Any]:
-        if not self.analyzer.is_available():
+        analyzer = self.analyzer or GeminiAnalyzer(config=self.config)
+        self.analyzer = analyzer
+        if not analyzer.is_available():
             raise PortfolioAnalysisError("LLM API Key 未配置，无法生成资产分析。")
 
         started_at = time.perf_counter()
@@ -169,7 +208,7 @@ class PortfolioAnalysisService:
         compact_payload["analysisMode"] = analysis_mode
         prompt = self._build_prompt(compact_payload, mode=analysis_mode, account_id=account_id)
         max_tokens = 4800
-        raw_text = self.analyzer.generate_text(
+        raw_text = analyzer.generate_text(
             prompt,
             max_tokens=max_tokens,
             temperature=0.25,
@@ -178,21 +217,13 @@ class PortfolioAnalysisService:
         if not raw_text:
             raise PortfolioAnalysisError("LLM 未返回资产分析结果。")
 
-        try:
-            parsed = self._parse_llm_json(raw_text)
-        except PortfolioAnalysisError as exc:
-            logger.warning(
-                "持仓资产分析 LLM JSON 解析失败，尝试 Markdown 兜底: mode=%s response_chars=%s error=%s tail=%r",
-                analysis_mode,
-                len(raw_text),
-                exc,
-                raw_text[-240:],
-            )
-            parsed = self._parse_llm_markdown(raw_text)
+        parsed = self._parse_llm_json(raw_text)
         summary_points = self._normalize_summary_points(parsed.get("summary_points"))
         full_markdown = self._sanitize_markdown(str(parsed.get("full_markdown") or "").strip())
         if not summary_points or not full_markdown:
             raise PortfolioAnalysisError("LLM 返回的资产分析结构不完整。")
+        if account_id is None and "## 四笔钱配置诊断" not in full_markdown:
+            raise PortfolioAnalysisError("LLM 未按要求输出“四笔钱配置诊断”章节，请重新生成资产分析。")
 
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
         yingmi_ok = sum(1 for item in provider_status if item.get("available") is True)
@@ -218,6 +249,7 @@ class PortfolioAnalysisService:
             "model_used": (getattr(self.config, "litellm_model", "") or None),
             "analysis_mode": analysis_mode,
             "provider_status": provider_status,
+            "analysis_schema_version": PORTFOLIO_ANALYSIS_SCHEMA_VERSION,
         }
         return self.save_report(
             account_id=account_id,
@@ -240,13 +272,22 @@ class PortfolioAnalysisService:
         as_of_date = as_of or date.today()
         method = self.portfolio_service._normalize_cost_method(cost_method)
         analysis_mode = mode if mode in {"standard", "quick", "deep", "wealth_report"} else "standard"
-        return self.portfolio_service.repo.get_analysis_report(
+        report = self.portfolio_service.repo.get_analysis_report(
             account_id=account_id,
             as_of=as_of_date,
             cost_method=method,
             mode=analysis_mode,
             snapshot_signature=snapshot_signature,
         )
+        if not report:
+            return None
+        try:
+            version = int(report.get("analysis_schema_version") or 1)
+        except (TypeError, ValueError):
+            version = 1
+        if version < PORTFOLIO_ANALYSIS_SCHEMA_VERSION:
+            return None
+        return report
 
     def save_report(
         self,
@@ -311,6 +352,11 @@ class PortfolioAnalysisService:
             "按账户汇总": self._build_account_breakdown(snapshot),
             "按市场汇总": self._build_breakdown(positions, "market"),
             "按币种汇总": self._build_breakdown(positions, "currency"),
+            "四笔钱配置诊断": self._build_family_asset_bucket_diagnosis(
+                positions=positions,
+                total_equity=total_equity,
+                report_currency=report_currency,
+            ),
             "保险资产摘要": self._build_insurance_summary(positions),
             "持仓数量": len(positions),
             "缺价持仓数量": sum(1 for item in positions if item.get("priceAvailable") is False),
@@ -392,6 +438,10 @@ class PortfolioAnalysisService:
                         "accountName": account.get("account_name"),
                         "symbol": pos.get("symbol"),
                         "displayName": pos.get("display_name"),
+                        "productKey": pos.get("product_key"),
+                        "tagId": pos.get("tag_id"),
+                        "tagName": pos.get("tag_name"),
+                        "tagColor": pos.get("tag_color"),
                         "market": pos.get("market"),
                         "currency": pos.get("currency"),
                         "账户本位币": account_currency,
@@ -416,6 +466,195 @@ class PortfolioAnalysisService:
                 )
         rows.sort(key=lambda item: float(item.get("市值_报告币种") or 0.0), reverse=True)
         return rows
+
+    def _build_family_asset_bucket_diagnosis(
+        self,
+        *,
+        positions: List[Dict[str, Any]],
+        total_equity: float,
+        report_currency: str,
+    ) -> Dict[str, Any]:
+        total = float(total_equity or 0.0)
+        bucket_amounts = {name: 0.0 for name in FAMILY_ASSET_BUCKETS}
+        bucket_counts = {name: 0 for name in FAMILY_ASSET_BUCKETS}
+        unclassified: List[Dict[str, Any]] = []
+        fit_findings: List[Dict[str, Any]] = []
+
+        for item in positions:
+            amount = float(item.get("市值_报告币种") or 0.0)
+            if amount <= 0:
+                continue
+            tag_name = str(item.get("tagName") or "").strip()
+            if tag_name in FAMILY_ASSET_BUCKETS:
+                bucket_amounts[tag_name] += amount
+                bucket_counts[tag_name] += 1
+                finding = self._build_bucket_fit_finding(item, bucket_name=tag_name, amount=amount)
+                if finding:
+                    fit_findings.append(finding)
+            else:
+                unclassified.append(self._compact_bucket_position(item, amount=amount))
+
+        bucket_summary = []
+        for bucket_name, profile in FAMILY_ASSET_BUCKETS.items():
+            amount = bucket_amounts[bucket_name]
+            weight_pct = round(amount / total * 100.0, 4) if total > 1e-8 else None
+            status = "unknown"
+            if weight_pct is not None:
+                if weight_pct < float(profile["minPct"]):
+                    status = "偏少"
+                elif weight_pct > float(profile["maxPct"]):
+                    status = "偏多"
+                else:
+                    status = "基本合理"
+            bucket_summary.append(
+                {
+                    "name": bucket_name,
+                    "role": profile["role"],
+                    "targetPct": profile["targetPct"],
+                    "rangePct": [profile["minPct"], profile["maxPct"]],
+                    "amount": round(amount, 6),
+                    "reportCurrency": report_currency,
+                    "weightPct": weight_pct,
+                    "status": status,
+                    "positionCount": bucket_counts[bucket_name],
+                    "suitableAssets": profile["fit"],
+                }
+            )
+
+        fit_findings.sort(
+            key=lambda row: (
+                {"必须处理": 0, "优先优化": 1, "观察": 2}.get(str(row.get("priority") or ""), 9),
+                -float(row.get("amount") or 0.0),
+            )
+        )
+        unclassified.sort(key=lambda row: -float(row.get("amount") or 0.0))
+        return {
+            "mapping": "按现有持仓标签名称精确识别，不修改标签和持仓归属",
+            "targetBasis": "目标只按比例诊断，默认目标为 14%/57%/17%/11%，不使用金额目标",
+            "bucketSummary": bucket_summary,
+            "fitFindings": fit_findings[:12],
+            "unclassifiedPositions": unclassified[:12],
+            "unclassifiedCount": len(unclassified),
+        }
+
+    def _build_bucket_fit_finding(
+        self,
+        item: Dict[str, Any],
+        *,
+        bucket_name: str,
+        amount: float,
+    ) -> Optional[Dict[str, Any]]:
+        risk_text = self._position_risk_text(item)
+        asset_profile = self._infer_position_asset_profile(item)
+
+        reason = ""
+        suggested_bucket: Optional[str] = None
+        action = ""
+        priority = "观察"
+
+        if bucket_name == "灵活备用":
+            if asset_profile in {"growth", "volatile", "insurance", "locked"}:
+                reason = "当前资产波动或流动性特征不适合作为随取随用的应急备用金。"
+                suggested_bucket = "进取高增" if asset_profile in {"growth", "volatile"} else "长期压舱"
+                action = "优先检查是否需要调整标签归属，或用现金/低风险银行资产补足备用金。"
+                priority = "优先优化"
+        elif bucket_name == "长期压舱":
+            if asset_profile in {"growth", "volatile"}:
+                reason = "当前资产波动特征偏进取，和长期压舱石的低回撤、本金安全优先目标不匹配。"
+                suggested_bucket = "进取高增"
+                action = "建议评估是否调入进取高增，或降低该类资产在压舱账户中的占比。"
+                priority = "必须处理"
+            elif asset_profile == "cash_like":
+                reason = "资产流动性很强但收益效率可能偏低，更像备用金而非长期压舱资产。"
+                suggested_bucket = "灵活备用"
+                action = "若不是刻意保留流动性，可考虑转入更匹配长期压舱目标的低波动固收或保险类资产。"
+        elif bucket_name == "稳健增强":
+            if asset_profile in {"growth", "volatile"}:
+                reason = "当前资产波动和回撤风险可能超过稳健增强账户的中低波动定位。"
+                suggested_bucket = "进取高增"
+                action = "建议检查产品底层权益/另类资产暴露，表现好也可调整为进取属性，表现差则考虑减持或替换。"
+                priority = "优先优化"
+            elif asset_profile == "cash_like":
+                reason = "资产过于现金化，可能难以承担稳健增强账户提升组合收益的任务。"
+                suggested_bucket = "灵活备用"
+                action = "若不是短期过渡资金，建议换成更符合稳健增强目标的低波动固收+或组合产品。"
+        elif bucket_name == "进取高增":
+            if asset_profile in {"cash_like", "ballast"}:
+                reason = "当前资产风险收益特征偏防守，和进取高增账户承担超额收益的定位不一致。"
+                suggested_bucket = "灵活备用" if asset_profile == "cash_like" else "长期压舱"
+                action = "如果是临时避险可以保留观察；若长期放置，建议调整标签归属或替换为进取仓位。"
+
+        if not reason:
+            return None
+
+        return {
+            **self._compact_bucket_position(item, amount=amount),
+            "currentBucket": bucket_name,
+            "assetProfile": asset_profile,
+            "observedAttributes": risk_text,
+            "mismatchReason": reason,
+            "suggestedBucket": suggested_bucket,
+            "recommendedAction": action,
+            "priority": priority,
+        }
+
+    def _infer_position_asset_profile(self, item: Dict[str, Any]) -> str:
+        market = str(item.get("market") or "").strip().lower()
+        text = self._position_risk_text(item).lower()
+        if market == "crypto":
+            return "volatile"
+        if market in {"cn", "hk", "us"}:
+            return "growth"
+        if market == "insurance":
+            return "insurance"
+        if market == "bank":
+            if any(keyword in text for keyword in ("活期", "现金", "t+0", "货币", "r1")):
+                return "cash_like"
+            if any(keyword in text for keyword in ("定期", "存款", "r2", "固收")):
+                return "ballast"
+            return "cash_like"
+        if market == "fund":
+            if any(keyword in text for keyword in ("股票", "偏股", "指数", "etf", "qdii", "纳斯达克", "创业板")):
+                return "growth"
+            if any(keyword in text for keyword in ("货币", "现金", "短债")):
+                return "cash_like"
+            if any(keyword in text for keyword in ("固收+", "固收 plus", "二级债", "增强")):
+                return "enhanced"
+            if any(keyword in text for keyword in ("纯债", "债券", "r2")):
+                return "ballast"
+            return "enhanced"
+        if market == "advisory":
+            if any(keyword in text for keyword in ("激进", "进取", "权益", "股票", "高波动")):
+                return "growth"
+            if any(keyword in text for keyword in ("稳健", "固收+", "增强")):
+                return "enhanced"
+            return "enhanced"
+        return "unknown"
+
+    def _position_risk_text(self, item: Dict[str, Any]) -> str:
+        fields = [
+            item.get("displayName"),
+            item.get("symbol"),
+            item.get("market"),
+            item.get("policyName"),
+            item.get("insuranceKind"),
+            item.get("designType"),
+            item.get("priceSource"),
+        ]
+        return " ".join(str(value) for value in fields if value is not None)
+
+    def _compact_bucket_position(self, item: Dict[str, Any], *, amount: float) -> Dict[str, Any]:
+        return {
+            "symbol": item.get("symbol"),
+            "displayName": item.get("displayName") or item.get("symbol"),
+            "market": item.get("market"),
+            "accountName": item.get("accountName"),
+            "tagName": item.get("tagName"),
+            "amount": round(amount, 6),
+            "reportCurrency": item.get("报告币种"),
+            "unrealizedPnlPct": item.get("unrealizedPnlPct"),
+            "priceAvailable": item.get("priceAvailable"),
+        }
 
     def _extract_insurance_position_fields(self, pos: Dict[str, Any]) -> Dict[str, Any]:
         if str(pos.get("market") or "").strip().lower() != "insurance":
@@ -886,6 +1125,12 @@ class PortfolioAnalysisService:
             "1. 资产配置结构：判断组合偏权益、偏固收、偏现金、偏另类资产，说明主要资产类型占比。\n"
             "2. 风险暴露与集中度：检查单一资产、账户、市场、币种、行业/主题集中；行业只用于股票类资产。\n"
             "3. 收益风险画像：判断组合风格为进攻型/均衡型/防守型/现金型，说明收益来源和波动来源。\n\n"
+            "四笔钱配置诊断要求：\n"
+            "- 当输入存在“四笔钱配置诊断”时，必须新增并认真完成对应章节；这是配置合理性诊断，不是简单占比复述。\n"
+            "- 四笔钱标签按现有持仓标签名称识别：灵活备用、长期压舱、稳健增强、进取高增；不得建议系统自动改标签。\n"
+            "- 比例目标只作为家庭资产规划参考，重点判断哪里偏多、偏少、哪些资产与当前归属不匹配，以及下一步如何处理。\n"
+            "- 资产属性偏离要结合风险、流动性、波动、期限、资产类型和可用专业诊断判断；不要只按收益率好坏评价。\n"
+            "- 对错配资产给出非交易指令式建议：保持、观察、补标签、调整归属、用新增资金再平衡、减持或替换。\n\n"
             f"完整分析 Markdown 必须使用以下章节模板，不要增删一级章节：\n{output_template}\n\n"
             "输出必须是严格 JSON，不要添加 JSON 之外的解释：\n"
             "{\n"
@@ -908,6 +1153,8 @@ class PortfolioAnalysisService:
             "说明本次本地快照、风险指标、盈米专项能力的覆盖范围；明确未覆盖或只适用于部分资产的地方。\n"
             "## 资产配置结构\n"
             "分析大类资产、账户、币种和现金/负债结构。\n"
+            "## 四笔钱配置诊断\n"
+            "基于灵活备用、长期压舱、稳健增强、进取高增四类标签，诊断比例偏离、资产属性错配和调整优先级。\n"
             "## 风险暴露与集中度\n"
             "分析主要集中风险、流动性、缺价和止损预警。\n"
             "## 基金与投顾专项\n"
@@ -953,56 +1200,6 @@ class PortfolioAnalysisService:
         if not isinstance(parsed, dict):
             raise PortfolioAnalysisError("LLM JSON 根节点不是对象。")
         return parsed
-
-    def _parse_llm_markdown(self, text: str) -> Dict[str, Any]:
-        markdown = self._extract_markdown_body(text)
-        if not markdown:
-            raise PortfolioAnalysisError("LLM 返回不是有效 JSON，且未找到可用 Markdown 正文。")
-        summary_points = self._derive_summary_points(markdown)
-        if not summary_points:
-            raise PortfolioAnalysisError("LLM Markdown 兜底失败，无法提取摘要要点。")
-        logger.info(
-            "持仓资产分析已使用 Markdown 兜底解析: response_chars=%s markdown_chars=%s",
-            len(text),
-            len(markdown),
-        )
-        return {
-            "summary_points": summary_points,
-            "full_markdown": markdown,
-        }
-
-    def _extract_markdown_body(self, text: str) -> str:
-        cleaned = str(text or "").strip()
-        if not cleaned:
-            return ""
-        cleaned = re.sub(r"^```(?:json|markdown|md)?\s*", "", cleaned, flags=re.I)
-        cleaned = re.sub(r"\s*```$", "", cleaned)
-        markdown_match = re.search(r"(##\s+.+)", cleaned, flags=re.S)
-        if markdown_match:
-            cleaned = markdown_match.group(1).strip()
-        heading_count = len(re.findall(r"^##\s+", cleaned, flags=re.M))
-        if heading_count < 2:
-            return ""
-        return self._sanitize_markdown(cleaned)
-
-    def _derive_summary_points(self, markdown: str) -> List[str]:
-        points: List[str] = []
-        for raw_line in markdown.splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            line = re.sub(r"^[\-*]\s+", "", line)
-            line = re.sub(r"^\*\*(.+?)\*\*[：:]\s*", r"\1：", line)
-            line = re.sub(r"\*\*", "", line)
-            line = re.sub(r"`", "", line)
-            if len(line) < 8:
-                continue
-            sentence = re.split(r"[。；;]", line, maxsplit=1)[0].strip()
-            if sentence:
-                points.append(sentence[:60])
-            if len(points) >= 3:
-                break
-        return points
 
     def _normalize_summary_points(self, value: Any) -> List[str]:
         if not isinstance(value, list):

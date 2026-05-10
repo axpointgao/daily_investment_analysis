@@ -728,6 +728,7 @@ class PortfolioAnalysisResponse(BaseModel):
     model_used: Optional[str] = None
     analysis_mode: Literal["standard", "quick", "deep", "wealth_report"] = "standard"
     provider_status: List[Dict[str, Any]] = Field(default_factory=list)
+    analysis_schema_version: Optional[int] = None
 
 
 class PortfolioAnalysisTaskAccepted(BaseModel):

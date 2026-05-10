@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 > For user-friendly release highlights, see the [GitHub Releases](https://github.com/ZhuLinsen/daily_stock_analysis/releases) page.
 
 ## [Unreleased]
+- [改进] 持仓资产分析新增四笔钱配置合理性诊断，按现有标签识别灵活备用、长期压舱、稳健增强和进取高增，并提示比例偏离与资产属性错配。
 - [改进] 持仓资产分析报告保存到后端数据库，同一持仓快照可跨设备查看已生成报告。
 - [改进] 持仓资产分析改为后台任务，刷新页面可恢复运行中状态，失败或超时后自动解锁重新生成。
 - [新功能] 新增 SQLite 持仓数据库自动备份脚本，支持一致性本地备份、可选加密、上传腾讯云 COS、cron 部署和恢复说明。
