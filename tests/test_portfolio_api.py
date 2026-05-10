@@ -23,6 +23,8 @@ except ModuleNotFoundError:
 import src.auth as auth
 from api.app import create_app
 from src.config import Config
+from src.services.portfolio_analysis_service import PortfolioAnalysisService
+from src.services.portfolio_analysis_task_service import PortfolioAnalysisTaskInfo, PortfolioAnalysisTaskStatus
 from src.services.portfolio_service import PortfolioBusyError
 from src.storage import DatabaseManager
 
@@ -866,6 +868,123 @@ class PortfolioApiTestCase(unittest.TestCase):
     def test_event_list_invalid_page_size_returns_422(self) -> None:
         resp = self.client.get("/api/v1/portfolio/trades", params={"page_size": 101})
         self.assertEqual(resp.status_code, 422)
+
+    def test_portfolio_analysis_task_endpoints(self) -> None:
+        task = PortfolioAnalysisTaskInfo(
+            task_id="task-1",
+            task_key="key",
+            account_id=None,
+            as_of=date(2026, 5, 10),
+            cost_method="fifo",
+            snapshot_signature="sig",
+            mode="standard",
+            status=PortfolioAnalysisTaskStatus.COMPLETED,
+            progress=100,
+            message="done",
+            result={
+                "as_of": "2026-05-10",
+                "snapshot_signature": "sig",
+                "generated_at": "2026-05-10T12:00:00",
+                "summary_points": ["point"],
+                "full_markdown": "report",
+                "model_used": "test",
+                "analysis_mode": "standard",
+                "provider_status": [],
+            },
+        )
+        queue = MagicMock()
+        queue.submit_task.return_value = (task, True)
+        queue.get_task.return_value = task
+        queue.get_current_task.return_value = task
+
+        with patch("api.v1.endpoints.portfolio.get_portfolio_analysis_task_queue", return_value=queue):
+            submit_resp = self.client.post(
+                "/api/v1/portfolio/analysis/tasks",
+                json={
+                    "as_of": "2026-05-10",
+                    "cost_method": "fifo",
+                    "snapshot_signature": "sig",
+                    "mode": "standard",
+                },
+            )
+            self.assertEqual(submit_resp.status_code, 202)
+            self.assertEqual(submit_resp.json()["task_id"], "task-1")
+
+            current_resp = self.client.get(
+                "/api/v1/portfolio/analysis/tasks/current",
+                params={
+                    "as_of": "2026-05-10",
+                    "cost_method": "fifo",
+                    "snapshot_signature": "sig",
+                    "mode": "standard",
+                },
+            )
+            self.assertEqual(current_resp.status_code, 200)
+            self.assertEqual(current_resp.json()["task"]["status"], "completed")
+
+            status_resp = self.client.get("/api/v1/portfolio/analysis/tasks/task-1")
+            self.assertEqual(status_resp.status_code, 200)
+            self.assertEqual(status_resp.json()["result"]["summary_points"], ["point"])
+
+    def test_saved_portfolio_analysis_endpoint(self) -> None:
+        service_report = {
+            "as_of": "2026-05-10",
+            "snapshot_signature": "sig",
+            "generated_at": "2026-05-10T12:00:00",
+            "summary_points": ["saved"],
+            "full_markdown": "saved report",
+            "model_used": "test",
+            "analysis_mode": "standard",
+            "provider_status": [],
+        }
+        with patch("api.v1.endpoints.portfolio.PortfolioAnalysisService") as service_cls:
+            service_cls.return_value.get_saved_report.return_value = service_report
+            resp = self.client.get(
+                "/api/v1/portfolio/analysis/saved",
+                params={
+                    "as_of": "2026-05-10",
+                    "cost_method": "fifo",
+                    "snapshot_signature": "sig",
+                    "mode": "standard",
+                },
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["report"]["summary_points"], ["saved"])
+
+    def test_saved_portfolio_analysis_persists_in_database(self) -> None:
+        service = PortfolioAnalysisService(analyzer=MagicMock())
+        payload = {
+            "as_of": "2026-05-10",
+            "snapshot_signature": "sig-db",
+            "generated_at": "2026-05-10T12:00:00",
+            "summary_points": ["db saved"],
+            "full_markdown": "saved report",
+            "model_used": "test",
+            "analysis_mode": "standard",
+            "provider_status": [],
+        }
+
+        service.save_report(
+            account_id=None,
+            as_of=date(2026, 5, 10),
+            cost_method="fifo",
+            snapshot_signature="sig-db",
+            mode="standard",
+            payload=payload,
+        )
+        resp = self.client.get(
+            "/api/v1/portfolio/analysis/saved",
+            params={
+                "as_of": "2026-05-10",
+                "cost_method": "fifo",
+                "snapshot_signature": "sig-db",
+                "mode": "standard",
+            },
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["report"]["summary_points"], ["db saved"])
 
 
 if __name__ == "__main__":

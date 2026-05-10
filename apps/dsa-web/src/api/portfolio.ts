@@ -13,6 +13,10 @@ import type {
   PortfolioAdvisoryProductSearchResponse,
   PortfolioAnalysisRequest,
   PortfolioAnalysisResponse,
+  PortfolioAnalysisCurrentTaskResponse,
+  PortfolioAnalysisSavedReportResponse,
+  PortfolioAnalysisTaskAccepted,
+  PortfolioAnalysisTaskStatus,
   PortfolioBankLedgerCreateRequest,
   PortfolioBankLedgerListResponse,
   PortfolioBankWealthNavResponse,
@@ -265,6 +269,50 @@ export const portfolioApi = {
       timeout: PORTFOLIO_ANALYSIS_TIMEOUT_MS,
     });
     return toCamelCase<PortfolioAnalysisResponse>(response.data);
+  },
+
+  async getSavedPortfolioAnalysis(payload: PortfolioAnalysisRequest): Promise<PortfolioAnalysisSavedReportResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/analysis/saved', {
+      params: {
+        account_id: payload.accountId,
+        as_of: payload.asOf,
+        cost_method: payload.costMethod,
+        snapshot_signature: payload.snapshotSignature,
+        mode: payload.mode,
+      },
+    });
+    return toCamelCase<PortfolioAnalysisSavedReportResponse>(response.data);
+  },
+
+  async startPortfolioAnalysisTask(payload: PortfolioAnalysisRequest): Promise<PortfolioAnalysisTaskAccepted> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/analysis/tasks', {
+      account_id: payload.accountId,
+      as_of: payload.asOf,
+      cost_method: payload.costMethod,
+      snapshot_signature: payload.snapshotSignature,
+      mode: payload.mode,
+    });
+    return toCamelCase<PortfolioAnalysisTaskAccepted>(response.data);
+  },
+
+  async getPortfolioAnalysisTask(taskId: string): Promise<PortfolioAnalysisTaskStatus> {
+    const response = await apiClient.get<Record<string, unknown>>(
+      `/api/v1/portfolio/analysis/tasks/${encodeURIComponent(taskId)}`,
+    );
+    return toCamelCase<PortfolioAnalysisTaskStatus>(response.data);
+  },
+
+  async getCurrentPortfolioAnalysisTask(payload: PortfolioAnalysisRequest): Promise<PortfolioAnalysisCurrentTaskResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/analysis/tasks/current', {
+      params: {
+        account_id: payload.accountId,
+        as_of: payload.asOf,
+        cost_method: payload.costMethod,
+        snapshot_signature: payload.snapshotSignature,
+        mode: payload.mode,
+      },
+    });
+    return toCamelCase<PortfolioAnalysisCurrentTaskResponse>(response.data);
   },
 
   async refreshFx(query: FxRefreshQuery = {}): Promise<PortfolioFxRefreshResponse> {

@@ -31,6 +31,7 @@ import type {
   PortfolioAssetTransferAsset,
   PortfolioAssetTransferResponse,
   PortfolioAnalysisResponse,
+  PortfolioAnalysisTaskStatus,
   PortfolioBankAssetKind,
   PortfolioBankWealthProductItem,
   PortfolioBankIncomeMode,
@@ -59,6 +60,8 @@ import type {
 
 const DEFAULT_PAGE_SIZE = 20;
 const PORTFOLIO_ANALYSIS_CACHE_PREFIX = 'dsa_portfolio_analysis';
+const PORTFOLIO_ANALYSIS_TASK_PREFIX = 'dsa_portfolio_analysis_task';
+const PORTFOLIO_ANALYSIS_MODE = 'standard' as const;
 
 type AccountOption = 'all' | number;
 type EventType = 'trade' | 'cash' | 'corporate' | 'bank' | 'advisory' | 'insurance';
@@ -906,6 +909,33 @@ function saveCachedPortfolioAnalysis(cacheKey: string, value: PortfolioAnalysisR
   }
 }
 
+function loadStoredPortfolioAnalysisTaskId(taskKey: string): string | null {
+  if (!taskKey) return null;
+  try {
+    return window.localStorage.getItem(taskKey);
+  } catch {
+    return null;
+  }
+}
+
+function saveStoredPortfolioAnalysisTaskId(taskKey: string, taskId: string): void {
+  if (!taskKey || !taskId) return;
+  try {
+    window.localStorage.setItem(taskKey, taskId);
+  } catch {
+    // Ignore storage failures; polling still works for the current page session.
+  }
+}
+
+function clearStoredPortfolioAnalysisTaskId(taskKey: string): void {
+  if (!taskKey) return;
+  try {
+    window.localStorage.removeItem(taskKey);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 function buildFxRefreshFeedback(data: PortfolioFxRefreshResponse): FxRefreshFeedback {
   if (data.refreshEnabled === false) {
     return {
@@ -980,6 +1010,8 @@ const PortfolioPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [portfolioAnalysis, setPortfolioAnalysis] = useState<PortfolioAnalysisResponse | null>(null);
   const [portfolioAnalysisLoading, setPortfolioAnalysisLoading] = useState(false);
+  const [portfolioAnalysisTask, setPortfolioAnalysisTask] = useState<PortfolioAnalysisTaskStatus | null>(null);
+  const [portfolioAnalysisTaskChecking, setPortfolioAnalysisTaskChecking] = useState(false);
   const [portfolioAnalysisError, setPortfolioAnalysisError] = useState<ParsedApiError | null>(null);
   const [portfolioAnalysisDrawerOpen, setPortfolioAnalysisDrawerOpen] = useState(false);
   const [fxRefreshing, setFxRefreshing] = useState(false);
@@ -1165,11 +1197,16 @@ const PortfolioPage: React.FC = () => {
     [costMethod, selectedAccount, snapshot],
   );
   const portfolioAnalysisCacheKey = snapshotSignature
-    ? `${PORTFOLIO_ANALYSIS_CACHE_PREFIX}:${selectedAccount === 'all' ? 'all' : selectedAccount}:${costMethod}:standard:${snapshotSignature}`
+    ? `${PORTFOLIO_ANALYSIS_CACHE_PREFIX}:${selectedAccount === 'all' ? 'all' : selectedAccount}:${costMethod}:${PORTFOLIO_ANALYSIS_MODE}:${snapshotSignature}`
+    : '';
+  const portfolioAnalysisTaskKey = snapshotSignature
+    ? `${PORTFOLIO_ANALYSIS_TASK_PREFIX}:${selectedAccount === 'all' ? 'all' : selectedAccount}:${costMethod}:${PORTFOLIO_ANALYSIS_MODE}:${snapshotSignature}`
     : '';
   const portfolioAnalysisButtonLabel = portfolioAnalysis
     ? '重新生成报告'
     : '生成资产分析报告';
+  const portfolioAnalysisTaskText = portfolioAnalysisTask?.message
+    || (portfolioAnalysisLoading ? '后台资产分析正在运行，请保持页面或稍后回来查看。' : '');
   const assetNameMaps = useMemo<AssetNameMaps>(() => {
     const stockByCode = new Map<string, string>();
     const stockAssetTypeByCode = new Map<string, string>();
@@ -1508,8 +1545,148 @@ const PortfolioPage: React.FC = () => {
 
   useEffect(() => {
     setPortfolioAnalysisError(null);
+    setPortfolioAnalysisTask(null);
+    setPortfolioAnalysisLoading(false);
     setPortfolioAnalysis(loadCachedPortfolioAnalysis(portfolioAnalysisCacheKey, snapshotSignature));
   }, [portfolioAnalysisCacheKey, snapshotSignature]);
+
+  useEffect(() => {
+    if (!snapshot || !snapshotSignature) {
+      return;
+    }
+    let cancelled = false;
+    void portfolioApi.getSavedPortfolioAnalysis({
+      accountId: queryAccountId,
+      asOf: snapshot.asOf,
+      costMethod,
+      snapshotSignature,
+      mode: PORTFOLIO_ANALYSIS_MODE,
+    })
+      .then((response) => {
+        if (cancelled || !response.report) return;
+        setPortfolioAnalysis(response.report);
+        saveCachedPortfolioAnalysis(portfolioAnalysisCacheKey, response.report);
+      })
+      .catch(() => {
+        // Local cache remains a non-blocking fallback when saved-report lookup fails.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [costMethod, portfolioAnalysisCacheKey, queryAccountId, snapshot, snapshotSignature]);
+
+  useEffect(() => {
+    if (!snapshot || !snapshotSignature || !portfolioAnalysisTaskKey) {
+      return;
+    }
+    let cancelled = false;
+    const payload = {
+      accountId: queryAccountId,
+      asOf: snapshot.asOf,
+      costMethod,
+      snapshotSignature,
+      mode: PORTFOLIO_ANALYSIS_MODE,
+    };
+    const applyTask = (task: PortfolioAnalysisTaskStatus | null) => {
+      if (cancelled) return;
+      setPortfolioAnalysisTask(task);
+      const active = task?.status === 'pending' || task?.status === 'processing';
+      setPortfolioAnalysisLoading(Boolean(active));
+      if (task?.status === 'completed' && task.result) {
+        setPortfolioAnalysis(task.result);
+        saveCachedPortfolioAnalysis(portfolioAnalysisCacheKey, task.result);
+        clearStoredPortfolioAnalysisTaskId(portfolioAnalysisTaskKey);
+      } else if (task?.status === 'failed') {
+        clearStoredPortfolioAnalysisTaskId(portfolioAnalysisTaskKey);
+      } else if (active) {
+        saveStoredPortfolioAnalysisTaskId(portfolioAnalysisTaskKey, task.taskId);
+      }
+    };
+
+    setPortfolioAnalysisTaskChecking(true);
+    const storedTaskId = loadStoredPortfolioAnalysisTaskId(portfolioAnalysisTaskKey);
+    Promise.resolve()
+      .then(async () => {
+        if (storedTaskId) {
+          try {
+            const task = await portfolioApi.getPortfolioAnalysisTask(storedTaskId);
+            return task;
+          } catch (err) {
+            const parsed = getParsedApiError(err);
+            if (parsed.status === 404) {
+              clearStoredPortfolioAnalysisTaskId(portfolioAnalysisTaskKey);
+            } else {
+              setPortfolioAnalysisError(parsed);
+              return {
+                taskId: storedTaskId,
+                status: 'processing',
+                progress: 0,
+                message: '后台资产分析状态暂时无法获取，正在重试...',
+                canRetry: false,
+              } satisfies PortfolioAnalysisTaskStatus;
+            }
+          }
+        }
+        const current = await portfolioApi.getCurrentPortfolioAnalysisTask(payload);
+        return current.task || null;
+      })
+      .then((task) => applyTask(task || null))
+      .catch(() => {
+        if (!cancelled) {
+          clearStoredPortfolioAnalysisTaskId(portfolioAnalysisTaskKey);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPortfolioAnalysisTaskChecking(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [costMethod, portfolioAnalysisCacheKey, portfolioAnalysisTaskKey, queryAccountId, snapshot, snapshotSignature]);
+
+  useEffect(() => {
+    if (!portfolioAnalysisTaskKey || !portfolioAnalysisTask) return;
+    if (portfolioAnalysisTask.status !== 'pending' && portfolioAnalysisTask.status !== 'processing') return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const task = await portfolioApi.getPortfolioAnalysisTask(portfolioAnalysisTask.taskId);
+        if (cancelled) return;
+        setPortfolioAnalysisTask(task);
+        const active = task.status === 'pending' || task.status === 'processing';
+        setPortfolioAnalysisLoading(active);
+        if (task.status === 'completed' && task.result) {
+          setPortfolioAnalysis(task.result);
+          saveCachedPortfolioAnalysis(portfolioAnalysisCacheKey, task.result);
+          clearStoredPortfolioAnalysisTaskId(portfolioAnalysisTaskKey);
+          setPortfolioAnalysisError(null);
+        } else if (task.status === 'failed') {
+          clearStoredPortfolioAnalysisTaskId(portfolioAnalysisTaskKey);
+          setPortfolioAnalysisError(getParsedApiError(new Error(task.error || task.message || '资产分析失败')));
+        }
+      } catch (err) {
+        if (cancelled) return;
+        const parsed = getParsedApiError(err);
+        if (parsed.status === 404) {
+          clearStoredPortfolioAnalysisTaskId(portfolioAnalysisTaskKey);
+          setPortfolioAnalysisLoading(false);
+          setPortfolioAnalysisTask(null);
+        }
+        setPortfolioAnalysisError(parsed);
+      }
+    };
+    const interval = window.setInterval(() => {
+      void poll();
+    }, 3000);
+    void poll();
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [portfolioAnalysisCacheKey, portfolioAnalysisTask, portfolioAnalysisTaskKey]);
 
   const positionRows: FlatPosition[] = useMemo(() => {
     if (!snapshot) return [];
@@ -1526,6 +1703,12 @@ const PortfolioPage: React.FC = () => {
     rows.sort((a, b) => Number(b.marketValueBase || 0) - Number(a.marketValueBase || 0));
     return rows;
   }, [snapshot]);
+  const portfolioAnalysisButtonDisabled = (
+    positionRows.length === 0
+    || portfolioAnalysisLoading
+    || portfolioAnalysisTaskChecking
+    || !snapshotSignature
+  );
 
   const assetTransferOptions: AssetTransferOption[] = useMemo(
     () => positionRows
@@ -2722,27 +2905,45 @@ const PortfolioPage: React.FC = () => {
   };
 
   const handleAnalyzePortfolio = async () => {
-    if (!snapshot || !snapshotSignature || portfolioAnalysisLoading) {
+    if (!snapshot || !snapshotSignature || portfolioAnalysisLoading || portfolioAnalysisTaskChecking) {
       return;
     }
     const cacheKey = snapshotSignature
-      ? `${PORTFOLIO_ANALYSIS_CACHE_PREFIX}:${selectedAccount === 'all' ? 'all' : selectedAccount}:${costMethod}:standard:${snapshotSignature}`
+      ? `${PORTFOLIO_ANALYSIS_CACHE_PREFIX}:${selectedAccount === 'all' ? 'all' : selectedAccount}:${costMethod}:${PORTFOLIO_ANALYSIS_MODE}:${snapshotSignature}`
       : '';
     try {
       setPortfolioAnalysisLoading(true);
       setPortfolioAnalysisError(null);
-      const response = await portfolioApi.analyzePortfolio({
+      const task = await portfolioApi.startPortfolioAnalysisTask({
         accountId: queryAccountId,
         asOf: snapshot.asOf,
         costMethod,
         snapshotSignature,
-        mode: 'standard',
+        mode: PORTFOLIO_ANALYSIS_MODE,
       });
-      setPortfolioAnalysis(response);
-      saveCachedPortfolioAnalysis(cacheKey, response);
+      const taskStatus: PortfolioAnalysisTaskStatus = {
+        taskId: task.taskId,
+        status: task.status,
+        progress: task.progress,
+        message: task.message,
+        canRetry: task.canRetry,
+      };
+      setPortfolioAnalysisTask(taskStatus);
+      saveStoredPortfolioAnalysisTaskId(portfolioAnalysisTaskKey, task.taskId);
+      if (task.status === 'completed') {
+        const completed = await portfolioApi.getPortfolioAnalysisTask(task.taskId);
+        setPortfolioAnalysisTask(completed);
+        if (completed.result) {
+          setPortfolioAnalysis(completed.result);
+          saveCachedPortfolioAnalysis(cacheKey, completed.result);
+          clearStoredPortfolioAnalysisTaskId(portfolioAnalysisTaskKey);
+        }
+        setPortfolioAnalysisLoading(false);
+      }
     } catch (err) {
       setPortfolioAnalysisError(getParsedApiError(err));
-    } finally {
+      setPortfolioAnalysisTask(null);
+      clearStoredPortfolioAnalysisTaskId(portfolioAnalysisTaskKey);
       setPortfolioAnalysisLoading(false);
     }
   };
@@ -3403,6 +3604,24 @@ const PortfolioPage: React.FC = () => {
             <ApiErrorAlert error={portfolioAnalysisError} className="mt-3" />
           ) : null}
 
+          {portfolioAnalysisLoading || portfolioAnalysisTaskChecking || portfolioAnalysisTask ? (
+            <div className="mt-3 rounded-md border border-border bg-muted px-3 py-2 text-xs leading-5 text-muted-foreground">
+              <div className="flex items-center justify-between gap-3">
+                <span>
+                  {portfolioAnalysisTaskChecking
+                    ? '正在检查是否已有后台分析任务...'
+                    : portfolioAnalysisTaskText}
+                </span>
+                {portfolioAnalysisTask?.status === 'pending' || portfolioAnalysisTask?.status === 'processing' ? (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" aria-label="后台分析中" />
+                ) : null}
+              </div>
+              {portfolioAnalysisTask?.status === 'failed' ? (
+                <p className="mt-1 text-destructive">任务已失败或超时，可重新生成。</p>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             {portfolioAnalysis ? (
               <ShadcnButton
@@ -3418,10 +3637,14 @@ const PortfolioPage: React.FC = () => {
               type="button"
               variant="outline"
               className="flex-1"
-              disabled={positionRows.length === 0 || portfolioAnalysisLoading || !snapshotSignature}
+              disabled={portfolioAnalysisButtonDisabled}
               onClick={() => void handleAnalyzePortfolio()}
             >
-              {portfolioAnalysisLoading ? '分析中...' : portfolioAnalysisButtonLabel}
+              {portfolioAnalysisTaskChecking
+                ? '检查中...'
+                : portfolioAnalysisLoading
+                  ? '后台分析中...'
+                  : portfolioAnalysisButtonLabel}
             </ShadcnButton>
           </div>
         </Card>
@@ -5054,7 +5277,7 @@ const PortfolioPage: React.FC = () => {
         isOpen={portfolioAnalysisDrawerOpen}
         onClose={() => setPortfolioAnalysisDrawerOpen(false)}
         title="资产分析报告"
-        width="max-w-4xl"
+        width="!w-[min(92vw,920px)] !max-w-none"
         backdropClassName="bg-background/56 backdrop-blur-[2px]"
       >
         <div className="space-y-4">

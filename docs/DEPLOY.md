@@ -87,6 +87,66 @@ docker-compose -f ./docker/docker-compose.yml exec stock-analyzer python main.py
 - `./logs/` - 日志文件
 - `./reports/` - 分析报告
 
+持仓、交易流水、现金流水、银行/投顾/保险流水等业务数据保存在 SQLite 数据库 `./data/stock_analysis.db` 中。项目默认启用 SQLite WAL，不建议直接复制正在运行的 `.db` 文件作为备份；请使用在线备份脚本生成一致副本：
+
+```bash
+python scripts/backup_sqlite_to_cos.py --no-upload
+```
+
+如果需要备份到腾讯云 COS，先在腾讯云创建 COS 存储桶，安装并配置官方 `coscli`，然后在 `.env` 中设置：
+
+```env
+DB_BACKUP_ENABLED=true
+DB_BACKUP_LOCAL_DIR=./backups/db
+DB_BACKUP_RETENTION_DAYS=30
+DB_BACKUP_LOCAL_KEEP_COUNT=3
+DB_BACKUP_COS_URI=cos://your-bucket-1250000000/dsa/db
+```
+
+手动验证一次：
+
+```bash
+python scripts/backup_sqlite_to_cos.py
+```
+
+确认上传成功后，用 `cron` 定时执行，例如每周一凌晨 3 点：
+
+```bash
+0 3 * * 1 cd /opt/stock-analyzer && /usr/bin/python3 scripts/backup_sqlite_to_cos.py >> logs/backup-db.log 2>&1
+```
+
+如果你希望备份上传前先本地加密，可以创建一个只允许当前用户读取的口令文件，并在 `.env` 中配置：
+
+```bash
+umask 077
+openssl rand -base64 48 > /root/.dsa-db-backup-passphrase
+```
+
+```env
+DB_BACKUP_ENCRYPTION_PASSPHRASE_FILE=/root/.dsa-db-backup-passphrase
+```
+
+请单独安全保存这个口令文件；丢失后无法解密历史备份。远端 COS 的长期保留建议用 COS 生命周期规则管理，例如当前版本文件 90 天后删除。
+
+恢复数据库时先停服务，再用备份文件覆盖数据库：
+
+```bash
+docker-compose -f ./docker/docker-compose.yml down
+cp data/stock_analysis.db data/stock_analysis.db.broken
+gunzip -c backups/db/stock_analysis-YYYYMMDD-HHMMSS.db.gz > data/stock_analysis.db
+docker-compose -f ./docker/docker-compose.yml up -d server analyzer
+```
+
+如使用 `.enc` 加密备份，先解密再恢复：
+
+```bash
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+  -in backups/db/stock_analysis-YYYYMMDD-HHMMSS.db.gz.enc \
+  -out /tmp/stock_analysis.db.gz \
+  -pass file:/root/.dsa-db-backup-passphrase
+gunzip -c /tmp/stock_analysis.db.gz > data/stock_analysis.db
+```
+
 ---
 
 ## 🖥️ 方案二：直接部署

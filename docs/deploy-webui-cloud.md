@@ -12,6 +12,7 @@
 - [方式二：Docker Compose](#方式二docker-compose)
 - [如何在浏览器里打开界面](#如何在浏览器里打开界面)
 - [如何确认 Docker 重建已生效](#如何确认-docker-重建已生效)
+- [业务数据自动备份到腾讯云 COS](#业务数据自动备份到腾讯云-cos)
 - [访问不了？先检查这几项](#访问不了先检查这几项)
 - [可选：Nginx 反向代理（绑定域名 / 80 端口）](#可选nginx-反向代理绑定域名--80-端口)
 - [安全建议](#安全建议)
@@ -186,6 +187,115 @@ npm run build
 ```
 
 其中 `build` 成功后，`static` 下生成的 `index.html`/JS/CSS 资源会包含本次构建时间与构建版本信息；刷新后在“版本信息”卡片中应能见到变化。
+
+---
+
+## 业务数据自动备份到腾讯云 COS
+
+持仓录入、交易流水、现金流水、银行/投顾/保险流水等业务数据保存在 SQLite 数据库中，默认路径是：
+
+```text
+./data/stock_analysis.db
+```
+
+Docker Compose 部署时，`./data/` 是宿主机目录，容器重建不会删除它；但如果误删数据、磁盘损坏或服务器不可用，仅靠项目迭代前的手动快照不够。建议把数据库定时备份到腾讯云 COS。
+
+### 1. 配置 COS 上传工具
+
+在腾讯云创建 COS 存储桶，然后在服务器安装并配置腾讯云官方 `coscli`。配置完成后，先确认命令可用：
+
+```bash
+coscli ls
+```
+
+建议为备份单独创建 CAM 子账号或使用 CVM 角色，只授予目标 bucket 的写入权限，不要复用主账号密钥。
+
+### 2. 配置 .env
+
+在项目根目录 `.env` 中增加：
+
+```env
+DB_BACKUP_ENABLED=true
+DB_BACKUP_LOCAL_DIR=./backups/db
+DB_BACKUP_RETENTION_DAYS=30
+DB_BACKUP_LOCAL_KEEP_COUNT=3
+DB_BACKUP_COS_URI=cos://your-bucket-1250000000/dsa/db
+```
+
+如果 `coscli` 不在默认 `PATH` 中，可以额外配置：
+
+```env
+DB_BACKUP_COSCLI_BIN=/usr/local/bin/coscli
+```
+
+### 3. 手动验证一次
+
+```bash
+cd /opt/stock-analyzer
+python scripts/backup_sqlite_to_cos.py
+```
+
+脚本会用 SQLite 在线备份接口生成一致副本，再压缩并上传到 `DB_BACKUP_COS_URI`。项目默认启用 SQLite WAL，所以不要直接复制正在运行的 `.db` 文件做备份。
+
+### 4. 设置定时任务
+
+每周一凌晨 3 点自动备份：
+
+```bash
+crontab -e
+```
+
+加入：
+
+```cron
+0 3 * * 1 cd /opt/stock-analyzer && /usr/bin/python3 scripts/backup_sqlite_to_cos.py >> logs/backup-db.log 2>&1
+```
+
+如果持仓流水录入频繁，可以改成每天一次：
+
+```cron
+0 2 * * * cd /opt/stock-analyzer && /usr/bin/python3 scripts/backup_sqlite_to_cos.py >> logs/backup-db.log 2>&1
+```
+
+### 5. 可选：上传前本地加密
+
+如果希望 COS 中保存的是加密文件：
+
+```bash
+umask 077
+openssl rand -base64 48 > /root/.dsa-db-backup-passphrase
+```
+
+`.env` 增加：
+
+```env
+DB_BACKUP_ENCRYPTION_PASSPHRASE_FILE=/root/.dsa-db-backup-passphrase
+```
+
+这个口令文件需要单独安全保存；丢失后无法解密历史备份。
+
+### 6. 恢复
+
+恢复前先停服务：
+
+```bash
+docker-compose -f ./docker/docker-compose.yml down
+cp data/stock_analysis.db data/stock_analysis.db.broken
+gunzip -c backups/db/stock_analysis-YYYYMMDD-HHMMSS.db.gz > data/stock_analysis.db
+docker-compose -f ./docker/docker-compose.yml up -d server analyzer
+```
+
+如使用加密备份，先解密再恢复：
+
+```bash
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+  -in backups/db/stock_analysis-YYYYMMDD-HHMMSS.db.gz.enc \
+  -out /tmp/stock_analysis.db.gz \
+  -pass file:/root/.dsa-db-backup-passphrase
+gunzip -c /tmp/stock_analysis.db.gz > data/stock_analysis.db
+```
+
+建议 COS 侧再配置生命周期规则，例如当前版本文件 90 天后删除。本地 `DB_BACKUP_RETENTION_DAYS` 和 `DB_BACKUP_LOCAL_KEEP_COUNT` 只控制服务器本地备份清理，不会删除 COS 里的对象。
 
 ---
 

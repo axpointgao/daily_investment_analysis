@@ -327,6 +327,38 @@ export interface PortfolioAnalysisResponse {
   providerStatus?: Array<Record<string, unknown>>;
 }
 
+export type PortfolioAnalysisTaskState = 'pending' | 'processing' | 'completed' | 'failed';
+
+export interface PortfolioAnalysisTaskAccepted {
+  taskId: string;
+  status: PortfolioAnalysisTaskState;
+  message: string;
+  progress: number;
+  existing: boolean;
+  canRetry: boolean;
+}
+
+export interface PortfolioAnalysisTaskStatus {
+  taskId: string;
+  status: PortfolioAnalysisTaskState;
+  progress: number;
+  message?: string | null;
+  result?: PortfolioAnalysisResponse | null;
+  error?: string | null;
+  canRetry: boolean;
+  createdAt?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+}
+
+export interface PortfolioAnalysisCurrentTaskResponse {
+  task?: PortfolioAnalysisTaskStatus | null;
+}
+
+export interface PortfolioAnalysisSavedReportResponse {
+  report?: PortfolioAnalysisResponse | null;
+}
+
 export interface PortfolioTradeCreateRequest {
   accountId: number;
   symbol: string;

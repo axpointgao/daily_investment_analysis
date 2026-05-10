@@ -209,7 +209,7 @@ class PortfolioAnalysisService:
             yingmi_failed,
             elapsed_ms,
         )
-        return {
+        result = {
             "as_of": str(snapshot.get("as_of") or as_of_date.isoformat()),
             "snapshot_signature": snapshot_signature,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -219,6 +219,55 @@ class PortfolioAnalysisService:
             "analysis_mode": analysis_mode,
             "provider_status": provider_status,
         }
+        return self.save_report(
+            account_id=account_id,
+            as_of=as_of_date,
+            cost_method=cost_method,
+            snapshot_signature=snapshot_signature,
+            mode=analysis_mode,
+            payload=result,
+        )
+
+    def get_saved_report(
+        self,
+        *,
+        account_id: Optional[int] = None,
+        as_of: Optional[date] = None,
+        cost_method: str = "fifo",
+        snapshot_signature: str,
+        mode: str = "standard",
+    ) -> Optional[Dict[str, Any]]:
+        as_of_date = as_of or date.today()
+        method = self.portfolio_service._normalize_cost_method(cost_method)
+        analysis_mode = mode if mode in {"standard", "quick", "deep", "wealth_report"} else "standard"
+        return self.portfolio_service.repo.get_analysis_report(
+            account_id=account_id,
+            as_of=as_of_date,
+            cost_method=method,
+            mode=analysis_mode,
+            snapshot_signature=snapshot_signature,
+        )
+
+    def save_report(
+        self,
+        *,
+        account_id: Optional[int],
+        as_of: date,
+        cost_method: str,
+        snapshot_signature: str,
+        mode: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        method = self.portfolio_service._normalize_cost_method(cost_method)
+        analysis_mode = mode if mode in {"standard", "quick", "deep", "wealth_report"} else "standard"
+        return self.portfolio_service.repo.upsert_analysis_report(
+            account_id=account_id,
+            as_of=as_of,
+            cost_method=method,
+            mode=analysis_mode,
+            snapshot_signature=snapshot_signature,
+            payload=payload,
+        )
 
     def _build_compact_payload(
         self,

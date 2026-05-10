@@ -25,7 +25,11 @@ from api.v1.schemas.portfolio import (
     PortfolioAdvisoryProductSearchRequest,
     PortfolioAdvisoryProductSearchResponse,
     PortfolioAnalysisRequest,
+    PortfolioAnalysisCurrentTaskResponse,
     PortfolioAnalysisResponse,
+    PortfolioAnalysisSavedReportResponse,
+    PortfolioAnalysisTaskAccepted,
+    PortfolioAnalysisTaskStatus,
     PortfolioBankLedgerCreateRequest,
     PortfolioBankLedgerListResponse,
     PortfolioBankWealthNavRequest,
@@ -65,6 +69,11 @@ from api.v1.schemas.portfolio import (
 )
 from src.services.iwencai_wealth_client import IwencaiWealthClient, IwencaiWealthError
 from src.services.portfolio_analysis_service import PortfolioAnalysisError, PortfolioAnalysisService
+from src.services.portfolio_analysis_task_service import (
+    PortfolioAnalysisTaskInfo,
+    PortfolioAnalysisTaskStatus as PortfolioAnalysisTaskState,
+    get_portfolio_analysis_task_queue,
+)
 from src.services.portfolio_import_service import PortfolioImportService
 from src.services.portfolio_risk_service import PortfolioRiskService
 from src.services.portfolio_service import (
@@ -110,6 +119,23 @@ def _serialize_import_record(item: dict) -> PortfolioImportTradeItem:
     else:
         payload["trade_date"] = str(trade_date)
     return PortfolioImportTradeItem(**payload)
+
+
+def _serialize_portfolio_analysis_task(task: PortfolioAnalysisTaskInfo) -> PortfolioAnalysisTaskStatus:
+    result = PortfolioAnalysisResponse(**task.result) if task.result else None
+    can_retry = task.status == PortfolioAnalysisTaskState.FAILED
+    return PortfolioAnalysisTaskStatus(
+        task_id=task.task_id,
+        status=task.status.value,
+        progress=task.progress,
+        message=task.message,
+        result=result,
+        error=task.error,
+        can_retry=can_retry,
+        created_at=task.created_at.isoformat(),
+        started_at=task.started_at.isoformat() if task.started_at else None,
+        completed_at=task.completed_at.isoformat() if task.completed_at else None,
+    )
 
 
 def _model_dump_excluding_none(model):
@@ -1255,6 +1281,115 @@ def analyze_portfolio(request: PortfolioAnalysisRequest) -> PortfolioAnalysisRes
         raise _bad_request(exc)
     except Exception as exc:
         raise _internal_error("Generate portfolio analysis failed", exc)
+
+
+@router.get(
+    "/analysis/saved",
+    response_model=PortfolioAnalysisSavedReportResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Get saved portfolio asset analysis report for the current snapshot",
+)
+def get_saved_portfolio_analysis(
+    snapshot_signature: str = Query(..., min_length=1, max_length=128),
+    account_id: Optional[int] = Query(None),
+    as_of: Optional[date] = Query(None),
+    cost_method: str = Query("fifo", pattern="^(fifo|avg)$"),
+    mode: str = Query("standard", pattern="^(standard|quick|deep|wealth_report)$"),
+) -> PortfolioAnalysisSavedReportResponse:
+    service = PortfolioAnalysisService()
+    try:
+        report = service.get_saved_report(
+            account_id=account_id,
+            as_of=as_of,
+            cost_method=cost_method,
+            snapshot_signature=snapshot_signature,
+            mode=mode,
+        )
+        return PortfolioAnalysisSavedReportResponse(
+            report=PortfolioAnalysisResponse(**report) if report else None,
+        )
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Get saved portfolio analysis failed", exc)
+
+
+@router.post(
+    "/analysis/tasks",
+    response_model=PortfolioAnalysisTaskAccepted,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    status_code=202,
+    summary="Start LLM portfolio asset analysis as a background task",
+)
+def start_portfolio_analysis_task(request: PortfolioAnalysisRequest) -> PortfolioAnalysisTaskAccepted:
+    queue = get_portfolio_analysis_task_queue()
+    try:
+        task, created = queue.submit_task(
+            account_id=request.account_id,
+            as_of=request.as_of,
+            cost_method=request.cost_method,
+            snapshot_signature=request.snapshot_signature,
+            mode=request.mode,
+        )
+        return PortfolioAnalysisTaskAccepted(
+            task_id=task.task_id,
+            status=task.status.value,
+            progress=task.progress,
+            message="资产分析任务已加入后台队列" if created else "当前快照已有资产分析任务在运行",
+            existing=not created,
+            can_retry=task.status == PortfolioAnalysisTaskState.FAILED,
+        )
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Start portfolio analysis task failed", exc)
+
+
+@router.get(
+    "/analysis/tasks/current",
+    response_model=PortfolioAnalysisCurrentTaskResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Get latest portfolio analysis task for the current snapshot",
+)
+def get_current_portfolio_analysis_task(
+    snapshot_signature: str = Query(..., min_length=1, max_length=128),
+    account_id: Optional[int] = Query(None),
+    as_of: Optional[date] = Query(None),
+    cost_method: str = Query("fifo", pattern="^(fifo|avg)$"),
+    mode: str = Query("standard", pattern="^(standard|quick|deep|wealth_report)$"),
+) -> PortfolioAnalysisCurrentTaskResponse:
+    queue = get_portfolio_analysis_task_queue()
+    try:
+        task = queue.get_current_task(
+            account_id=account_id,
+            as_of=as_of,
+            cost_method=cost_method,
+            snapshot_signature=snapshot_signature,
+            mode=mode,
+        )
+        return PortfolioAnalysisCurrentTaskResponse(
+            task=_serialize_portfolio_analysis_task(task) if task else None,
+        )
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Get current portfolio analysis task failed", exc)
+
+
+@router.get(
+    "/analysis/tasks/{task_id}",
+    response_model=PortfolioAnalysisTaskStatus,
+    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Get portfolio analysis task status",
+)
+def get_portfolio_analysis_task_status(task_id: str) -> PortfolioAnalysisTaskStatus:
+    task = get_portfolio_analysis_task_queue().get_task(task_id)
+    if not task:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "not_found", "message": f"资产分析任务不存在或已过期: {task_id}"},
+        )
+    return _serialize_portfolio_analysis_task(task)
 
 
 @router.post(

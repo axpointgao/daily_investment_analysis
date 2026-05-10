@@ -619,6 +619,37 @@ class PortfolioDailySnapshot(Base):
     )
 
 
+class PortfolioAnalysisReport(Base):
+    """Persisted portfolio asset analysis report keyed by snapshot signature."""
+
+    __tablename__ = 'portfolio_analysis_reports'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    scope_key = Column(String(32), nullable=False, index=True)  # all/account id
+    account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=True, index=True)
+    as_of = Column(Date, nullable=False, index=True)
+    cost_method = Column(String(8), nullable=False, default='fifo')
+    mode = Column(String(24), nullable=False, default='standard')
+    snapshot_signature = Column(String(128), nullable=False, index=True)
+    model_used = Column(String(128))
+    generated_at = Column(DateTime, default=datetime.now, index=True)
+    payload = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint(
+            'scope_key',
+            'as_of',
+            'cost_method',
+            'mode',
+            'snapshot_signature',
+            name='uix_portfolio_analysis_report_snapshot',
+        ),
+        Index('ix_portfolio_analysis_report_lookup', 'scope_key', 'as_of', 'cost_method', 'mode'),
+    )
+
+
 class PortfolioFxRate(Base):
     """Cached FX rates used for cross-currency portfolio conversion."""
 

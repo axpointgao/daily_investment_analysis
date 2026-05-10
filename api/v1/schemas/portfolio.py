@@ -728,3 +728,33 @@ class PortfolioAnalysisResponse(BaseModel):
     model_used: Optional[str] = None
     analysis_mode: Literal["standard", "quick", "deep", "wealth_report"] = "standard"
     provider_status: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class PortfolioAnalysisTaskAccepted(BaseModel):
+    task_id: str
+    status: Literal["pending", "processing", "completed", "failed"]
+    message: str
+    progress: int = 0
+    existing: bool = False
+    can_retry: bool = False
+
+
+class PortfolioAnalysisTaskStatus(BaseModel):
+    task_id: str
+    status: Literal["pending", "processing", "completed", "failed"]
+    progress: int = 0
+    message: Optional[str] = None
+    result: Optional[PortfolioAnalysisResponse] = None
+    error: Optional[str] = None
+    can_retry: bool = False
+    created_at: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+
+
+class PortfolioAnalysisCurrentTaskResponse(BaseModel):
+    task: Optional[PortfolioAnalysisTaskStatus] = None
+
+
+class PortfolioAnalysisSavedReportResponse(BaseModel):
+    report: Optional[PortfolioAnalysisResponse] = None

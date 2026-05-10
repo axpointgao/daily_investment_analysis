@@ -7,6 +7,7 @@ Provides DB access helpers for portfolio account/events/snapshot tables.
 from __future__ import annotations
 
 import logging
+import json
 from contextlib import contextmanager
 from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
@@ -18,6 +19,7 @@ from src.storage import (
     DatabaseManager,
     PortfolioAccount,
     PortfolioAdvisoryLedger,
+    PortfolioAnalysisReport,
     PortfolioBankLedger,
     PortfolioCashLedger,
     PortfolioCorporateAction,
@@ -150,6 +152,106 @@ class PortfolioRepository:
                 }
                 for assignment, tag in rows
             }
+
+    # ------------------------------------------------------------------
+    # Portfolio analysis report cache
+    # ------------------------------------------------------------------
+    @staticmethod
+    def build_analysis_report_scope_key(account_id: Optional[int]) -> str:
+        return "all" if account_id is None else str(int(account_id))
+
+    def get_analysis_report(
+        self,
+        *,
+        account_id: Optional[int],
+        as_of: date,
+        cost_method: str,
+        mode: str,
+        snapshot_signature: str,
+    ) -> Optional[Dict[str, Any]]:
+        scope_key = self.build_analysis_report_scope_key(account_id)
+        with self.db.get_session() as session:
+            row = session.execute(
+                select(PortfolioAnalysisReport)
+                .where(
+                    and_(
+                        PortfolioAnalysisReport.scope_key == scope_key,
+                        PortfolioAnalysisReport.as_of == as_of,
+                        PortfolioAnalysisReport.cost_method == cost_method,
+                        PortfolioAnalysisReport.mode == mode,
+                        PortfolioAnalysisReport.snapshot_signature == snapshot_signature,
+                    )
+                )
+                .limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            try:
+                payload = json.loads(row.payload)
+            except Exception:
+                logger.warning("持仓资产分析报告 payload 解析失败: id=%s", row.id)
+                return None
+            return payload if isinstance(payload, dict) else None
+
+    def upsert_analysis_report(
+        self,
+        *,
+        account_id: Optional[int],
+        as_of: date,
+        cost_method: str,
+        mode: str,
+        snapshot_signature: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        scope_key = self.build_analysis_report_scope_key(account_id)
+        payload_text = json.dumps(payload, ensure_ascii=False, default=str)
+        generated_at_value = self._parse_optional_datetime(payload.get("generated_at"))
+        with self.portfolio_write_session() as session:
+            row = session.execute(
+                select(PortfolioAnalysisReport)
+                .where(
+                    and_(
+                        PortfolioAnalysisReport.scope_key == scope_key,
+                        PortfolioAnalysisReport.as_of == as_of,
+                        PortfolioAnalysisReport.cost_method == cost_method,
+                        PortfolioAnalysisReport.mode == mode,
+                        PortfolioAnalysisReport.snapshot_signature == snapshot_signature,
+                    )
+                )
+                .limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                row = PortfolioAnalysisReport(
+                    scope_key=scope_key,
+                    account_id=account_id,
+                    as_of=as_of,
+                    cost_method=cost_method,
+                    mode=mode,
+                    snapshot_signature=snapshot_signature,
+                    model_used=payload.get("model_used"),
+                    generated_at=generated_at_value or datetime.now(),
+                    payload=payload_text,
+                )
+                session.add(row)
+            else:
+                row.account_id = account_id
+                row.model_used = payload.get("model_used")
+                row.generated_at = generated_at_value or datetime.now()
+                row.payload = payload_text
+                row.updated_at = datetime.now()
+            session.flush()
+            return payload
+
+    @staticmethod
+    def _parse_optional_datetime(value: Any) -> Optional[datetime]:
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str) and value.strip():
+            try:
+                return datetime.fromisoformat(value.strip())
+            except ValueError:
+                return None
+        return None
 
     # ------------------------------------------------------------------
     # Account CRUD
