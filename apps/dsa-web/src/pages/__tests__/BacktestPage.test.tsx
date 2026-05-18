@@ -179,6 +179,25 @@ describe('BacktestPage', () => {
     expect(screen.getByText('已保存：')).toBeInTheDocument();
   });
 
+  it('explains when a run finds no eligible historical analyses', async () => {
+    mockRun.mockResolvedValueOnce({
+      processed: 0,
+      saved: 0,
+      completed: 0,
+      insufficient: 0,
+      errors: 0,
+    });
+
+    render(<BacktestPage />);
+
+    await screen.findByPlaceholderText('按股票代码筛选（留空查看全部）');
+    fireEvent.click(screen.getByRole('button', { name: '运行回测' }));
+
+    expect(await screen.findByText('已处理：')).toBeInTheDocument();
+    expect(screen.getByText(/没有找到可回测的历史分析记录/)).toBeInTheDocument();
+    expect(screen.getByText(/打开“强制重跑”后再运行/)).toBeInTheDocument();
+  });
+
   it('switches to next-day validation with the 1D shortcut', async () => {
     render(<BacktestPage />);
 

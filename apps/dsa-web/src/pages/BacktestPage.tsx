@@ -164,13 +164,20 @@ const PerformanceCard: React.FC<{ metrics: PerformanceMetrics; title: string }> 
 // ============ Run Summary ============
 
 const RunSummary: React.FC<{ data: BacktestRunResponse }> = ({ data }) => (
-  <div className="rounded-lg border bg-card animate-fade-in">
-    <span className="label">已处理：<span className="value">{data.processed}</span></span>
-    <span className="label">已保存：<span className="value primary">{data.saved}</span></span>
-    <span className="label">已完成：<span className="value success">{data.completed}</span></span>
-    <span className="label">数据不足：<span className="value warning">{data.insufficient}</span></span>
-    {data.errors > 0 && (
-      <span className="label">错误：<span className="value danger">{data.errors}</span></span>
+  <div className="space-y-2 animate-fade-in">
+    <div className="rounded-lg border bg-card">
+      <span className="label">已处理：<span className="value">{data.processed}</span></span>
+      <span className="label">已保存：<span className="value primary">{data.saved}</span></span>
+      <span className="label">已完成：<span className="value success">{data.completed}</span></span>
+      <span className="label">数据不足：<span className="value warning">{data.insufficient}</span></span>
+      {data.errors > 0 && (
+        <span className="label">错误：<span className="value danger">{data.errors}</span></span>
+      )}
+    </div>
+    {data.processed === 0 && (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+        没有找到可回测的历史分析记录。可能是这只股票还没有历史分析，或者分析记录还没超过默认冷却期。已有后续行情数据时，可打开“强制重跑”后再运行。
+      </div>
     )}
   </div>
 );
@@ -454,7 +461,7 @@ const BacktestPage: React.FC = () => {
         <p className="mt-2 text-xs text-muted-foreground">
           {isNextDayValidation
             ? '次日验证模式会将智能预测与下一个交易日收盘表现进行对比。'
-            : '将窗口设为 1，可查看智能预测与下一个交易日收盘表现的对比。'}
+            : '回测会先找历史分析记录，再用后续交易日行情验证判断。若刚分析不久，需打开“强制重跑”才会跳过默认冷却期。'}
         </p>
       </header>
 
