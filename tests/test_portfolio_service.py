@@ -12,7 +12,7 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 from sqlalchemy.exc import OperationalError
@@ -202,6 +202,37 @@ class PortfolioServiceTestCase(unittest.TestCase):
         self.assertEqual(pos["price_source"], "history_close")
         self.assertTrue(pos["price_available"])
 
+    def test_refresh_prices_prefers_realtime_over_stale_close_for_today(self) -> None:
+        today = date.today()
+        account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
+        aid = account["id"]
+        self.service.record_trade(
+            account_id=aid,
+            symbol="600519",
+            trade_date=today,
+            side="buy",
+            quantity=10,
+            price=100,
+            market="cn",
+            currency="CNY",
+        )
+        self._save_close("600519", date(2026, 1, 2), 118.0)
+
+        with patch.object(PortfolioService, "_fetch_realtime_position_price", return_value=(125.0, "unit-test")):
+            snapshot = self.service.get_portfolio_snapshot(
+                account_id=aid,
+                as_of=today,
+                cost_method="fifo",
+                refresh_prices=True,
+            )
+
+        pos = snapshot["accounts"][0]["positions"][0]
+        self.assertAlmostEqual(pos["last_price"], 125.0, places=6)
+        self.assertEqual(pos["price_source"], "realtime_quote")
+        self.assertEqual(pos["price_provider"], "unit-test")
+        self.assertEqual(pos["price_date"], today.isoformat())
+        self.assertFalse(pos["price_stale"])
+
     def test_current_snapshot_defaults_to_skip_online_realtime_price(self) -> None:
         today = date.today()
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")
@@ -279,6 +310,24 @@ class PortfolioServiceTestCase(unittest.TestCase):
         with patch("src.services.portfolio_service.DataFetcherManager", return_value=object()) as manager:
             self.assertIs(self.service._get_data_manager(), self.service._data_manager)
         manager.assert_called_once()
+
+    def test_realtime_position_price_forces_user_triggered_online_refresh(self) -> None:
+        manager = SimpleNamespace(
+            get_realtime_quote=MagicMock(
+                return_value=SimpleNamespace(price=125.0, source=SimpleNamespace(value="unit-test"))
+            )
+        )
+        with patch.object(self.service, "_get_data_manager", return_value=manager):
+            price, provider = self.service._fetch_realtime_position_price("510050")
+
+        self.assertEqual(price, 125.0)
+        self.assertEqual(provider, "unit-test")
+        manager.get_realtime_quote.assert_called_once_with(
+            "510050",
+            log_final_failure=False,
+            basic_only=True,
+            force=True,
+        )
 
     def test_historical_snapshot_marks_missing_price_without_cost_fallback(self) -> None:
         account = self.service.create_account(name="Main", broker="Demo", market="cn", base_currency="CNY")

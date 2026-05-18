@@ -158,3 +158,21 @@ def test_pipeline_does_not_fetch_realtime_when_realtime_disabled(caplog):
     pipeline.fetcher_manager.get_stock_name.assert_called_once_with("600519", allow_realtime=False)
     pipeline.fetcher_manager.get_realtime_quote.assert_not_called()
     assert "使用最新交易日收盘价继续分析" in caplog.text
+
+
+@patch("src.config.get_config")
+def test_manager_force_bypasses_realtime_disabled_for_manual_refresh(mock_get_config):
+    mock_get_config.return_value = SimpleNamespace(
+        enable_realtime_quote=False,
+        realtime_source_priority="akshare_em",
+    )
+    manager = DataFetcherManager(
+        fetchers=[
+            _DummyFetcher("AkshareFetcher", 0, result=_make_quote()),
+        ]
+    )
+
+    quote = manager.get_realtime_quote("600519", force=True)
+
+    assert quote is not None
+    assert quote.price == 1688.0

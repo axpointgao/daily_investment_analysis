@@ -3633,18 +3633,6 @@ class PortfolioService:
                 is_available=False,
             )
 
-        close = self.repo.get_latest_close_with_date(symbol=symbol, as_of=as_of_date)
-        if close is not None:
-            close_price, close_date = close
-            if close_price > 0:
-                return _ResolvedPositionPrice(
-                    price=float(close_price),
-                    source="history_close",
-                    price_date=close_date,
-                    is_stale=close_date < as_of_date,
-                    is_available=True,
-                )
-
         if as_of_date == today and refresh_prices:
             realtime_price, provider = self._fetch_realtime_position_price(symbol)
             if realtime_price is not None and realtime_price > 0:
@@ -3655,6 +3643,18 @@ class PortfolioService:
                     is_stale=False,
                     is_available=True,
                     provider=provider,
+                )
+
+        close = self.repo.get_latest_close_with_date(symbol=symbol, as_of=as_of_date)
+        if close is not None:
+            close_price, close_date = close
+            if close_price > 0:
+                return _ResolvedPositionPrice(
+                    price=float(close_price),
+                    source="history_close",
+                    price_date=close_date,
+                    is_stale=close_date < as_of_date,
+                    is_available=True,
                 )
 
         return _ResolvedPositionPrice(
@@ -3946,7 +3946,12 @@ class PortfolioService:
 
     def _fetch_realtime_position_price(self, symbol: str) -> Tuple[Optional[float], Optional[str]]:
         try:
-            quote = self._get_data_manager().get_realtime_quote(symbol, log_final_failure=False, basic_only=True)
+            quote = self._get_data_manager().get_realtime_quote(
+                symbol,
+                log_final_failure=False,
+                basic_only=True,
+                force=True,
+            )
         except Exception as exc:
             logger.warning("Failed to fetch realtime portfolio price for %s: %s", symbol, exc)
             return None, None

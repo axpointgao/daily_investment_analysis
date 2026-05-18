@@ -1192,6 +1192,7 @@ class DataFetcherManager:
         *,
         log_final_failure: bool = True,
         basic_only: bool = False,
+        force: bool = False,
     ):
         """
         获取实时行情数据（自动故障切换）
@@ -1211,6 +1212,8 @@ class DataFetcherManager:
             basic_only: Return after the first source with a valid price.
                 Portfolio snapshots use this to avoid slow supplemental
                 requests for fields they do not render.
+            force: Ignore the global realtime quote toggle for explicit
+                user-triggered online refresh flows.
             
         Returns:
             UnifiedRealtimeQuote 对象，所有数据源都失败则返回 None
@@ -1226,7 +1229,7 @@ class DataFetcherManager:
         config = get_config()
 
         # 如果实时行情功能被禁用，直接返回 None
-        if not config.enable_realtime_quote:
+        if not force and not config.enable_realtime_quote:
             logger.debug(f"[实时行情] 功能已禁用，跳过 {stock_code}")
             return None
 

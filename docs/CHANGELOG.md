@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 > For user-friendly release highlights, see the [GitHub Releases](https://github.com/ZhuLinsen/daily_stock_analysis/releases) page.
 
 ## [Unreleased]
+- [修复] 持仓在线刷新当日股票价格时优先请求实时行情，失败后才退回历史收盘价，避免刷新后仍显示上一交易日价格。
 - [修复] 系统设置页对未写入 `.env` 的非敏感配置显示 schema 默认值，避免“启用大盘复盘”等默认开启项被误显示为未启用。
 - [修复] 问股分析统一日线缓存股票代码并优先使用目标交易日收盘价，目标日收盘价尚不可用时允许退到上一交易日，并在报告价格区展示收盘价对应日期，避免过期缓存价格误导分析。
 - [改进] 问股 Agent 在同一次分析内跨阶段复用重复工具结果，并让日线数据源按最新交易日期择优，减少重复请求和旧行情源误用而不削减分析上下文。
