@@ -371,6 +371,39 @@ describe('ChatPage', () => {
     expect(wave).not.toBeDisabled();
   });
 
+  it('shows skill descriptions in a floating tooltip without moving the skill option', async () => {
+    mockGetSkills.mockResolvedValue({
+      skills: [
+        {
+          id: 'wave_theory',
+          name: '波浪理论',
+          description: '识别上涨和回调浪形，用于判断趋势阶段。',
+        },
+      ],
+      default_skill_id: 'wave_theory',
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    const wave = await screen.findByRole('checkbox', { name: '波浪理论' });
+    const option = wave.closest('label');
+    const trigger = option?.parentElement;
+    expect(option).not.toBeNull();
+    expect(trigger).not.toBeNull();
+    expect(option).not.toHaveTextContent('识别上涨和回调浪形');
+
+    fireEvent.pointerMove(trigger!);
+
+    expect((await screen.findAllByText('适合什么时候用：')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/适合想判断一段上涨或下跌走到什么阶段/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/专业说明：识别上涨和回调浪形，用于判断趋势阶段。/).length).toBeGreaterThan(0);
+    expect(option).not.toHaveTextContent('识别上涨和回调浪形');
+  });
+
   it('quick questions override the current multi-skill selection', async () => {
     mockGetSkills.mockResolvedValue({
       skills: [

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 > For user-friendly release highlights, see the [GitHub Releases](https://github.com/ZhuLinsen/daily_stock_analysis/releases) page.
 
 ## [Unreleased]
+- [改进] Web 问股策略选择 hover 改为浮层展示，并补充小白版策略说明，避免说明文案挤动多选项。
 - [改进] 云端问股降低综合情报搜索内存峰值，默认关闭 SerpAPI 正文补抓并限制 Agent 工具并发，同时保留较完整情报维度和每维结果数。
 - [改进] Web 持仓页刷新在线价格改为后台任务并轮询状态，避免长请求被前端超时切断。
 - [改进] Docker Compose 云端默认资源限制按 4GB 主机调整，server 提升到 1.5G、analyzer 提升到 1G，并配置情报搜索云端资源档位。

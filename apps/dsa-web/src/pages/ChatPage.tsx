@@ -65,6 +65,64 @@ type ChatPageProps = {
 
 const MAX_SELECTED_SKILLS = 3;
 
+const STOCK_SKILL_HELP_TEXT: Record<string, { suitableFor: string; watches: string; helps: string }> = {
+  bull_trend: {
+    suitableFor: '常规问股首选。想先判断一只股票是不是还在健康上涨趋势里时使用。',
+    watches: '主要看短中期均线排列、价格和均线的距离、回踩有没有跌破关键位置，以及上涨时成交量是否配合。',
+    helps: '判断现在更适合买入、继续持有、等待回踩，还是趋势已经转弱需要谨慎。',
+  },
+  ma_golden_cross: {
+    suitableFor: '适合判断一只股票是不是刚开始转强，尤其是前期横盘或回调后重新走起来的情况。',
+    watches: '主要看短期均线是否向上穿过中期均线，也会结合成交量和 MACD 看这个信号是不是可靠。',
+    helps: '判断上涨启动信号是否成立，避免只看到一根阳线就误以为趋势已经反转。',
+  },
+  volume_breakout: {
+    suitableFor: '适合股价接近前期高点、压力位或平台上沿时，判断这次突破能不能跟。',
+    watches: '主要看有没有明显放量、是否突破关键阻力位、突破后能不能站稳，以及是不是假突破。',
+    helps: '判断是真突破机会，还是冲高后容易回落；同时给出突破位附近的风险位置。',
+  },
+  shrink_pullback: {
+    suitableFor: '适合已经在上涨趋势里的股票，回调时想判断有没有低吸机会。',
+    watches: '主要看回调过程中成交量是否缩小、价格是否守住 MA5/MA10/MA20 等关键均线，以及反弹是否重新出现。',
+    helps: '判断这次下跌是健康回踩，还是趋势变坏；帮助找到比追高更舒服的入场位置。',
+  },
+  box_oscillation: {
+    suitableFor: '适合长期在一个价格区间里上上下下、没有明显单边趋势的股票。',
+    watches: '主要看箱体顶部和底部在哪里，当前价格靠近箱底、箱中还是箱顶，以及突破是否有效。',
+    helps: '判断更适合箱底低吸、箱顶减仓，还是等待真正突破后再决定。',
+  },
+  bottom_volume: {
+    suitableFor: '适合长期下跌后突然放量、想判断是不是有资金开始进场的股票。',
+    watches: '主要看下跌是否已经持续较久、底部成交量是否异常放大、价格有没有企稳，以及有没有消息催化。',
+    helps: '判断可能见底反转，还是只是短线反弹；同时提醒底部形态失败时该怎么止损。',
+  },
+  chan_theory: {
+    suitableFor: '适合想做更细的技术结构分析，判断当前是趋势、震荡，还是关键买卖点附近。',
+    watches: '主要看中枢、趋势段、背驰，以及一买、二买、三买等结构信号。',
+    helps: '判断现在有没有明确买点或卖点，避免在结构还不清楚时随意操作。',
+  },
+  wave_theory: {
+    suitableFor: '适合想判断一段上涨或下跌走到什么阶段，尤其担心自己追在末端时使用。',
+    watches: '主要把走势拆成上涨浪和回调浪，结合关键支撑、阻力和斐波那契位置。',
+    helps: '判断当前可能是在上涨中段、上涨末端还是回调阶段，辅助决定买入、等待或规避。',
+  },
+  dragon_head: {
+    suitableFor: '适合热点题材或板块行情里，想判断这只股票是不是板块里最强的一批。',
+    watches: '主要看板块是否走强、个股涨幅和换手率是否领先、有没有新闻催化，以及是否已经过热。',
+    helps: '判断它有没有龙头气质，还是只是跟风上涨；同时提醒强势股追高风险。',
+  },
+  emotion_cycle: {
+    suitableFor: '适合判断市场对这只股票是太冷、刚升温，还是已经过热。',
+    watches: '主要看换手率、成交量变化、新闻和市场情绪，以及均线是否进入蓄势状态。',
+    helps: '判断是否适合逆情绪布局，避免在大家都很兴奋时接在高点。',
+  },
+  one_yang_three_yin: {
+    suitableFor: '适合短线形态分析，尤其是上涨后整理几天，又出现重新转强迹象的股票。',
+    watches: '主要看最近几根 K 线是否形成“一根阳线后连续整理，再次阳线突破”的形态，并结合趋势确认。',
+    helps: '判断短线整理后是否有继续上涨机会，同时给出形态失败时的止损参考。',
+  },
+};
+
 const getMessageSkillNames = (msg: Message): string[] => {
   if (msg.skillNames?.length) return msg.skillNames;
   if (msg.skillName) return [msg.skillName];
@@ -74,6 +132,8 @@ const getMessageSkillNames = (msg: Message): string[] => {
 };
 
 const getMessageSkillLabel = (msg: Message): string => getMessageSkillNames(msg).join('、');
+
+const getStockSkillHelp = (skill: SkillInfo) => STOCK_SKILL_HELP_TEXT[skill.id];
 
 const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -92,7 +152,6 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
   const [input, setInput] = useState('');
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
-  const [showSkillDesc, setShowSkillDesc] = useState<string | null>(null);
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -1061,34 +1120,60 @@ const ChatPage: React.FC<ChatPageProps> = ({ assetType = 'stock' }) => {
                 {skills.map((s) => {
                   const checked = selectedSkillIdSet.has(s.id);
                   const disabled = !checked && skillLimitReached;
+                  const stockSkillHelp = !isFundMode ? getStockSkillHelp(s) : undefined;
                   return (
-                    <label
+                    <Tooltip
                       key={s.id}
-                      className={`flex items-center gap-1.5 cursor-pointer group relative mt-0.5 ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
-                      onMouseEnter={() => setShowSkillDesc(s.id)}
-                      onMouseLeave={() => setShowSkillDesc(null)}
-                    >
-                      <input
-                        type="checkbox"
-                        name="skills"
-                        value={s.id}
-                        checked={checked}
-                        disabled={disabled}
-                        onChange={() => toggleSkillSelection(s.id)}
-                        className="chat-skill-checkbox"
-                      />
-                      <span
-                        className={`transition-colors text-sm ${checked ? 'text-foreground font-medium' : 'text-muted-foreground group-hover:text-foreground'}`}
-                      >
-                        {s.name}
-                      </span>
-                      {showSkillDesc === s.id && s.description && (
-                        <div className="skill-desc-tooltip">
-                          <p className="skill-title">{s.name}</p>
-                          <p>{s.description}</p>
+                      side="top"
+                      content={(stockSkillHelp || s.description) ? (
+                        <div className="max-w-80 space-y-2 text-left">
+                          <p className="text-xs font-semibold text-background">{s.name}</p>
+                          {stockSkillHelp ? (
+                            <div className="space-y-1.5 text-xs leading-relaxed text-background/80">
+                              <p>
+                                <span className="font-medium text-background">适合什么时候用：</span>
+                                {stockSkillHelp.suitableFor}
+                              </p>
+                              <p>
+                                <span className="font-medium text-background">它主要看什么：</span>
+                                {stockSkillHelp.watches}
+                              </p>
+                              <p>
+                                <span className="font-medium text-background">它能帮你判断什么：</span>
+                                {stockSkillHelp.helps}
+                              </p>
+                            </div>
+                          ) : (
+                            <p className="text-xs leading-relaxed text-background/80">{s.description}</p>
+                          )}
+                          {stockSkillHelp && s.description ? (
+                            <p className="border-t border-background/15 pt-2 text-[11px] leading-relaxed text-background/60">
+                              专业说明：{s.description}
+                            </p>
+                          ) : null}
                         </div>
-                      )}
-                    </label>
+                      ) : null}
+                      contentClassName="z-[80] max-w-[22rem] px-3 py-2"
+                    >
+                      <label
+                        className={`flex items-center gap-1.5 cursor-pointer group mt-0.5 ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+                      >
+                        <input
+                          type="checkbox"
+                          name="skills"
+                          value={s.id}
+                          checked={checked}
+                          disabled={disabled}
+                          onChange={() => toggleSkillSelection(s.id)}
+                          className="chat-skill-checkbox"
+                        />
+                        <span
+                          className={`transition-colors text-sm ${checked ? 'text-foreground font-medium' : 'text-muted-foreground group-hover:text-foreground'}`}
+                        >
+                          {s.name}
+                        </span>
+                      </label>
+                    </Tooltip>
                   );
                 })}
               </div>
