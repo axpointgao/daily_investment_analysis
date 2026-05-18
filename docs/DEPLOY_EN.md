@@ -279,13 +279,16 @@ rm /opt/stock-analyzer/data/*.lock
 
 ### 4. Insufficient memory
 
-Adjust memory limits in `docker-compose.yml`:
+The default `docker/docker-compose.yml` resource profile targets a 4GB cloud host: `server` is limited to 1.5G, `analyzer` to 1G, leaving roughly 1GB for the host OS, Docker, logs, and cache. For other server sizes, adjust the service-specific limits:
 ```yaml
-deploy:
-  resources:
-    limits:
-      memory: 1G
+services:
+  analyzer:
+    mem_limit: 1g
+  server:
+    mem_limit: 1536m
 ```
+
+The default cloud intel-search profile disables SerpAPI body fetching, searches up to 5 intel dimensions, returns 3 results per dimension, and caps Agent tool parallelism at 2. If you have more memory and want deeper analysis, raise `SEARCH_COMPREHENSIVE_INTEL_MAX_SEARCHES` / `SEARCH_COMPREHENSIVE_INTEL_RESULTS_PER_DIMENSION` in `.env`; avoid `SEARCH_SERPAPI_BODY_FETCH_ENABLED=true` on small-memory hosts.
 
 ---
 

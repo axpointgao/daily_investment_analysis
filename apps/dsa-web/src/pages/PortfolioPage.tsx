@@ -54,6 +54,7 @@ import type {
   PortfolioPositionItem,
   PortfolioSide,
   PortfolioSnapshotResponse,
+  PortfolioSnapshotRefreshTaskStatus,
   PortfolioTagItem,
   PortfolioTradeListItem,
 } from '../types/portfolio';
@@ -101,6 +102,8 @@ type FxRefreshContext = {
   viewKey: string;
   requestId: number;
 };
+
+type SnapshotRefreshContext = FxRefreshContext;
 
 type PortfolioAlertVariant = 'info' | 'success' | 'warning' | 'danger';
 
@@ -1015,6 +1018,8 @@ const PortfolioPage: React.FC = () => {
   const [portfolioAnalysisTaskChecking, setPortfolioAnalysisTaskChecking] = useState(false);
   const [portfolioAnalysisError, setPortfolioAnalysisError] = useState<ParsedApiError | null>(null);
   const [portfolioAnalysisDrawerOpen, setPortfolioAnalysisDrawerOpen] = useState(false);
+  const [snapshotRefreshing, setSnapshotRefreshing] = useState(false);
+  const [snapshotRefreshTask, setSnapshotRefreshTask] = useState<PortfolioSnapshotRefreshTaskStatus | null>(null);
   const [fxRefreshing, setFxRefreshing] = useState(false);
   const [fxRefreshFeedback, setFxRefreshFeedback] = useState<FxRefreshFeedback | null>(null);
   const [portfolioToast, setPortfolioToast] = useState<PortfolioToast | null>(null);
@@ -1178,6 +1183,7 @@ const PortfolioPage: React.FC = () => {
   const queryAccountId = selectedAccount === 'all' ? undefined : selectedAccount;
   const refreshViewKey = `${selectedAccount === 'all' ? 'all' : `account:${selectedAccount}`}:cost:${costMethod}`;
   const refreshContextRef = useRef<FxRefreshContext>({ viewKey: refreshViewKey, requestId: 0 });
+  const snapshotRefreshContextRef = useRef<SnapshotRefreshContext>({ viewKey: refreshViewKey, requestId: 0 });
   const hasAccounts = accounts.length > 0;
   const writableAccount = selectedAccount === 'all' ? undefined : accounts.find((item) => item.id === selectedAccount);
   const writableAccountId = writableAccount?.id;
@@ -1276,6 +1282,13 @@ const PortfolioPage: React.FC = () => {
     return (
       refreshContextRef.current.viewKey === requestedViewKey
       && refreshContextRef.current.requestId === requestedRequestId
+    );
+  };
+
+  const isActiveSnapshotRefreshContext = (requestedViewKey: string, requestedRequestId: number) => {
+    return (
+      snapshotRefreshContextRef.current.viewKey === requestedViewKey
+      && snapshotRefreshContextRef.current.requestId === requestedRequestId
     );
   };
 
@@ -1468,8 +1481,14 @@ const PortfolioPage: React.FC = () => {
       viewKey: refreshViewKey,
       requestId: refreshContextRef.current.requestId + 1,
     };
+    snapshotRefreshContextRef.current = {
+      viewKey: refreshViewKey,
+      requestId: snapshotRefreshContextRef.current.requestId + 1,
+    };
     setFxRefreshing(false);
     setFxRefreshFeedback(null);
+    setSnapshotRefreshing(false);
+    setSnapshotRefreshTask(null);
   }, [refreshViewKey]);
 
   useEffect(() => {
@@ -1991,7 +2010,7 @@ const PortfolioPage: React.FC = () => {
         tradeUid: tradeForm.tradeUid || undefined,
         note: tradeForm.note || undefined,
       });
-      await refreshPortfolioData(eventPage, { refreshPrices: true });
+      await refreshPortfolioData(eventPage);
       setTradeForm((prev) => ({ ...prev, symbol: '', tradeUid: '', note: '' }));
       showPortfolioToast(
         isFundAccount ? '基金流水已记录' : isCryptoAccount ? '数字货币流水已记录' : '交易已记录',
@@ -2059,7 +2078,7 @@ const PortfolioPage: React.FC = () => {
         currency: cashForm.currency || undefined,
         note: cashForm.note || undefined,
       });
-      await refreshPortfolioData(eventPage, { refreshPrices: true });
+      await refreshPortfolioData(eventPage);
       setCashForm((prev) => ({ ...prev, note: '' }));
       showPortfolioToast(
         cashForm.direction === 'in' ? '入金已记录' : '出金已记录',
@@ -2087,7 +2106,7 @@ const PortfolioPage: React.FC = () => {
         splitRatio: corpForm.splitRatio ? Number(corpForm.splitRatio) : undefined,
         note: corpForm.note || undefined,
       });
-      await refreshPortfolioData(eventPage, { refreshPrices: true });
+      await refreshPortfolioData(eventPage);
       setCorpForm((prev) => ({ ...prev, symbol: '', note: '' }));
       showPortfolioToast(
         '公司行为已记录',
@@ -2116,7 +2135,7 @@ const PortfolioPage: React.FC = () => {
         currency: getDefaultCurrencyForMarket(writableAccount.market),
         note: manualPriceForm.note || undefined,
       });
-      await refreshPortfolioData(eventPage, { refreshPrices: true });
+      await refreshPortfolioData(eventPage);
       setManualPriceForm((prev) => ({ ...prev, symbol: '', price: '', note: '' }));
       showPortfolioToast(
         writableAccount.market === 'fund' ? '基金净值已保存' : '数字货币价格已保存',
@@ -2147,7 +2166,7 @@ const PortfolioPage: React.FC = () => {
         price: Number(bankNavForm.price),
         currency: writableAccount.baseCurrency || 'CNY',
       });
-      await refreshPortfolioData(eventPage, { refreshPrices: true });
+      await refreshPortfolioData(eventPage);
       setBankNavForm((prev) => ({ ...prev, selectedProduct: '', price: '' }));
       showPortfolioToast(
         '价值已保存',
@@ -2493,7 +2512,7 @@ const PortfolioPage: React.FC = () => {
           : undefined,
         incomeMode: bankForm.assetKind === 'wealth' ? (selectedBankProduct?.incomeMode as PortfolioBankIncomeMode | undefined) || bankForm.incomeMode : undefined,
       });
-      await refreshPortfolioData(eventPage, { refreshPrices: true });
+      await refreshPortfolioData(eventPage);
       setBankForm((prev) => ({
         ...prev,
         amount: '',
@@ -2560,7 +2579,7 @@ const PortfolioPage: React.FC = () => {
         managerName: advisoryForm.managerName || undefined,
         recommendedHoldingDuration: advisoryForm.recommendedHoldingDuration || undefined,
       });
-      await refreshPortfolioData(eventPage, { refreshPrices: true });
+      await refreshPortfolioData(eventPage);
       setAdvisoryForm((prev) => ({
         ...prev,
         amount: '',
@@ -2600,7 +2619,7 @@ const PortfolioPage: React.FC = () => {
         price: Number(advisoryNavForm.price),
         currency: writableAccount.baseCurrency || 'CNY',
       });
-      await refreshPortfolioData(eventPage, { refreshPrices: true });
+      await refreshPortfolioData(eventPage);
       setAdvisoryNavForm((prev) => ({ ...prev, selectedProduct: '', price: '' }));
       showPortfolioToast(
         '投顾价值已保存',
@@ -2633,7 +2652,7 @@ const PortfolioPage: React.FC = () => {
         totalPeriods: insurancePolicyForm.totalPeriods ? Number(insurancePolicyForm.totalPeriods) : undefined,
         note: insurancePolicyForm.note || undefined,
       });
-      await refreshPortfolioData(eventPage, { refreshPrices: true });
+      await refreshPortfolioData(eventPage);
       setInsuranceLedgerForm((prev) => ({
         ...prev,
         policyId: String(created.id),
@@ -2679,7 +2698,7 @@ const PortfolioPage: React.FC = () => {
         periodNo: insuranceLedgerForm.periodNo ? Number(insuranceLedgerForm.periodNo) : undefined,
         note: insuranceLedgerForm.note || undefined,
       });
-      await refreshPortfolioData(eventPage, { refreshPrices: true });
+      await refreshPortfolioData(eventPage);
       setInsuranceLedgerForm((prev) => ({ ...prev, amount: '', note: '' }));
       showPortfolioToast(
         '保险流水已记录',
@@ -2727,7 +2746,7 @@ const PortfolioPage: React.FC = () => {
       if (nextPage !== eventPage) {
         setEventPage(nextPage);
       }
-      await refreshPortfolioData(nextPage, { refreshPrices: true });
+      await refreshPortfolioData(nextPage);
     } catch (err) {
       setError(getParsedApiError(err));
     } finally {
@@ -2820,7 +2839,71 @@ const PortfolioPage: React.FC = () => {
   };
 
   const handleRefresh = async () => {
-    await Promise.all([loadAccounts(), loadSnapshot({ refreshPrices: true }), loadEvents()]);
+    if (!hasAccounts || snapshotRefreshing) {
+      return;
+    }
+
+    const requestedViewKey = refreshViewKey;
+    const requestedAccountId = queryAccountId;
+    const requestedCostMethod = costMethod;
+    const requestedRequestId = snapshotRefreshContextRef.current.requestId + 1;
+    snapshotRefreshContextRef.current = {
+      viewKey: requestedViewKey,
+      requestId: requestedRequestId,
+    };
+
+    try {
+      setSnapshotRefreshing(true);
+      setSnapshotRefreshTask(null);
+      setError(null);
+      const accepted = await portfolioApi.startSnapshotRefreshTask({
+        accountId: requestedAccountId,
+        costMethod: requestedCostMethod,
+      });
+      if (!isActiveSnapshotRefreshContext(requestedViewKey, requestedRequestId)) {
+        return;
+      }
+      setSnapshotRefreshTask({
+        taskId: accepted.taskId,
+        status: accepted.status,
+        progress: accepted.progress,
+        message: accepted.message,
+        canRetry: accepted.canRetry,
+      });
+
+      let currentTask: PortfolioSnapshotRefreshTaskStatus | null = null;
+      for (let attempt = 0; attempt < 600; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, attempt < 10 ? 1000 : 2000));
+        if (!isActiveSnapshotRefreshContext(requestedViewKey, requestedRequestId)) {
+          return;
+        }
+        currentTask = await portfolioApi.getSnapshotRefreshTask(accepted.taskId);
+        if (!isActiveSnapshotRefreshContext(requestedViewKey, requestedRequestId)) {
+          return;
+        }
+        setSnapshotRefreshTask(currentTask);
+        if (currentTask.status === 'completed' || currentTask.status === 'failed') {
+          break;
+        }
+      }
+
+      if (!currentTask || currentTask.status !== 'completed') {
+        throw new Error(currentTask?.error || currentTask?.message || '在线行情刷新未完成');
+      }
+      if (!currentTask.result) {
+        throw new Error('在线行情刷新完成但未返回快照');
+      }
+      setSnapshot(currentTask.result);
+      await Promise.all([loadAccounts(), loadEvents()]);
+    } catch (err) {
+      if (isActiveSnapshotRefreshContext(requestedViewKey, requestedRequestId)) {
+        setError(getParsedApiError(err));
+      }
+    } finally {
+      if (isActiveSnapshotRefreshContext(requestedViewKey, requestedRequestId)) {
+        setSnapshotRefreshing(false);
+      }
+    }
   };
 
   const clearEventFilters = () => {
@@ -2849,7 +2932,7 @@ const PortfolioPage: React.FC = () => {
       const snapshotData = await portfolioApi.getSnapshot({
         accountId: requestedAccountId,
         costMethod: requestedCostMethod,
-        refreshPrices: true,
+        refreshPrices: false,
       });
       if (!isActiveRefreshContext(requestedViewKey, requestedRequestId)) {
         return false;
@@ -2868,7 +2951,7 @@ const PortfolioPage: React.FC = () => {
   }, []);
 
   const handleRefreshFx = async () => {
-    if (!hasAccounts || isLoading || fxRefreshing) {
+    if (!hasAccounts || isLoading || snapshotRefreshing || fxRefreshing) {
       return;
     }
 
@@ -3015,10 +3098,12 @@ const PortfolioPage: React.FC = () => {
                   type="button"
                   variant="outline"
                   onClick={() => void handleRefresh()}
-                  disabled={isLoading || fxRefreshing}
+                  disabled={isLoading || snapshotRefreshing || fxRefreshing}
                   className="flex-1"
                 >
-                  {isLoading ? '刷新中...' : '刷新数据'}
+                  {snapshotRefreshing
+                    ? `刷新中${snapshotRefreshTask?.progress != null ? ` ${snapshotRefreshTask.progress}%` : '...'}`
+                    : isLoading ? '加载中...' : '刷新数据'}
                 </ShadcnButton>
               </div>
             </div>
@@ -3220,7 +3305,7 @@ const PortfolioPage: React.FC = () => {
               size="sm"
               className="shrink-0"
               onClick={() => void handleRefreshFx()}
-              disabled={!hasAccounts || isLoading || fxRefreshing}
+              disabled={!hasAccounts || isLoading || snapshotRefreshing || fxRefreshing}
             >
               {fxRefreshing ? '刷新中...' : '刷新汇率'}
             </ShadcnButton>

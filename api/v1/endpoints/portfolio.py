@@ -58,6 +58,9 @@ from api.v1.schemas.portfolio import (
     PortfolioManualPriceUpsertRequest,
     PortfolioRiskResponse,
     PortfolioSnapshotResponse,
+    PortfolioSnapshotRefreshCurrentTaskResponse,
+    PortfolioSnapshotRefreshTaskAccepted,
+    PortfolioSnapshotRefreshTaskStatus,
     PortfolioProductTagUpdateRequest,
     PortfolioProductTagUpdateResponse,
     PortfolioTagCreateRequest,
@@ -75,6 +78,11 @@ from src.services.portfolio_analysis_task_service import (
     get_portfolio_analysis_task_queue,
 )
 from src.services.portfolio_import_service import PortfolioImportService
+from src.services.portfolio_refresh_task_service import (
+    PortfolioRefreshTaskInfo,
+    PortfolioRefreshTaskStatus as PortfolioRefreshTaskState,
+    get_portfolio_refresh_task_queue,
+)
 from src.services.portfolio_risk_service import PortfolioRiskService
 from src.services.portfolio_service import (
     PortfolioBusyError,
@@ -125,6 +133,23 @@ def _serialize_portfolio_analysis_task(task: PortfolioAnalysisTaskInfo) -> Portf
     result = PortfolioAnalysisResponse(**task.result) if task.result else None
     can_retry = task.status == PortfolioAnalysisTaskState.FAILED
     return PortfolioAnalysisTaskStatus(
+        task_id=task.task_id,
+        status=task.status.value,
+        progress=task.progress,
+        message=task.message,
+        result=result,
+        error=task.error,
+        can_retry=can_retry,
+        created_at=task.created_at.isoformat(),
+        started_at=task.started_at.isoformat() if task.started_at else None,
+        completed_at=task.completed_at.isoformat() if task.completed_at else None,
+    )
+
+
+def _serialize_portfolio_refresh_task(task: PortfolioRefreshTaskInfo) -> PortfolioSnapshotRefreshTaskStatus:
+    result = PortfolioSnapshotResponse(**task.result) if task.result else None
+    can_retry = task.status == PortfolioRefreshTaskState.FAILED
+    return PortfolioSnapshotRefreshTaskStatus(
         task_id=task.task_id,
         status=task.status.value,
         progress=task.progress,
@@ -1256,6 +1281,85 @@ def get_snapshot(
         raise _bad_request(exc)
     except Exception as exc:
         raise _internal_error("Get snapshot failed", exc)
+
+
+@router.post(
+    "/snapshot/refresh-prices/tasks",
+    response_model=PortfolioSnapshotRefreshTaskAccepted,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    status_code=202,
+    summary="Refresh online portfolio prices as a background task",
+)
+def start_snapshot_refresh_prices_task(
+    account_id: Optional[int] = Query(None, description="Optional account id, default returns all accounts"),
+    as_of: Optional[date] = Query(None, description="Snapshot date, default today"),
+    cost_method: str = Query("fifo", pattern="^(fifo|avg)$"),
+) -> PortfolioSnapshotRefreshTaskAccepted:
+    queue = get_portfolio_refresh_task_queue()
+    try:
+        task, created = queue.submit_task(
+            account_id=account_id,
+            as_of=as_of,
+            cost_method=cost_method,
+        )
+        return PortfolioSnapshotRefreshTaskAccepted(
+            task_id=task.task_id,
+            status=task.status.value,
+            progress=task.progress,
+            message="在线行情刷新任务已加入后台队列" if created else "当前范围已有在线行情刷新任务在运行",
+            existing=not created,
+            can_retry=task.status == PortfolioRefreshTaskState.FAILED,
+        )
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Start snapshot refresh task failed", exc)
+
+
+@router.get(
+    "/snapshot/refresh-prices/tasks/current",
+    response_model=PortfolioSnapshotRefreshCurrentTaskResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Get latest online portfolio price refresh task",
+)
+def get_current_snapshot_refresh_prices_task(
+    account_id: Optional[int] = Query(None),
+    as_of: Optional[date] = Query(None),
+    cost_method: str = Query("fifo", pattern="^(fifo|avg)$"),
+) -> PortfolioSnapshotRefreshCurrentTaskResponse:
+    queue = get_portfolio_refresh_task_queue()
+    try:
+        task = queue.get_current_task(
+            account_id=account_id,
+            as_of=as_of,
+            cost_method=cost_method,
+        )
+        return PortfolioSnapshotRefreshCurrentTaskResponse(
+            task=_serialize_portfolio_refresh_task(task) if task else None,
+        )
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Get current snapshot refresh task failed", exc)
+
+
+@router.get(
+    "/snapshot/refresh-prices/tasks/{task_id}",
+    response_model=PortfolioSnapshotRefreshTaskStatus,
+    responses={404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Get online portfolio price refresh task status",
+)
+def get_snapshot_refresh_prices_task(task_id: str) -> PortfolioSnapshotRefreshTaskStatus:
+    queue = get_portfolio_refresh_task_queue()
+    try:
+        task = queue.get_task(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail={"error": "not_found", "message": f"Refresh task not found: {task_id}"})
+        return _serialize_portfolio_refresh_task(task)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _internal_error("Get snapshot refresh task failed", exc)
 
 
 @router.post(

@@ -6,6 +6,7 @@ import json
 import threading
 import unittest
 from datetime import date
+from unittest.mock import patch
 
 from src.agent.tools.registry import ToolDefinition, ToolRegistry
 from src.services.history_loader import (
@@ -94,14 +95,15 @@ class ExecuteToolsFrozenContextTestCase(unittest.TestCase):
         tool_calls = [_FakeToolCall(n) for n in names]
         token = set_frozen_target_date(frozen_date)
         try:
-            _execute_tools(
-                tool_calls=tool_calls,
-                tool_registry=registry,
-                step=1,
-                progress_callback=None,
-                tool_calls_log=[],
-                tool_wait_timeout_seconds=10.0,
-            )
+            with patch("src.agent.runner._configured_tool_parallelism", return_value=num_tools):
+                _execute_tools(
+                    tool_calls=tool_calls,
+                    tool_registry=registry,
+                    step=1,
+                    progress_callback=None,
+                    tool_calls_log=[],
+                    tool_wait_timeout_seconds=10.0,
+                )
         finally:
             reset_frozen_target_date(token)
 

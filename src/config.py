@@ -695,6 +695,10 @@ class Config:
     # === 新闻与分析筛选配置 ===
     news_max_age_days: int = 3   # 新闻最大时效（天）
     news_strategy_profile: str = "short"  # 新闻窗口策略档位：ultra_short/short/medium/long
+    search_serpapi_body_fetch_enabled: bool = False  # Enable SerpAPI organic body fetch (costly on memory)
+    search_comprehensive_intel_max_searches: int = 5  # Max dimensions for Agent comprehensive intel
+    search_comprehensive_intel_results_per_dimension: int = 3  # Max visible results per intel dimension
+    agent_tool_parallelism: int = 2  # Max concurrent Agent tool calls per batch
     bias_threshold: float = 5.0  # 乖离率阈值（%），超过此值提示不追高
 
     # === Agent 模式配置 ===
@@ -1438,6 +1442,28 @@ class Config:
             news_max_age_days=parse_env_int(os.getenv('NEWS_MAX_AGE_DAYS'), 3, field_name='NEWS_MAX_AGE_DAYS', minimum=1),
             news_strategy_profile=cls._parse_news_strategy_profile(
                 os.getenv('NEWS_STRATEGY_PROFILE', 'short')
+            ),
+            search_serpapi_body_fetch_enabled=parse_env_bool(
+                os.getenv('SEARCH_SERPAPI_BODY_FETCH_ENABLED'),
+                default=False,
+            ),
+            search_comprehensive_intel_max_searches=parse_env_int(
+                os.getenv('SEARCH_COMPREHENSIVE_INTEL_MAX_SEARCHES'),
+                5,
+                field_name='SEARCH_COMPREHENSIVE_INTEL_MAX_SEARCHES',
+                minimum=1,
+            ),
+            search_comprehensive_intel_results_per_dimension=parse_env_int(
+                os.getenv('SEARCH_COMPREHENSIVE_INTEL_RESULTS_PER_DIMENSION'),
+                3,
+                field_name='SEARCH_COMPREHENSIVE_INTEL_RESULTS_PER_DIMENSION',
+                minimum=1,
+            ),
+            agent_tool_parallelism=parse_env_int(
+                os.getenv('AGENT_TOOL_PARALLELISM'),
+                2,
+                field_name='AGENT_TOOL_PARALLELISM',
+                minimum=1,
             ),
             bias_threshold=parse_env_float(os.getenv('BIAS_THRESHOLD'), 5.0, field_name='BIAS_THRESHOLD', minimum=1.0),
             agent_litellm_model=agent_litellm_model,

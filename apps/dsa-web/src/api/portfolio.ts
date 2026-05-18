@@ -41,6 +41,9 @@ import type {
   PortfolioManualPriceUpsertRequest,
   PortfolioRiskResponse,
   PortfolioSnapshotResponse,
+  PortfolioSnapshotRefreshCurrentTaskResponse,
+  PortfolioSnapshotRefreshTaskAccepted,
+  PortfolioSnapshotRefreshTaskStatus,
   PortfolioTagCreateRequest,
   PortfolioTagItem,
   PortfolioTagListResponse,
@@ -102,7 +105,7 @@ type CorporateListQuery = EventQuery & {
   actionType?: 'cash_dividend' | 'split_adjustment';
 };
 
-const PORTFOLIO_ANALYSIS_TIMEOUT_MS = 180000;
+const PORTFOLIO_ANALYSIS_TIMEOUT_MS = 300000;
 
 function buildSnapshotParams(query: SnapshotQuery): Record<string, string | number | boolean> {
   const params: Record<string, string | number | boolean> = {};
@@ -249,6 +252,34 @@ export const portfolioApi = {
       params: buildSnapshotParams(query),
     });
     return toCamelCase<PortfolioSnapshotResponse>(response.data);
+  },
+
+  async startSnapshotRefreshTask(query: SnapshotQuery = {}): Promise<PortfolioSnapshotRefreshTaskAccepted> {
+    const response = await apiClient.post<Record<string, unknown>>(
+      '/api/v1/portfolio/snapshot/refresh-prices/tasks',
+      undefined,
+      {
+        params: buildSnapshotParams({ ...query, refreshPrices: undefined }),
+      },
+    );
+    return toCamelCase<PortfolioSnapshotRefreshTaskAccepted>(response.data);
+  },
+
+  async getSnapshotRefreshTask(taskId: string): Promise<PortfolioSnapshotRefreshTaskStatus> {
+    const response = await apiClient.get<Record<string, unknown>>(
+      `/api/v1/portfolio/snapshot/refresh-prices/tasks/${encodeURIComponent(taskId)}`,
+    );
+    return toCamelCase<PortfolioSnapshotRefreshTaskStatus>(response.data);
+  },
+
+  async getCurrentSnapshotRefreshTask(query: SnapshotQuery = {}): Promise<PortfolioSnapshotRefreshCurrentTaskResponse> {
+    const response = await apiClient.get<Record<string, unknown>>(
+      '/api/v1/portfolio/snapshot/refresh-prices/tasks/current',
+      {
+        params: buildSnapshotParams({ ...query, refreshPrices: undefined }),
+      },
+    );
+    return toCamelCase<PortfolioSnapshotRefreshCurrentTaskResponse>(response.data);
   },
 
   async getRisk(query: SnapshotQuery = {}): Promise<PortfolioRiskResponse> {

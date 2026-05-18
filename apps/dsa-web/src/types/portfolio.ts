@@ -360,6 +360,32 @@ export interface PortfolioAnalysisSavedReportResponse {
   report?: PortfolioAnalysisResponse | null;
 }
 
+export interface PortfolioSnapshotRefreshTaskAccepted {
+  taskId: string;
+  status: PortfolioAnalysisTaskState;
+  message: string;
+  progress: number;
+  existing: boolean;
+  canRetry: boolean;
+}
+
+export interface PortfolioSnapshotRefreshTaskStatus {
+  taskId: string;
+  status: PortfolioAnalysisTaskState;
+  progress: number;
+  message?: string | null;
+  result?: PortfolioSnapshotResponse | null;
+  error?: string | null;
+  canRetry: boolean;
+  createdAt?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+}
+
+export interface PortfolioSnapshotRefreshCurrentTaskResponse {
+  task?: PortfolioSnapshotRefreshTaskStatus | null;
+}
+
 export interface PortfolioTradeCreateRequest {
   accountId: number;
   symbol: string;

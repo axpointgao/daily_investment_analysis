@@ -12,7 +12,9 @@ A股自选股智能分析系统 - 搜索服务模块
 """
 
 import logging
+import os
 import re
+import resource
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -473,8 +475,9 @@ class SerpAPISearchProvider(BaseSearchProvider):
         "resource_file",
     }
     
-    def __init__(self, api_keys: List[str]):
+    def __init__(self, api_keys: List[str], *, body_fetch_enabled: bool = True):
         super().__init__(api_keys, "SerpAPI")
+        self._body_fetch_enabled = body_fetch_enabled
     
     def _do_search(self, query: str, api_key: str, max_results: int, days: int = 7) -> SearchResponse:
         """执行 SerpAPI 搜索"""
@@ -619,7 +622,7 @@ class SerpAPISearchProvider(BaseSearchProvider):
                     rank=rank,
                     fetched_count=organic_content_fetch_attempts,
                     has_structured_summary=bool(rich_extensions),
-                ):
+                ) and self._body_fetch_enabled:
                     organic_content_fetch_attempts += 1
                     try:
                         fetched_content = fetch_url_content(
@@ -2129,6 +2132,8 @@ class SearchService:
         searxng_public_instances_enabled: bool = True,
         news_max_age_days: int = 3,
         news_strategy_profile: str = "short",
+        serpapi_body_fetch_enabled: bool = False,
+        comprehensive_intel_results_per_dimension: int = 3,
     ):
         """
         初始化搜索服务
@@ -2162,6 +2167,10 @@ class SearchService:
             self.news_strategy_profile,
             NEWS_STRATEGY_WINDOWS["short"],
         )
+        self.comprehensive_intel_results_per_dimension = max(
+            1,
+            int(comprehensive_intel_results_per_dimension or 3),
+        )
 
         # 初始化搜索引擎（按优先级排序）
         # 1. Bocha 优先（中文搜索优化，AI摘要）
@@ -2181,7 +2190,12 @@ class SearchService:
 
         # 4. SerpAPI 作为备选（每月 100 次）
         if serpapi_keys:
-            self._providers.append(SerpAPISearchProvider(serpapi_keys))
+            self._providers.append(
+                SerpAPISearchProvider(
+                    serpapi_keys,
+                    body_fetch_enabled=serpapi_body_fetch_enabled,
+                )
+            )
             logger.info(f"已配置 SerpAPI 搜索，共 {len(serpapi_keys)} 个 API Key")
 
         # 5. MiniMax（Coding Plan Web Search，结构化结果）
@@ -2222,6 +2236,24 @@ class SearchService:
             self.news_max_age_days,
             self.news_window_days,
         )
+
+    @staticmethod
+    def _rss_mb() -> Optional[float]:
+        try:
+            rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        except Exception:
+            return None
+        if os.name == "posix" and hasattr(os, "uname") and os.uname().sysname == "Darwin":
+            return round(rss / 1024 / 1024, 1)
+        return round(rss / 1024, 1)
+
+    @classmethod
+    def _log_memory_checkpoint(cls, label: str, **fields: Any) -> None:
+        rss_mb = cls._rss_mb()
+        if rss_mb is None:
+            logger.info("[内存观测] %s %s", label, fields)
+            return
+        logger.info("[内存观测] %s rss_mb=%s %s", label, rss_mb, fields)
     
     @staticmethod
     def _is_foreign_stock(stock_code: str) -> bool:
@@ -2957,7 +2989,8 @@ class SearchService:
         self,
         stock_code: str,
         stock_name: str,
-        max_searches: int = 3
+        max_searches: int = 3,
+        results_per_dimension: Optional[int] = None,
     ) -> Dict[str, SearchResponse]:
         """
         多维度情报搜索（同时使用多个引擎、多个维度）
@@ -3087,7 +3120,10 @@ class SearchService:
             ]
         
         search_days = self._effective_news_window_days()
-        target_per_dimension = 3
+        target_per_dimension = max(
+            1,
+            int(results_per_dimension or self.comprehensive_intel_results_per_dimension),
+        )
         provider_max_results = self._provider_request_size(target_per_dimension)
 
         logger.info(
@@ -3102,6 +3138,12 @@ class SearchService:
             self.news_max_age_days,
             target_per_dimension,
             provider_max_results,
+        )
+        self._log_memory_checkpoint(
+            "comprehensive_intel_start",
+            stock_code=stock_code,
+            max_searches=max_searches,
+            results_per_dimension=target_per_dimension,
         )
         
         # 轮流使用不同的搜索引擎
@@ -3162,6 +3204,13 @@ class SearchService:
             # 短暂延迟避免请求过快
             time.sleep(0.5)
         
+        total_results = sum(len(resp.results) for resp in results.values() if resp and resp.success)
+        self._log_memory_checkpoint(
+            "comprehensive_intel_done",
+            stock_code=stock_code,
+            dimensions=len(results),
+            total_results=total_results,
+        )
         return results
     
     def format_intel_report(self, intel_results: Dict[str, SearchResponse], stock_name: str) -> str:
@@ -3446,6 +3495,12 @@ def get_search_service() -> SearchService:
                     searxng_public_instances_enabled=config.searxng_public_instances_enabled,
                     news_max_age_days=config.news_max_age_days,
                     news_strategy_profile=getattr(config, "news_strategy_profile", "short"),
+                    serpapi_body_fetch_enabled=getattr(config, "search_serpapi_body_fetch_enabled", False),
+                    comprehensive_intel_results_per_dimension=getattr(
+                        config,
+                        "search_comprehensive_intel_results_per_dimension",
+                        3,
+                    ),
                 )
     
     return _search_service

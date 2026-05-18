@@ -699,6 +699,32 @@ class PortfolioFxRefreshResponse(BaseModel):
     error_count: int
 
 
+class PortfolioSnapshotRefreshTaskAccepted(BaseModel):
+    task_id: str
+    status: Literal["pending", "processing", "completed", "failed"]
+    message: str
+    progress: int = 0
+    existing: bool = False
+    can_retry: bool = False
+
+
+class PortfolioSnapshotRefreshTaskStatus(BaseModel):
+    task_id: str
+    status: Literal["pending", "processing", "completed", "failed"]
+    progress: int = 0
+    message: Optional[str] = None
+    result: Optional[PortfolioSnapshotResponse] = None
+    error: Optional[str] = None
+    can_retry: bool = False
+    created_at: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+
+
+class PortfolioSnapshotRefreshCurrentTaskResponse(BaseModel):
+    task: Optional[PortfolioSnapshotRefreshTaskStatus] = None
+
+
 class PortfolioRiskResponse(BaseModel):
     as_of: str
     account_id: Optional[int] = None

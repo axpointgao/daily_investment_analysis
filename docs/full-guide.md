@@ -1206,6 +1206,7 @@ A: 检查是否启用了 Actions，以及 cron 表达式是否正确（注意是
 - `get_stock_info` 遇到 ETF/指数代码时只返回轻量的 `not_supported` 结构，不再尝试公司基本面、板块归属等股票专用数据源；这类问题应优先结合最新收盘价、日线、趋势分析和持仓快照回答。
 - 持仓、组合配置、ETF 替换或调仓类问答默认不调用 `search_stock_news`；只有用户明确要求“最新消息/资讯/公告/催化/风险事件”时才扩展新闻搜索。
 - `search_stock_news` 与 `search_comprehensive_intel` 成功返回后会 best-effort 写入 `news_intel`，复用现有 URL / fallback key 去重逻辑。
+- 云端环境下，`search_comprehensive_intel` 默认保留较完整的情报上下文（最多 5 个维度、每维 3 条结果），同时关闭 SerpAPI 网页正文补抓并限制 Agent 工具并发，重点降低正文解析和并行工具调用带来的内存峰值，而不是大幅压缩给 Agent 的 token。可通过 `SEARCH_COMPREHENSIVE_INTEL_MAX_SEARCHES`、`SEARCH_COMPREHENSIVE_INTEL_RESULTS_PER_DIMENSION`、`SEARCH_SERPAPI_BODY_FETCH_ENABLED` 和 `AGENT_TOOL_PARALLELISM` 调整深度与内存占用。
 - `get_realtime_quote` 不复用 `stock_daily` 作为实时行情缓存，也不会把盘中实时行情写入日线表；如需实时行情缓存，应单独设计实时行情存储。
 
 ## Agent 事件告警监控
@@ -1250,6 +1251,9 @@ AGENT_EVENT_ALERT_RULES_JSON=[{"stock_code":"600519","alert_type":"price_cross",
 | `/api/v1/portfolio/accounts/{account_id}/asset-transfers/preview` | POST | 预览单产品/单标的转移会迁移的源数据 |
 | `/api/v1/portfolio/accounts/{account_id}/asset-transfers` | POST | 在同类型账户之间执行单产品/单标的资产转移 |
 | `/api/v1/portfolio/snapshot` | GET | 查询持仓快照 |
+| `/api/v1/portfolio/snapshot/refresh-prices/tasks` | POST | 后台刷新持仓在线价格 |
+| `/api/v1/portfolio/snapshot/refresh-prices/tasks/{task_id}` | GET | 查询在线价格刷新任务状态 |
+| `/api/v1/portfolio/snapshot/refresh-prices/tasks/current` | GET | 查询当前范围最新在线价格刷新任务 |
 | `/api/v1/portfolio/risk` | GET | 查询风险摘要 |
 | `/api/v1/portfolio/trades` | GET | 分页查询交易记录 |
 | `/api/v1/portfolio/cash-ledger` | GET | 分页查询现金流水 |
@@ -1285,7 +1289,7 @@ AGENT_EVENT_ALERT_RULES_JSON=[{"stock_code":"600519","alert_type":"price_cross",
 - 保险账户是独立账户类型，面向年金险、终身寿险、两全保险、万能险、投连险等带现金价值或领取/返还属性的保单，不覆盖重疾险、医疗险、意外险等纯保障险。Web 端先创建保单，再记录缴费、现金价值更新、年金/生存金/满期金/分红/退保到账等保险流水；除保单名称外字段尽量可选，系统会根据缴费方式、每期保费、首期日期和已交期数展示缴费进度与下次缴费日，避免用户手动计算。
 - 保险资产估值优先使用用户手工维护的现金价值/账户价值；未维护价值前按“已交保费 - 累计返还”临时估算，并在持仓明细标记为“净投入暂估”。返还类险种的领取、分红、退保、满期金都作为保险现金流参与收益统计，不会自动生成银行入账，避免与用户银行流水重复记账。
 - 持仓资产分析会为保险生成结构化资产摘要。全部账户分析中，保险只作为长期、低流动性、现金价值类资产纳入家庭资产配置判断；单独分析保险账户时，会基于已交保费、现金价值、已领取金额、缴费进度、下次缴费日和价值更新新鲜度做“保单资产体检”。该分析不读取合同条款，不判断重疾/医疗/意外保障是否充足，也不提供保险产品购买建议；现金价值缺失或过期时，报告会提示估值可靠性不足。
-- 持仓快照的 `positions[]` 会返回 `price_source`、`price_date`、`price_stale`、`price_available` 等价格元信息；默认查询优先返回最近一次快照缓存，避免页面加载时被实时行情源拖慢。需要刷新现价时，可点击 Web 页面“刷新数据”，或调用 `/api/v1/portfolio/snapshot?refresh_prices=true`。
+- 持仓快照的 `positions[]` 会返回 `price_source`、`price_date`、`price_stale`、`price_available` 等价格元信息；默认查询优先返回最近一次快照缓存，避免页面加载时被实时行情源拖慢。Web 页面“刷新数据”会创建后台在线价格刷新任务并轮询结果，避免长请求被浏览器或网关超时切断；兼容调用仍可使用 `/api/v1/portfolio/snapshot?refresh_prices=true`。
 - 无缓存时，默认快照会重放账本并跳过在线行情，仅使用已入库收盘价或手工价格；缺价持仓会标记 `price_available=false` 并从市值与未实现盈亏汇总中排除。设置 `refresh_prices=true` 时，当天快照会在收盘价缺失时尝试实时价 fallback。
 - 汇率刷新会先尝试在线源；若在线获取失败，则回退到最近一次缓存并标记 `is_stale=true`，避免快照和风险页整体不可用。
 - 当 `PORTFOLIO_FX_UPDATE_ENABLED=false` 时，手动刷新接口会明确返回“在线刷新已禁用”，页面不会误导为“当前没有可刷新的汇率对”。

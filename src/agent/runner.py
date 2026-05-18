@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import resource
 import time
 import contextvars
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
@@ -107,6 +109,33 @@ def serialize_tool_result(result: Any) -> str:
         except (TypeError, ValueError):
             return str(result)
     return str(result)
+
+
+def _rss_mb() -> Optional[float]:
+    try:
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    except Exception:
+        return None
+    if os.name == "posix" and hasattr(os, "uname") and os.uname().sysname == "Darwin":
+        return round(rss / 1024 / 1024, 1)
+    return round(rss / 1024, 1)
+
+
+def _configured_tool_parallelism(default: int = 2) -> int:
+    try:
+        from src.config import get_config
+
+        return max(1, int(getattr(get_config(), "agent_tool_parallelism", default) or default))
+    except Exception:
+        return default
+
+
+def _log_memory_checkpoint(label: str, **fields: Any) -> None:
+    rss = _rss_mb()
+    if rss is None:
+        logger.info("[AgentMemory] %s %s", label, fields)
+    else:
+        logger.info("[AgentMemory] %s rss_mb=%s %s", label, rss, fields)
 
 
 def _normalize_tool_stock_code(value: Any) -> Any:
@@ -722,6 +751,13 @@ def _execute_tools(
         return {"tc": tc, "result_str": result_str}
 
     results: List[Dict[str, Any]] = []
+    max_parallelism = _configured_tool_parallelism()
+    _log_memory_checkpoint(
+        "tool_batch_start",
+        step=step,
+        tool_count=len(tool_calls),
+        max_parallelism=max_parallelism,
+    )
 
     if len(tool_calls) == 1 or _has_duplicate_cache_keys():
         if len(tool_calls) > 1:
@@ -732,7 +768,7 @@ def _execute_tools(
             if progress_callback:
                 progress_callback({"type": "tool_start", "step": step, "tool": tc.name})
 
-        pool = ThreadPoolExecutor(max_workers=min(len(tool_calls), 5))
+        pool = ThreadPoolExecutor(max_workers=min(len(tool_calls), max_parallelism, 5))
         timeout_triggered = False
         try:
             futures = {pool.submit(contextvars.copy_context().run, _exec_single, tc): tc for tc in tool_calls}
@@ -788,4 +824,10 @@ def _execute_tools(
         finally:
             pool.shutdown(wait=not timeout_triggered, cancel_futures=timeout_triggered)
 
+    _log_memory_checkpoint(
+        "tool_batch_done",
+        step=step,
+        tool_count=len(tool_calls),
+        result_bytes=sum(len(item.get("result_str", "")) for item in results),
+    )
     return results

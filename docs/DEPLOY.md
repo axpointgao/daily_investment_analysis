@@ -351,13 +351,16 @@ rm /opt/stock-analyzer/data/*.lock
 
 ### 4. 内存不足
 
-调整 `docker-compose.yml` 中的内存限制：
+默认 `docker/docker-compose.yml` 按 4GB 云服务器设置资源限制：`server` 为 1.5G，`analyzer` 为 1G，并保留约 1GB 给宿主机、Docker、日志和系统缓存。若服务器规格不同，可调整对应服务的内存限制：
 ```yaml
-deploy:
-  resources:
-    limits:
-      memory: 1G
+services:
+  analyzer:
+    mem_limit: 1g
+  server:
+    mem_limit: 1536m
 ```
+
+问股情报搜索的云端默认档位为：关闭 SerpAPI 正文补抓、综合情报最多 5 个维度、每维 3 条结果、Agent 工具并发 2。需要更高质量且内存充足时，可在 `.env` 中调高 `SEARCH_COMPREHENSIVE_INTEL_MAX_SEARCHES` / `SEARCH_COMPREHENSIVE_INTEL_RESULTS_PER_DIMENSION`；不建议在小内存服务器上开启 `SEARCH_SERPAPI_BODY_FETCH_ENABLED=true`。
 
 ### 5. WebUI 打开后 UI 元素异常变大 / 布局错乱
 

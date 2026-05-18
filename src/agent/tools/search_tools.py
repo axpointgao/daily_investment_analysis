@@ -8,6 +8,7 @@ Tools:
 """
 
 import logging
+from typing import Optional
 
 from src.agent.tools.registry import ToolParameter, ToolDefinition
 
@@ -24,6 +25,18 @@ def _get_search_service():
     """Return shared SearchService singleton."""
     from src.search_service import get_search_service
     return get_search_service()
+
+
+def _get_config():
+    from src.config import get_config
+    return get_config()
+
+
+def _clip_text(value: Optional[str], limit: int) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "..."
 
 
 def _canonical_search_code(stock_code: str) -> str:
@@ -145,19 +158,22 @@ def _handle_search_comprehensive_intel(stock_code: str, stock_name: str) -> dict
     if not service.is_available:
         return {"error": "No search engine available (no API keys configured)"}
 
+    config = _get_config()
+    max_searches = int(getattr(config, "search_comprehensive_intel_max_searches", 5) or 5)
+    results_per_dimension = int(
+        getattr(config, "search_comprehensive_intel_results_per_dimension", 3) or 3
+    )
+
     intel_results = service.search_comprehensive_intel(
         stock_code=stock_code,
         stock_name=stock_name,
-        max_searches=6,
+        max_searches=max_searches,
+        results_per_dimension=results_per_dimension,
     )
 
     if not intel_results:
         return {"error": "Comprehensive intel search returned no results"}
 
-    # Format into readable report
-    report = service.format_intel_report(intel_results, stock_name)
-
-    # Also return structured data
     dimensions = {}
     for dim_name, response in intel_results.items():
         if response and response.success:
@@ -169,20 +185,29 @@ def _handle_search_comprehensive_intel(stock_code: str, stock_name: str) -> dict
             )
             dimensions[dim_name] = {
                 "query": response.query,
+                "provider": response.provider,
                 "results_count": len(response.results),
                 "results": [
                     {
-                        "title": r.title,
-                        "snippet": r.snippet,
+                        "title": _clip_text(r.title, 200),
+                        "snippet": _clip_text(r.snippet, 500),
                         "source": r.source,
+                        "published_date": r.published_date,
                     }
-                    for r in response.results[:3]  # limit to 3 per dimension to save tokens
+                    for r in response.results[:results_per_dimension]
                 ],
             }
 
+    compatibility_report = service.format_intel_report(intel_results, stock_name)
+
     return {
-        "report": report,
+        "report": compatibility_report,
+        "summary": f"{stock_name} 综合情报搜索完成，共 {len(dimensions)} 个维度。",
         "dimensions": dimensions,
+        "limits": {
+            "max_searches": max_searches,
+            "results_per_dimension": results_per_dimension,
+        },
     }
 
 

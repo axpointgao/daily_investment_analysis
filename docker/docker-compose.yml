@@ -36,6 +36,13 @@ x-common: &common
     - WEBUI_HOST=0.0.0.0
     # API_PORT 从 .env 文件读取，无需在此硬编码
 
+    # Cloud memory profile for a 4GB host:
+    # keep expensive body fetch disabled, but preserve enough intel breadth.
+    - SEARCH_SERPAPI_BODY_FETCH_ENABLED=${SEARCH_SERPAPI_BODY_FETCH_ENABLED:-false}
+    - SEARCH_COMPREHENSIVE_INTEL_MAX_SEARCHES=${SEARCH_COMPREHENSIVE_INTEL_MAX_SEARCHES:-5}
+    - SEARCH_COMPREHENSIVE_INTEL_RESULTS_PER_DIMENSION=${SEARCH_COMPREHENSIVE_INTEL_RESULTS_PER_DIMENSION:-3}
+    - AGENT_TOOL_PARALLELISM=${AGENT_TOOL_PARALLELISM:-2}
+
     # 代理设置（如果需要）
     # - http_proxy=http://host.docker.internal:10809
     # - https_proxy=http://host.docker.internal:10809
@@ -44,13 +51,6 @@ x-common: &common
     options:
       max-size: "10m"
       max-file: "3"
-  # 资源限制
-  deploy:
-    resources:
-      limits:
-        memory: 512M
-      reservations:
-        memory: 256M
 
 services:
   # 定时任务模式
@@ -58,12 +58,28 @@ services:
     <<: *common
     container_name: stock-analyzer
     command: ["/app/docker/analyzer-entrypoint.sh"]
+    mem_limit: 1g
+    mem_reservation: 512m
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
 
   # FastAPI 模式
   server:
     <<: *common
     container_name: stock-server
     command: ["python", "main.py", "--serve-only", "--host", "0.0.0.0", "--port", "${API_PORT:-8000}"]
+    mem_limit: 1536m
+    mem_reservation: 768m
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+        reservations:
+          memory: 768M
     # 若使用 network_mode: host，则以下 ports 映射无效，端口由 command 中的 --port 指定
     ports:
       - "${API_PORT:-8000}:${API_PORT:-8000}"

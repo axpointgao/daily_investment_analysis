@@ -25,6 +25,7 @@ from api.app import create_app
 from src.config import Config
 from src.services.portfolio_analysis_service import PortfolioAnalysisService
 from src.services.portfolio_analysis_task_service import PortfolioAnalysisTaskInfo, PortfolioAnalysisTaskStatus
+from src.services.portfolio_refresh_task_service import PortfolioRefreshTaskInfo, PortfolioRefreshTaskStatus
 from src.services.portfolio_service import PortfolioBusyError
 from src.storage import DatabaseManager
 
@@ -925,6 +926,60 @@ class PortfolioApiTestCase(unittest.TestCase):
             status_resp = self.client.get("/api/v1/portfolio/analysis/tasks/task-1")
             self.assertEqual(status_resp.status_code, 200)
             self.assertEqual(status_resp.json()["result"]["summary_points"], ["point"])
+
+    def test_snapshot_refresh_task_endpoints(self) -> None:
+        task = PortfolioRefreshTaskInfo(
+            task_id="refresh-1",
+            task_key="key",
+            account_id=None,
+            as_of=date(2026, 5, 10),
+            cost_method="fifo",
+            status=PortfolioRefreshTaskStatus.COMPLETED,
+            progress=100,
+            message="done",
+            result={
+                "as_of": "2026-05-10",
+                "cost_method": "fifo",
+                "currency": "CNY",
+                "account_count": 1,
+                "total_cash": 0.0,
+                "total_market_value": 100.0,
+                "total_equity": 100.0,
+                "realized_pnl": 0.0,
+                "unrealized_pnl": 0.0,
+                "fee_total": 0.0,
+                "tax_total": 0.0,
+                "fx_stale": False,
+                "fx_missing": False,
+                "missing_fx_pairs": [],
+                "asset_breakdown": {},
+                "tag_breakdown": [],
+                "accounts": [],
+            },
+        )
+        queue = MagicMock()
+        queue.submit_task.return_value = (task, True)
+        queue.get_task.return_value = task
+        queue.get_current_task.return_value = task
+
+        with patch("api.v1.endpoints.portfolio.get_portfolio_refresh_task_queue", return_value=queue):
+            submit_resp = self.client.post(
+                "/api/v1/portfolio/snapshot/refresh-prices/tasks",
+                params={"as_of": "2026-05-10", "cost_method": "fifo"},
+            )
+            self.assertEqual(submit_resp.status_code, 202)
+            self.assertEqual(submit_resp.json()["task_id"], "refresh-1")
+
+            current_resp = self.client.get(
+                "/api/v1/portfolio/snapshot/refresh-prices/tasks/current",
+                params={"as_of": "2026-05-10", "cost_method": "fifo"},
+            )
+            self.assertEqual(current_resp.status_code, 200)
+            self.assertEqual(current_resp.json()["task"]["status"], "completed")
+
+            status_resp = self.client.get("/api/v1/portfolio/snapshot/refresh-prices/tasks/refresh-1")
+            self.assertEqual(status_resp.status_code, 200)
+            self.assertEqual(status_resp.json()["result"]["total_market_value"], 100.0)
 
     def test_saved_portfolio_analysis_endpoint(self) -> None:
         service_report = {

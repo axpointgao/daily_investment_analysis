@@ -53,7 +53,7 @@ export interface ChatSessionMessage {
 export const agentApi = {
   async chat(payload: ChatRequest): Promise<ChatResponse> {
     const response = await apiClient.post<ChatResponse>('/api/v1/agent/chat', payload, {
-      timeout: 120000,
+      timeout: 300000,
     });
     return response.data;
   },
