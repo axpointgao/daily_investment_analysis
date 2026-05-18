@@ -1493,6 +1493,70 @@ class TestBaseAgentMemoryIntegration(unittest.TestCase):
         )
 
 
+class TestMultiAgentToolCache(unittest.TestCase):
+    def test_agents_share_tool_cache_within_same_context(self):
+        from src.agent.agents.base_agent import BaseAgent
+        from src.agent.llm_adapter import LLMResponse, ToolCall
+        from src.agent.tools.registry import ToolDefinition, ToolParameter, ToolRegistry
+
+        class DummyAgent(BaseAgent):
+            agent_name = "dummy"
+            tool_names = ["echo"]
+            max_steps = 2
+
+            def system_prompt(self, ctx):
+                return "system"
+
+            def build_user_message(self, ctx):
+                return "user"
+
+        calls = []
+
+        def _echo(message):
+            calls.append(message)
+            return {"echo": message, "sequence": len(calls)}
+
+        registry = ToolRegistry()
+        registry.register(
+            ToolDefinition(
+                name="echo",
+                description="Echo",
+                parameters=[ToolParameter(name="message", type="string", description="Message")],
+                handler=_echo,
+            )
+        )
+
+        adapter = MagicMock()
+        adapter.call_with_tools.side_effect = [
+            LLMResponse(
+                content="",
+                tool_calls=[ToolCall(id="a1", name="echo", arguments={"message": "same"})],
+                usage={"total_tokens": 1},
+                provider="test",
+            ),
+            LLMResponse(content="first done", tool_calls=[], usage={"total_tokens": 1}, provider="test"),
+            LLMResponse(
+                content="",
+                tool_calls=[ToolCall(id="a2", name="echo", arguments={"message": "same"})],
+                usage={"total_tokens": 1},
+                provider="test",
+            ),
+            LLMResponse(content="second done", tool_calls=[], usage={"total_tokens": 1}, provider="test"),
+        ]
+
+        agent = DummyAgent(registry, adapter)
+        ctx = AgentContext(query="test", stock_code="600519")
+
+        first = agent.run(ctx)
+        second = agent.run(ctx)
+
+        self.assertTrue(first.success)
+        self.assertTrue(second.success)
+        self.assertEqual(calls, ["same"])
+        self.assertFalse(first.meta["tool_calls_log"][0]["cached"])
+        self.assertTrue(second.meta["tool_calls_log"][0]["cached"])
+
+
 class TestRiskOverride(unittest.TestCase):
     """Test orchestrator-level risk override integration."""
 

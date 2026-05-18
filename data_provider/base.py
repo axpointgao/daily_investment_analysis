@@ -19,7 +19,7 @@ import random
 import time
 from threading import BoundedSemaphore, RLock, Thread
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import date, datetime
 from typing import Callable, Optional, List, Tuple, Dict, Any
 
 import pandas as pd
@@ -996,6 +996,11 @@ class DataFetcherManager:
             logger.error(f"[数据源终止] {stock_code} 获取失败: elapsed={elapsed:.2f}s\n{error_summary}")
             raise DataFetchError(error_summary)
 
+        target_date = self._resolve_daily_target_date(stock_code, end_date=end_date)
+        best_df: Optional[pd.DataFrame] = None
+        best_source: Optional[str] = None
+        best_latest_date: Optional[date] = None
+
         for attempt, fetcher in enumerate(fetchers, start=1):
             try:
                 logger.info(f"[数据源尝试 {attempt}/{total_fetchers}] [{fetcher.name}] 获取 {stock_code}...")
@@ -1009,12 +1014,24 @@ class DataFetcherManager:
                 )
                 
                 if df is not None and not df.empty:
+                    latest_date = self._latest_daily_date(df)
+                    if best_df is None or self._is_newer_daily_frame(latest_date, best_latest_date):
+                        best_df = df
+                        best_source = fetcher.name
+                        best_latest_date = latest_date
+
                     elapsed = time.time() - request_start
+                    if target_date is None or (latest_date is not None and latest_date >= target_date):
+                        logger.info(
+                            f"[数据源完成] {stock_code} 使用 [{fetcher.name}] 获取成功: "
+                            f"rows={len(df)}, latest_date={latest_date}, elapsed={elapsed:.2f}s"
+                        )
+                        return df, fetcher.name
+
                     logger.info(
-                        f"[数据源完成] {stock_code} 使用 [{fetcher.name}] 获取成功: "
-                        f"rows={len(df)}, elapsed={elapsed:.2f}s"
+                        f"[数据源继续择优] {stock_code} [{fetcher.name}] 返回数据最新日期 {latest_date} "
+                        f"早于目标 {target_date}，继续尝试后续数据源"
                     )
-                    return df, fetcher.name
                     
             except Exception as e:
                 error_type, error_reason = summarize_exception(e)
@@ -1024,17 +1041,64 @@ class DataFetcherManager:
                     f"error_type={error_type}, reason={error_reason}"
                 )
                 errors.append(error_msg)
-                if attempt < total_fetchers:
-                    next_fetcher = fetchers[attempt]
-                    logger.info(f"[数据源切换] {stock_code}: [{fetcher.name}] -> [{next_fetcher.name}]")
-                # 继续尝试下一个数据源
-                continue
+            if attempt < total_fetchers:
+                next_fetcher = fetchers[attempt]
+                logger.info(f"[数据源切换] {stock_code}: [{fetcher.name}] -> [{next_fetcher.name}]")
+
+        if best_df is not None and best_source is not None:
+            elapsed = time.time() - request_start
+            logger.info(
+                f"[数据源完成] {stock_code} 使用最新可用数据源 [{best_source}]: "
+                f"rows={len(best_df)}, latest_date={best_latest_date}, target_date={target_date}, elapsed={elapsed:.2f}s"
+            )
+            return best_df, best_source
         
         # 所有数据源都失败
         error_summary = f"所有数据源获取 {stock_code} 失败:\n" + "\n".join(errors)
         elapsed = time.time() - request_start
         logger.error(f"[数据源终止] {stock_code} 获取失败: elapsed={elapsed:.2f}s\n{error_summary}")
         raise DataFetchError(error_summary)
+
+    @staticmethod
+    def _latest_daily_date(df: pd.DataFrame) -> Optional[date]:
+        if df is None or df.empty or "date" not in df.columns:
+            return None
+        parsed = pd.to_datetime(df["date"], errors="coerce")
+        parsed = parsed.dropna()
+        if parsed.empty:
+            return None
+        latest = parsed.max()
+        if isinstance(latest, pd.Timestamp):
+            return latest.date()
+        if isinstance(latest, datetime):
+            return latest.date()
+        if isinstance(latest, date):
+            return latest
+        return None
+
+    @staticmethod
+    def _is_newer_daily_frame(candidate: Optional[date], current: Optional[date]) -> bool:
+        if current is None:
+            return True
+        if candidate is None:
+            return False
+        return candidate > current
+
+    @staticmethod
+    def _resolve_daily_target_date(stock_code: str, end_date: Optional[str] = None) -> Optional[date]:
+        if end_date:
+            try:
+                return datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+            except ValueError:
+                return None
+
+        try:
+            from src.core.trading_calendar import get_effective_trading_date, get_market_for_stock
+
+            return get_effective_trading_date(get_market_for_stock(stock_code))
+        except Exception as exc:
+            logger.debug("resolve daily target date failed for %s: %s", stock_code, exc)
+            return None
     
     @property
     def available_fetchers(self) -> List[str]:

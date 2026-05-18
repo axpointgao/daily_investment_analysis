@@ -93,10 +93,7 @@ def _history_code_candidates(stock_code: str) -> Tuple[List[str], str]:
 
     raw_code = str(stock_code or "").strip()
     normalized_code = canonical_stock_code(normalize_stock_code(raw_code))
-    candidates: List[str] = []
-    for candidate in (canonical_stock_code(raw_code), normalized_code):
-        if candidate and candidate not in candidates:
-            candidates.append(candidate)
+    candidates: List[str] = [normalized_code] if normalized_code else []
     return candidates, normalized_code
 
 

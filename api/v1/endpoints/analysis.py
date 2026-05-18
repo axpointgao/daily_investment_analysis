@@ -612,7 +612,7 @@ def get_analysis_status(task_id: str) -> TaskStatus:
             stock_name = get_localized_stock_name(record.name, record.code, report_language)
 
             context_snapshot = parse_json_field(getattr(record, 'context_snapshot', None))
-            current_price, change_pct = extract_price_fields(
+            current_price, change_pct, price_date = extract_price_fields(
                 raw_result if isinstance(raw_result, dict) else {},
                 context_snapshot if isinstance(context_snapshot, dict) else None,
             )
@@ -630,6 +630,7 @@ def get_analysis_status(task_id: str) -> TaskStatus:
                     model_used=model_used,
                     current_price=current_price,
                     change_pct=change_pct,
+                    price_date=price_date,
                 ),
                 summary=ReportSummary(
                     sentiment_score=record.sentiment_score,
@@ -759,6 +760,7 @@ def _build_analysis_report(
         created_at=meta_data.get("created_at", datetime.now().isoformat()),
         current_price=meta_data.get("current_price"),
         change_pct=meta_data.get("change_pct"),
+        price_date=meta_data.get("price_date"),
         model_used=normalize_model_used(meta_data.get("model_used")),
     )
 

@@ -46,6 +46,7 @@ export interface ReportMeta {
   createdAt: string;
   currentPrice?: number;
   changePct?: number;
+  priceDate?: string;
   modelUsed?: string;  // LLM model used for analysis
   latestNav?: number;
   navDate?: string;

@@ -166,6 +166,66 @@ class TestStorage(unittest.TestCase):
         finally:
             DatabaseManager.reset_instance()
 
+    def test_upgrade_merges_legacy_stock_daily_cache_keys(self):
+        DatabaseManager.reset_instance()
+        temp_dir = tempfile.TemporaryDirectory()
+        db_path = os.path.join(temp_dir.name, "legacy_daily_cache.db")
+
+        try:
+            db = DatabaseManager(db_url=f"sqlite:///{db_path}")
+            with db.get_session() as session:
+                session.add_all(
+                    [
+                        StockDaily(
+                            code="300274",
+                            date=date(2026, 5, 18),
+                            close=135.03,
+                            pct_chg=0.2,
+                            data_source="old-normalized",
+                            updated_at=date(2026, 5, 18),
+                        ),
+                        StockDaily(
+                            code="300274.SZ",
+                            date=date(2026, 5, 18),
+                            close=152.25,
+                            pct_chg=-0.46,
+                            data_source="legacy-fresh",
+                            updated_at=date(2026, 5, 19),
+                        ),
+                        StockDaily(
+                            code="600519.SH",
+                            date=date(2026, 5, 18),
+                            close=1323.0,
+                            data_source="legacy-only",
+                            updated_at=date(2026, 5, 18),
+                        ),
+                    ]
+                )
+                session.commit()
+
+            db._upgrade_schema_compat()
+
+            rows_300274 = db.get_data_range("300274.SZ", date(2026, 5, 18), date(2026, 5, 18))
+            rows_600519 = db.get_data_range("600519", date(2026, 5, 18), date(2026, 5, 18))
+
+            self.assertEqual(len(rows_300274), 1)
+            self.assertEqual(rows_300274[0].code, "300274")
+            self.assertAlmostEqual(rows_300274[0].close, 152.25)
+            self.assertEqual(rows_300274[0].data_source, "legacy-fresh")
+            self.assertEqual(len(rows_600519), 1)
+            self.assertEqual(rows_600519[0].code, "600519")
+
+            with db.get_session() as session:
+                legacy_count = session.execute(
+                    select(func.count()).select_from(StockDaily).where(
+                        StockDaily.code.in_(["300274.SZ", "600519.SH"])
+                    )
+                ).scalar()
+            self.assertEqual(legacy_count, 0)
+        finally:
+            temp_dir.cleanup()
+            DatabaseManager.reset_instance()
+
     def test_save_daily_data_sqlite_concurrent_same_code_date_counts_only_new_rows(self):
         DatabaseManager.reset_instance()
         temp_dir = tempfile.TemporaryDirectory()

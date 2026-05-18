@@ -29,6 +29,21 @@ def _sample_df() -> pd.DataFrame:
     )
 
 
+def _dated_df(latest_date: str, close: float = 10.0) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "date": ["2026-03-06", latest_date],
+            "open": [close - 0.2, close - 0.1],
+            "high": [close + 0.2, close + 0.3],
+            "low": [close - 0.4, close - 0.2],
+            "close": [close, close + 0.1],
+            "volume": [1000, 1200],
+            "amount": [10000, 12120],
+            "pct_chg": [0.1, 0.2],
+        }
+    )
+
+
 class _SuccessFetcher(BaseFetcher):
     name = "SuccessFetcher"
     priority = 1
@@ -50,6 +65,28 @@ class _FailureFetcher(BaseFetcher):
             "endpoint=push2his.eastmoney.com/api/qt/stock/kline/get, "
             "category=remote_disconnect"
         )
+
+    def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
+        return df
+
+
+class _StaleSuccessFetcher(BaseFetcher):
+    name = "StaleSuccessFetcher"
+    priority = 0
+
+    def _fetch_raw_data(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        return _dated_df("2026-03-07", close=10.0)
+
+    def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
+        return df
+
+
+class _FreshSuccessFetcher(BaseFetcher):
+    name = "FreshSuccessFetcher"
+    priority = 1
+
+    def _fetch_raw_data(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        return _dated_df("2026-03-08", close=20.0)
 
     def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
         return df
@@ -80,7 +117,18 @@ class TestFetcherLogging(unittest.TestCase):
         self.assertIn("[数据源尝试 1/2] [FailureFetcher] 获取 601006...", log_text)
         self.assertIn("[数据源失败 1/2] [FailureFetcher] 601006:", log_text)
         self.assertIn("[数据源切换] 601006: [FailureFetcher] -> [SuccessFetcher]", log_text)
-        self.assertIn("[数据源完成] 601006 使用 [SuccessFetcher] 获取成功:", log_text)
+        self.assertIn("[数据源完成] 601006 使用最新可用数据源 [SuccessFetcher]:", log_text)
+
+    def test_manager_prefers_fresher_daily_data_when_first_source_is_stale(self):
+        manager = DataFetcherManager(fetchers=[_StaleSuccessFetcher(), _FreshSuccessFetcher()])
+
+        with self.assertLogs("data_provider.base", level="INFO") as captured:
+            df, source = manager.get_daily_data("601006", end_date="2026-03-08", days=5)
+
+        log_text = "\n".join(captured.output)
+        self.assertEqual(source, "FreshSuccessFetcher")
+        self.assertEqual(str(df.sort_values("date").iloc[-1]["date"])[:10], "2026-03-08")
+        self.assertIn("[数据源继续择优] 601006 [StaleSuccessFetcher] 返回数据最新日期 2026-03-07", log_text)
 
     def test_efinance_logs_eastmoney_endpoint_on_remote_disconnect(self):
         fetcher = EfinanceFetcher()

@@ -16,9 +16,15 @@ from typing import Optional, List, Dict, Any
 import pandas as pd
 from sqlalchemy import and_, desc, select
 
+from data_provider.base import canonical_stock_code, normalize_stock_code
 from src.storage import DatabaseManager, StockDaily
 
 logger = logging.getLogger(__name__)
+
+
+def _daily_cache_code(code: str) -> str:
+    raw_code = str(code or "").strip()
+    return canonical_stock_code(normalize_stock_code(raw_code)) if raw_code else raw_code
 
 
 class StockRepository:
@@ -140,10 +146,11 @@ class StockRepository:
 
     def get_start_daily(self, *, code: str, analysis_date: date) -> Optional[StockDaily]:
         """Return StockDaily for analysis_date (preferred) or nearest previous date."""
+        cache_code = _daily_cache_code(code)
         with self.db.get_session() as session:
             row = session.execute(
                 select(StockDaily)
-                .where(and_(StockDaily.code == code, StockDaily.date <= analysis_date))
+                .where(and_(StockDaily.code == cache_code, StockDaily.date <= analysis_date))
                 .order_by(desc(StockDaily.date))
                 .limit(1)
             ).scalar_one_or_none()
@@ -151,10 +158,11 @@ class StockRepository:
 
     def get_forward_bars(self, *, code: str, analysis_date: date, eval_window_days: int) -> List[StockDaily]:
         """Return forward daily bars after analysis_date, up to eval_window_days."""
+        cache_code = _daily_cache_code(code)
         with self.db.get_session() as session:
             rows = session.execute(
                 select(StockDaily)
-                .where(and_(StockDaily.code == code, StockDaily.date > analysis_date))
+                .where(and_(StockDaily.code == cache_code, StockDaily.date > analysis_date))
                 .order_by(StockDaily.date)
                 .limit(eval_window_days)
             ).scalars().all()

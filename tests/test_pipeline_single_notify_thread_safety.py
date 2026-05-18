@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 import unittest
+from datetime import date
 from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -68,6 +69,7 @@ class TestPipelineSingleNotifyThreadSafety(unittest.TestCase):
     def test_process_single_stock_serializes_direct_notification_path(self):
         pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
         pipeline.fetch_and_save_stock_data = MagicMock(return_value=(True, None))
+        pipeline._get_latest_daily_bar_date = MagicMock(return_value=date.today())
         pipeline.notifier = _CriticalSectionTrackingNotifier()
 
         notify_barrier = threading.Barrier(2)

@@ -74,6 +74,19 @@ describe('ReportOverview', () => {
     expect(screen.queryByText('关联板块')).not.toBeInTheDocument();
   });
 
+  it('shows the close price trading date when available', () => {
+    render(
+      <ReportOverview
+        meta={{ ...baseMeta, currentPrice: 135.03, changePct: -5.34, priceDate: '2026-05-15' }}
+        summary={baseSummary}
+      />,
+    );
+
+    expect(screen.getByText('收盘价 · 2026-05-15')).toBeInTheDocument();
+    expect(screen.getByText('135.03')).toBeInTheDocument();
+    expect(screen.getByText('-5.34%')).toBeInTheDocument();
+  });
+
   it('fails open on malformed ranking payloads', () => {
     render(
       <ReportOverview

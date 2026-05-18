@@ -94,6 +94,7 @@ class AnalysisService:
                 skip_analysis=False,
                 single_stock_notify=send_notification,
                 report_type=rt,
+                force_refresh=force_refresh,
             )
             
             if result is None:
@@ -151,6 +152,7 @@ class AnalysisService:
                 "report_language": report_language,
                 "current_price": result.current_price,
                 "change_pct": result.change_pct,
+                "price_date": getattr(result, "price_date", None),
                 "model_used": getattr(result, "model_used", None),
             },
             "summary": {

@@ -65,6 +65,14 @@ if TYPE_CHECKING:
     from src.search_service import SearchResponse
 
 
+def _normalize_daily_cache_code(code: str) -> str:
+    """Return the single cache key used by stock_daily read/write paths."""
+    from data_provider.base import canonical_stock_code, normalize_stock_code
+
+    raw_code = str(code or "").strip()
+    return canonical_stock_code(normalize_stock_code(raw_code)) if raw_code else raw_code
+
+
 # === 数据模型定义 ===
 
 class StockDaily(Base):
@@ -1115,6 +1123,111 @@ class DatabaseManager:
                     connection.execute(
                         text(f"ALTER TABLE portfolio_advisory_ledger ADD COLUMN {column_name} {column_type}")
                     )
+            if "stock_daily" in table_names:
+                self._merge_legacy_stock_daily_cache_keys(connection)
+
+    def _merge_legacy_stock_daily_cache_keys(self, connection) -> None:
+        """Merge legacy suffix/prefix stock_daily keys into normalized cache keys."""
+        rows = connection.execute(
+            text(
+                """
+                SELECT id, code, date, open, high, low, close, volume, amount,
+                       pct_chg, ma5, ma10, ma20, volume_ratio, data_source,
+                       created_at, updated_at
+                FROM stock_daily
+                WHERE code LIKE '%.%'
+                   OR code LIKE 'SH%'
+                   OR code LIKE 'SZ%'
+                   OR code LIKE 'BJ%'
+                """
+            )
+        ).mappings().all()
+
+        migrated = 0
+        for row in rows:
+            raw_code = row["code"]
+            cache_code = _normalize_daily_cache_code(raw_code)
+            if not cache_code or cache_code == raw_code:
+                continue
+
+            existing = connection.execute(
+                text(
+                    """
+                    SELECT id, updated_at
+                    FROM stock_daily
+                    WHERE code = :code AND date = :date
+                    LIMIT 1
+                    """
+                ),
+                {"code": cache_code, "date": row["date"]},
+            ).mappings().first()
+
+            if existing is None:
+                connection.execute(
+                    text("UPDATE stock_daily SET code = :code WHERE id = :id"),
+                    {"code": cache_code, "id": row["id"]},
+                )
+                migrated += 1
+                continue
+
+            legacy_updated_at = row["updated_at"]
+            existing_updated_at = existing["updated_at"]
+            should_replace = (
+                existing_updated_at is None
+                or (
+                    legacy_updated_at is not None
+                    and str(legacy_updated_at) >= str(existing_updated_at)
+                )
+            )
+            if should_replace:
+                connection.execute(
+                    text(
+                        """
+                        UPDATE stock_daily
+                        SET open = :open,
+                            high = :high,
+                            low = :low,
+                            close = :close,
+                            volume = :volume,
+                            amount = :amount,
+                            pct_chg = :pct_chg,
+                            ma5 = :ma5,
+                            ma10 = :ma10,
+                            ma20 = :ma20,
+                            volume_ratio = :volume_ratio,
+                            data_source = :data_source,
+                            created_at = :created_at,
+                            updated_at = :updated_at
+                        WHERE id = :id
+                        """
+                    ),
+                    {
+                        "id": existing["id"],
+                        "open": row["open"],
+                        "high": row["high"],
+                        "low": row["low"],
+                        "close": row["close"],
+                        "volume": row["volume"],
+                        "amount": row["amount"],
+                        "pct_chg": row["pct_chg"],
+                        "ma5": row["ma5"],
+                        "ma10": row["ma10"],
+                        "ma20": row["ma20"],
+                        "volume_ratio": row["volume_ratio"],
+                        "data_source": row["data_source"],
+                        "created_at": row["created_at"],
+                        "updated_at": row["updated_at"],
+                    },
+                )
+
+            connection.execute(
+                text("DELETE FROM stock_daily WHERE id = :id"),
+                {"id": row["id"]},
+            )
+            migrated += 1
+
+        if migrated:
+            logger.info("已合并 legacy stock_daily 缓存键 %s 条", migrated)
 
     @staticmethod
     def _normalize_daily_date(value: Any) -> Any:
@@ -1182,12 +1295,13 @@ class DatabaseManager:
         # 注意：这里的 target_date 语义是“自然日”，而不是“最新交易日”。
         # 在周末/节假日/非交易日运行时，即使数据库已有最新交易日数据，这里也会返回 False。
         # 该行为目前保留（按需求不改逻辑）。
-        
+        cache_code = _normalize_daily_cache_code(code)
+
         with self.get_session() as session:
             result = session.execute(
                 select(StockDaily).where(
                     and_(
-                        StockDaily.code == code,
+                        StockDaily.code == cache_code,
                         StockDaily.date == target_date
                     )
                 )
@@ -1212,10 +1326,11 @@ class DatabaseManager:
         Returns:
             StockDaily 对象列表（按日期降序）
         """
+        cache_code = _normalize_daily_cache_code(code)
         with self.get_session() as session:
             results = session.execute(
                 select(StockDaily)
-                .where(StockDaily.code == code)
+                .where(StockDaily.code == cache_code)
                 .order_by(desc(StockDaily.date))
                 .limit(days)
             ).scalars().all()
@@ -1872,15 +1987,16 @@ class DatabaseManager:
             start_date: 开始日期
             end_date: 结束日期
             
-        Returns:
+            Returns:
             StockDaily 对象列表
         """
+        cache_code = _normalize_daily_cache_code(code)
         with self.get_session() as session:
             results = session.execute(
                 select(StockDaily)
                 .where(
                     and_(
-                        StockDaily.code == code,
+                        StockDaily.code == cache_code,
                         StockDaily.date >= start_date,
                         StockDaily.date <= end_date
                     )
@@ -1916,12 +2032,13 @@ class DatabaseManager:
             logger.warning(f"保存数据为空，跳过 {code}")
             return 0
 
+        cache_code = _normalize_daily_cache_code(code)
         now = datetime.now()
         records_by_date: Dict[date, Dict[str, Any]] = {}
         for row in df.to_dict(orient='records'):
             row_date = self._normalize_daily_date(row.get('date'))
             records_by_date[row_date] = {
-                'code': code,
+                'code': cache_code,
                 'date': row_date,
                 'open': self._normalize_sql_value(row.get('open')),
                 'high': self._normalize_sql_value(row.get('high')),
@@ -1963,7 +2080,7 @@ class DatabaseManager:
                         session.execute(
                             select(StockDaily.date).where(
                                 and_(
-                                    StockDaily.code == code,
+                                    StockDaily.code == cache_code,
                                     StockDaily.date.in_(chunk_dates),
                                 )
                             )
@@ -2003,7 +2120,7 @@ class DatabaseManager:
                     for row in session.execute(
                         select(StockDaily).where(
                             and_(
-                                StockDaily.code == code,
+                                StockDaily.code == cache_code,
                                 StockDaily.date.in_(batch_dates),
                             )
                         )
@@ -2033,13 +2150,13 @@ class DatabaseManager:
 
         try:
             saved_count = self._run_write_transaction(
-                f"save_daily_data[{code}]",
+                f"save_daily_data[{cache_code}]",
                 _write,
             )
-            logger.info(f"保存 {code} 数据成功，新增 {saved_count} 条")
+            logger.info(f"保存 {cache_code} 数据成功，新增 {saved_count} 条")
             return saved_count
         except Exception as e:
-            logger.error(f"保存 {code} 数据失败: {e}")
+            logger.error(f"保存 {cache_code} 数据失败: {e}")
             raise
     
     def get_analysis_context(
@@ -2066,8 +2183,10 @@ class DatabaseManager:
         # 因此若未来需要支持“按历史某天复盘/重算”的可解释性，这里需要调整。
         # 该行为目前保留（按需求不改逻辑）。
         
+        cache_code = _normalize_daily_cache_code(code)
+
         # 获取最近2天数据
-        recent_data = self.get_latest_data(code, days=2)
+        recent_data = self.get_latest_data(cache_code, days=2)
         
         if not recent_data:
             logger.warning(f"未找到 {code} 的数据")
@@ -2077,7 +2196,7 @@ class DatabaseManager:
         yesterday_data = recent_data[1] if len(recent_data) > 1 else None
         
         context = {
-            'code': code,
+            'code': cache_code,
             'date': today_data.date.isoformat(),
             'today': today_data.to_dict(),
         }

@@ -117,6 +117,7 @@ class BaseAgent(ABC):
                 max_steps=self.max_steps,
                 progress_callback=progress_callback,
                 max_wall_clock_seconds=timeout_seconds,
+                tool_result_cache=ctx.meta.setdefault("tool_result_cache", {}),
             )
 
             result.tokens_used = loop_result.total_tokens

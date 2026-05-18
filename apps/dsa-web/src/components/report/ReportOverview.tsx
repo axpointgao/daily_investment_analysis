@@ -79,6 +79,14 @@ const formatChangePct = (changePct: number | undefined): string => {
   return `${sign}${changePct.toFixed(2)}%`;
 };
 
+const formatPriceLabel = (priceDate?: string): string => {
+  const text = (priceDate || '').trim();
+  if (!text) {
+    return '收盘价';
+  }
+  return `收盘价 · ${text.slice(0, 10)}`;
+};
+
 const getBoardStatusLabel = (status: BoardStatus, text: ReturnType<typeof getReportText>): string => {
   if (status === 'leading') {
     return text.leadingBoard;
@@ -134,7 +142,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-xs text-muted-foreground">收盘价</p>
+                <p className="text-xs text-muted-foreground">{formatPriceLabel(meta.priceDate)}</p>
                 <p className={`mt-1 text-xl font-bold font-mono text-foreground ${getChangeToneClass(meta.changePct)}`}>
                   {meta.currentPrice != null ? meta.currentPrice.toFixed(2) : '--'}
                 </p>

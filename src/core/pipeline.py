@@ -456,9 +456,10 @@ class StockAnalysisPipeline:
             if result:
                 self._emit_progress(94, f"{stock_name}：正在校验并整理分析结果")
                 result.query_id = query_id
-                latest_close, latest_change = self._get_latest_close_from_context(enhanced_context)
+                latest_close, latest_change, price_date = self._get_latest_close_from_context(enhanced_context)
                 result.current_price = latest_close
                 result.change_pct = latest_change
+                result.price_date = price_date
 
             # Step 7.6: chip_structure fallback (Issue #589)
             if result and chip_data:
@@ -677,15 +678,15 @@ class StockAnalysisPipeline:
                 "fundamental_context": fundamental_context,
             }
 
-            latest_close, latest_change = self._get_latest_close_from_context(
-                self.db.get_analysis_context(code) or {}
-            )
+            latest_context = self.db.get_analysis_context(code) or {}
+            latest_close, latest_change, price_date = self._get_latest_close_from_context(latest_context)
             if latest_close is not None or latest_change is not None:
                 initial_context["latest_close_quote"] = {
                     "code": code,
                     "price": latest_close,
                     "close": latest_close,
                     "change_pct": latest_change,
+                    "date": price_date,
                     "source": "db:latest_close",
                     "note": "Latest trading-day close data; no intraday realtime quote is used.",
                 }
@@ -734,6 +735,9 @@ class StockAnalysisPipeline:
             )
             if result:
                 result.query_id = query_id
+                result.current_price = latest_close
+                result.change_pct = latest_change
+                result.price_date = price_date
             # Agent weak integrity: placeholder fill only, no LLM retry
             if result and getattr(self.config, "report_integrity_enabled", False):
                 from src.analyzer import check_content_integrity, apply_placeholder_fill
@@ -970,11 +974,13 @@ class StockAnalysisPipeline:
             return "巨量"
 
     @staticmethod
-    def _get_latest_close_from_context(context: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
-        """Return latest close price and pct change from the stored daily context."""
+    def _get_latest_close_from_context(
+        context: Dict[str, Any]
+    ) -> Tuple[Optional[float], Optional[float], Optional[str]]:
+        """Return latest close price, pct change, and trading date from stored daily context."""
         today = context.get("today") if isinstance(context, dict) else None
         if not isinstance(today, dict):
-            return None, None
+            return None, None, None
 
         def _safe_float(value: Any) -> Optional[float]:
             if value is None:
@@ -984,7 +990,67 @@ class StockAnalysisPipeline:
             except (TypeError, ValueError):
                 return None
 
-        return _safe_float(today.get("close")), _safe_float(today.get("pct_chg"))
+        price_date = today.get("date") or context.get("date")
+        return (
+            _safe_float(today.get("close")),
+            _safe_float(today.get("pct_chg")),
+            str(price_date) if price_date else None,
+        )
+
+    def _get_latest_daily_bar_date(self, code: str, target_date: date) -> Optional[date]:
+        """Return the latest persisted K-line date up to target_date."""
+        try:
+            bars = self.db.get_data_range(code, target_date - timedelta(days=10), target_date)
+        except Exception as exc:
+            logger.warning("[%s] 检查日线数据新鲜度失败: %s", code, exc)
+            return None
+
+        latest: Optional[date] = None
+        for bar in bars or []:
+            raw_date = getattr(bar, "date", None)
+            if isinstance(raw_date, datetime):
+                bar_date = raw_date.date()
+            elif isinstance(raw_date, date):
+                bar_date = raw_date
+            elif isinstance(raw_date, str):
+                try:
+                    bar_date = datetime.fromisoformat(raw_date[:10]).date()
+                except ValueError:
+                    continue
+            else:
+                continue
+
+            if latest is None or bar_date > latest:
+                latest = bar_date
+
+        return latest
+
+    @staticmethod
+    def _resolve_min_acceptable_close_date(
+        code: str,
+        target_date: date,
+        current_time: Optional[datetime] = None,
+    ) -> date:
+        """Allow analysis with previous trading-day close, while preferring target-date close."""
+        market = get_market_for_stock(normalize_stock_code(code))
+        market_now = get_market_now(market, current_time=current_time)
+
+        if not is_market_open(market, market_now.date()):
+            return target_date
+
+        effective_date = get_effective_trading_date(market, current_time=market_now)
+        if effective_date < market_now.date():
+            return effective_date
+
+        previous_check_time = datetime.combine(
+            target_date - timedelta(days=1),
+            market_now.timetz().replace(tzinfo=None),
+        )
+        previous_effective = get_effective_trading_date(
+            market,
+            current_time=previous_check_time,
+        )
+        return previous_effective if previous_effective < target_date else target_date
 
     @staticmethod
     def _compute_ma_status(close: float, ma5: float, ma10: float, ma20: float) -> str:
@@ -1183,6 +1249,7 @@ class StockAnalysisPipeline:
         report_type: ReportType = ReportType.SIMPLE,
         analysis_query_id: Optional[str] = None,
         current_time: Optional[datetime] = None,
+        force_refresh: bool = False,
     ) -> Optional[AnalysisResult]:
         """
         处理单只股票的完整流程
@@ -1202,6 +1269,7 @@ class StockAnalysisPipeline:
             single_stock_notify: 是否启用单股推送模式（每分析完一只立即推送）
             report_type: 报告类型枚举（从配置读取，Issue #119）
             current_time: 本轮运行冻结的参考时间，用于统一断点续传目标交易日判断
+            force_refresh: 是否强制刷新日线数据
 
         Returns:
             AnalysisResult 或 None
@@ -1215,14 +1283,50 @@ class StockAnalysisPipeline:
             self._emit_progress(12, f"{code}：正在准备分析任务")
             # Step 1: 获取并保存数据
             success, error = self.fetch_and_save_stock_data(
-                code, current_time=current_time
+                code,
+                force_refresh=force_refresh,
+                current_time=current_time,
             )
             
             if not success:
                 logger.warning(f"[{code}] 数据获取失败: {error}")
-                # 即使获取失败，也尝试用已有数据分析
             else:
                 self._emit_progress(16, f"{code}：行情数据准备完成")
+
+            min_close_date = self._resolve_min_acceptable_close_date(
+                code,
+                frozen_td,
+                current_time=current_time,
+            )
+            latest_bar_date = self._get_latest_daily_bar_date(code, frozen_td)
+            if latest_bar_date is None or latest_bar_date < min_close_date:
+                latest_desc = latest_bar_date.isoformat() if latest_bar_date else "无可用日线"
+                message = (
+                    f"{code} 缺少可用于分析的收盘日线数据（至少需要 {min_close_date.isoformat()}），"
+                    f"当前最新为 {latest_desc}；为避免使用过期价格生成分析，已停止本次问股"
+                )
+                if error:
+                    message = f"{message}（数据刷新错误：{error}）"
+                logger.warning("[%s] %s", code, message)
+            elif latest_bar_date < frozen_td:
+                logger.info(
+                    "[%s] 目标交易日 %s 收盘价尚不可用，使用上一可用交易日 %s 收盘价继续分析",
+                    code,
+                    frozen_td.isoformat(),
+                    latest_bar_date.isoformat(),
+                )
+
+            if latest_bar_date is None or latest_bar_date < min_close_date:
+                return AnalysisResult(
+                    code=code,
+                    name=code,
+                    sentiment_score=0,
+                    trend_prediction="未知",
+                    operation_advice="暂停分析",
+                    analysis_summary=message,
+                    success=False,
+                    error_message=message,
+                )
             
             # Step 2: AI 分析
             if skip_analysis:

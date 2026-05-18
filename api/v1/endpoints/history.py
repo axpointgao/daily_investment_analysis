@@ -450,7 +450,7 @@ def get_history_detail(
         # 从 raw_result / context_snapshot 中提取价格信息。
         # 注意：使用 `is None` 而非 `or`，避免把 0.0（平盘）误判为缺失值；
         # 同时不混用 `change_60d`（60 日累计涨跌幅）作为日内 change_pct 的兜底。
-        current_price, change_pct = extract_price_fields(raw_result, context_snapshot)
+        current_price, change_pct, price_date = extract_price_fields(raw_result, context_snapshot)
         report_language = normalize_report_language(
             result.get("report_language")
             or raw_result.get("report_language")
@@ -477,6 +477,7 @@ def get_history_detail(
             created_at=result.get("created_at"),
             current_price=current_price,
             change_pct=change_pct,
+            price_date=price_date,
             model_used=normalize_model_used(result.get("model_used"))
         )
         

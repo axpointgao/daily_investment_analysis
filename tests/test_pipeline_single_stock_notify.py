@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 import unittest
+from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -126,6 +127,7 @@ class TestPipelineSingleStockNotify(unittest.TestCase):
     def test_process_single_stock_direct_path_keeps_notify_compatibility(self):
         pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
         pipeline.fetch_and_save_stock_data = MagicMock(return_value=(True, None))
+        pipeline._get_latest_daily_bar_date = MagicMock(return_value=date.today())
         pipeline.analyze_stock = MagicMock(return_value=_make_result("600519"))
         pipeline.notifier = _TrackingNotifier()
 
@@ -138,6 +140,8 @@ class TestPipelineSingleStockNotify(unittest.TestCase):
         )
 
         self.assertIsNotNone(result)
+        pipeline.fetch_and_save_stock_data.assert_called_once()
+        self.assertFalse(pipeline.fetch_and_save_stock_data.call_args.kwargs["force_refresh"])
         pipeline.notifier.generate_brief_report.assert_called_once_with([result])
         pipeline.notifier.send.assert_called_once_with(
             "brief:600519",
@@ -147,6 +151,7 @@ class TestPipelineSingleStockNotify(unittest.TestCase):
     def test_process_single_stock_direct_path_does_not_notify_when_failed(self):
         pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
         pipeline.fetch_and_save_stock_data = MagicMock(return_value=(True, None))
+        pipeline._get_latest_daily_bar_date = MagicMock(return_value=date.today())
         pipeline.analyze_stock = MagicMock(return_value=_make_result("600519", success=False))
         pipeline.notifier = _TrackingNotifier()
 
@@ -162,6 +167,85 @@ class TestPipelineSingleStockNotify(unittest.TestCase):
         self.assertFalse(result.success)
         pipeline.notifier.generate_brief_report.assert_not_called()
         pipeline.notifier.send.assert_not_called()
+
+    def test_process_single_stock_passes_force_refresh_to_data_prefetch(self):
+        pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
+        pipeline.fetch_and_save_stock_data = MagicMock(return_value=(True, None))
+        pipeline._get_latest_daily_bar_date = MagicMock(return_value=date(2026, 5, 15))
+        pipeline.analyze_stock = MagicMock(return_value=_make_result("600519"))
+        pipeline.notifier = _TrackingNotifier()
+
+        result = pipeline.process_single_stock(
+            code="600519",
+            skip_analysis=False,
+            single_stock_notify=False,
+            report_type=ReportType.BRIEF,
+            analysis_query_id="query-1",
+            current_time=datetime(2026, 5, 15, 16, 5),
+            force_refresh=True,
+        )
+
+        self.assertIsNotNone(result)
+        pipeline.fetch_and_save_stock_data.assert_called_once()
+        self.assertTrue(pipeline.fetch_and_save_stock_data.call_args.kwargs["force_refresh"])
+
+    def test_process_single_stock_allows_previous_trading_day_close(self):
+        pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
+        pipeline.fetch_and_save_stock_data = MagicMock(return_value=(True, None))
+        pipeline._get_latest_daily_bar_date = MagicMock(return_value=date(2026, 5, 14))
+        pipeline.analyze_stock = MagicMock(return_value=_make_result("600519"))
+        pipeline.notifier = _TrackingNotifier()
+
+        result = pipeline.process_single_stock(
+            code="600519",
+            skip_analysis=False,
+            single_stock_notify=True,
+            report_type=ReportType.BRIEF,
+            analysis_query_id="query-1",
+            current_time=datetime(2026, 5, 15, 16, 5),
+        )
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.success)
+        pipeline.analyze_stock.assert_called_once()
+
+    def test_process_single_stock_stops_when_close_bar_is_older_than_previous_trading_day(self):
+        pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
+        pipeline.fetch_and_save_stock_data = MagicMock(return_value=(True, None))
+        pipeline._get_latest_daily_bar_date = MagicMock(return_value=date(2026, 5, 13))
+        pipeline.analyze_stock = MagicMock(return_value=_make_result("600519"))
+        pipeline.notifier = _TrackingNotifier()
+
+        result = pipeline.process_single_stock(
+            code="600519",
+            skip_analysis=False,
+            single_stock_notify=True,
+            report_type=ReportType.BRIEF,
+            analysis_query_id="query-1",
+            current_time=datetime(2026, 5, 15, 16, 5),
+        )
+
+        self.assertIsNotNone(result)
+        self.assertFalse(result.success)
+        self.assertIn("至少需要 2026-05-14", result.error_message)
+        pipeline.analyze_stock.assert_not_called()
+        pipeline.notifier.send.assert_not_called()
+
+    def test_latest_daily_bar_date_reads_normalized_cache_key(self):
+        pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
+        pipeline.db = MagicMock()
+        pipeline.db.get_data_range.return_value = [
+            SimpleNamespace(date=date(2026, 5, 18)),
+        ]
+
+        latest = pipeline._get_latest_daily_bar_date("300274.SZ", date(2026, 5, 18))
+
+        self.assertEqual(latest, date(2026, 5, 18))
+        pipeline.db.get_data_range.assert_called_once_with(
+            "300274.SZ",
+            date(2026, 5, 8),
+            date(2026, 5, 18),
+        )
 
 
 if __name__ == "__main__":

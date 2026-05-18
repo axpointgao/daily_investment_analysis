@@ -148,6 +148,7 @@ class ReportMeta(BaseModel):
     created_at: Optional[str] = Field(None, description="创建时间")
     current_price: Optional[float] = Field(None, description="分析时股价")
     change_pct: Optional[float] = Field(None, description="分析时涨跌幅(%)")
+    price_date: Optional[str] = Field(None, description="分析价格对应的交易日")
     model_used: Optional[str] = Field(None, description="分析使用的 LLM 模型")
 
 

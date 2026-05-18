@@ -96,6 +96,73 @@ class GetLatestDataTestCase(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].code, "600519")
 
+    def test_daily_cache_uses_normalized_code_for_suffix_variants(self) -> None:
+        """带交易所后缀和纯代码应命中同一份日线缓存。"""
+        trade_date = date(2026, 5, 18)
+        self.db.save_daily_data(
+            pd.DataFrame(
+                [
+                    {
+                        "date": trade_date,
+                        "open": 150.0,
+                        "high": 153.0,
+                        "low": 149.0,
+                        "close": 152.25,
+                        "volume": 1000000,
+                        "amount": 152250000,
+                        "pct_chg": -0.46,
+                    }
+                ]
+            ),
+            "300274.SZ",
+            data_source="suffix",
+        )
+
+        self.assertTrue(self.db.has_today_data("300274", trade_date))
+        self.assertTrue(self.db.has_today_data("300274.SZ", trade_date))
+
+        rows = self.db.get_data_range("300274", trade_date, trade_date)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].code, "300274")
+        self.assertAlmostEqual(rows[0].close, 152.25)
+
+        context = self.db.get_analysis_context("300274.SZ", target_date=trade_date)
+        self.assertIsNotNone(context)
+        self.assertEqual(context["code"], "300274")
+        self.assertEqual(context["today"]["date"], trade_date)
+        self.assertAlmostEqual(context["today"]["close"], 152.25)
+
+    def test_daily_cache_refresh_overwrites_same_normalized_code(self) -> None:
+        """刷新纯代码数据应覆盖之前带后缀写入的同日缓存。"""
+        trade_date = date(2026, 5, 18)
+        stale = pd.DataFrame(
+            [
+                {
+                    "date": trade_date,
+                    "open": 130.0,
+                    "high": 136.0,
+                    "low": 129.0,
+                    "close": 135.03,
+                    "volume": 900000,
+                    "amount": 121527000,
+                    "pct_chg": 0.2,
+                }
+            ]
+        )
+        fresh = stale.copy()
+        fresh.loc[0, "close"] = 152.25
+        fresh.loc[0, "pct_chg"] = -0.46
+
+        self.assertEqual(self.db.save_daily_data(stale, "300274.SZ", data_source="stale"), 1)
+        self.assertEqual(self.db.save_daily_data(fresh, "300274", data_source="fresh"), 0)
+
+        rows = self.db.get_data_range("300274.SZ", trade_date, trade_date)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].code, "300274")
+        self.assertAlmostEqual(rows[0].close, 152.25)
+        self.assertAlmostEqual(rows[0].pct_chg, -0.46)
+        self.assertEqual(rows[0].data_source, "fresh")
+
     def test_save_daily_data_batch_upsert_updates_existing_rows_and_keeps_insert_count(self) -> None:
         base_date = date(2026, 1, 2)
         first_batch = pd.DataFrame(

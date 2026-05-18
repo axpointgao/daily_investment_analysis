@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 > For user-friendly release highlights, see the [GitHub Releases](https://github.com/ZhuLinsen/daily_stock_analysis/releases) page.
 
 ## [Unreleased]
+- [修复] 问股分析统一日线缓存股票代码并优先使用目标交易日收盘价，目标日收盘价尚不可用时允许退到上一交易日，并在报告价格区展示收盘价对应日期，避免过期缓存价格误导分析。
+- [改进] 问股 Agent 在同一次分析内跨阶段复用重复工具结果，并让日线数据源按最新交易日期择优，减少重复请求和旧行情源误用而不削减分析上下文。
 - [改进] Web 问股策略选择 hover 改为浮层展示，并补充小白版策略说明，避免说明文案挤动多选项。
 - [改进] 云端问股降低综合情报搜索内存峰值，默认关闭 SerpAPI 正文补抓并限制 Agent 工具并发，同时保留较完整情报维度和每维结果数。
 - [改进] Web 持仓页刷新在线价格改为后台任务并轮询状态，避免长请求被前端超时切断。

@@ -6,13 +6,14 @@ from __future__ import annotations
 from typing import Any, Optional, Tuple
 
 
-def extract_price_fields(raw_result: dict, context_snapshot: Optional[dict] = None) -> Tuple[Any, Any]:
-    """Extract price/change fields from new close-price records and legacy realtime snapshots."""
+def extract_price_fields(raw_result: dict, context_snapshot: Optional[dict] = None) -> Tuple[Any, Any, Any]:
+    """Extract price/change/date fields from close-price records and legacy realtime snapshots."""
     current_price = raw_result.get("current_price") if isinstance(raw_result, dict) else None
     change_pct = raw_result.get("change_pct") if isinstance(raw_result, dict) else None
+    price_date = raw_result.get("price_date") if isinstance(raw_result, dict) else None
 
     if not isinstance(context_snapshot, dict):
-        return current_price, change_pct
+        return current_price, change_pct, price_date
 
     enhanced_context = context_snapshot.get("enhanced_context")
     if not isinstance(enhanced_context, dict):
@@ -24,6 +25,8 @@ def extract_price_fields(raw_result: dict, context_snapshot: Optional[dict] = No
             current_price = today.get("close")
         if change_pct is None:
             change_pct = today.get("pct_chg")
+        if price_date is None:
+            price_date = today.get("date")
 
     latest_close_quote = context_snapshot.get("latest_close_quote")
     if not isinstance(latest_close_quote, dict):
@@ -37,6 +40,8 @@ def extract_price_fields(raw_result: dict, context_snapshot: Optional[dict] = No
             change_pct = latest_close_quote.get("change_pct")
         if change_pct is None:
             change_pct = latest_close_quote.get("pct_chg")
+        if price_date is None:
+            price_date = latest_close_quote.get("date")
 
     realtime = enhanced_context.get("realtime")
     if isinstance(realtime, dict):
@@ -54,4 +59,4 @@ def extract_price_fields(raw_result: dict, context_snapshot: Optional[dict] = No
         if change_pct is None:
             change_pct = realtime_quote_raw.get("pct_chg")
 
-    return current_price, change_pct
+    return current_price, change_pct, price_date

@@ -406,6 +406,7 @@ def run_agent_loop(
     thinking_labels: Optional[Dict[str, str]] = None,
     max_wall_clock_seconds: Optional[float] = None,
     tool_call_timeout_seconds: Optional[float] = None,
+    tool_result_cache: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> RunLoopResult:
     """Execute the ReAct LLM ↔ tool loop.
 
@@ -423,6 +424,7 @@ def run_agent_loop(
         thinking_labels: Override map of tool_name → friendly label.
         max_wall_clock_seconds: Optional overall timeout budget for the loop.
         tool_call_timeout_seconds: Optional timeout for one parallel tool batch.
+        tool_result_cache: Optional per-request cache shared by multiple agent loops.
 
     Returns:
         A :class:`RunLoopResult` with the final content, stats, and the
@@ -433,7 +435,9 @@ def run_agent_loop(
 
     start_time = time.time()
     tool_calls_log: List[Dict[str, Any]] = []
-    tool_result_cache: Dict[str, Dict[str, Any]] = {}
+    effective_tool_result_cache: Dict[str, Dict[str, Any]] = (
+        tool_result_cache if tool_result_cache is not None else {}
+    )
     total_tokens = 0
     provider_used = ""
     models_used: List[str] = []
@@ -567,7 +571,7 @@ def run_agent_loop(
                 step + 1,
                 progress_callback,
                 tool_calls_log,
-                tool_result_cache,
+                effective_tool_result_cache,
                 tool_wait_timeout_seconds=effective_tool_timeout,
             )
 
