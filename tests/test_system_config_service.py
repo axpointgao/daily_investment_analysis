@@ -59,6 +59,13 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         self.assertFalse(items["GEMINI_API_KEY"]["is_masked"])
         self.assertTrue(items["GEMINI_API_KEY"]["raw_value_exists"])
 
+    def test_get_config_uses_schema_default_for_missing_non_sensitive_values(self) -> None:
+        payload = self.service.get_config(include_schema=True)
+        items = {item["key"]: item for item in payload["items"]}
+
+        self.assertEqual(items["MARKET_REVIEW_ENABLED"]["value"], "true")
+        self.assertFalse(items["MARKET_REVIEW_ENABLED"]["raw_value_exists"])
+
     def test_get_setup_status_reports_required_gaps_for_empty_config(self) -> None:
         self._rewrite_env("")
 

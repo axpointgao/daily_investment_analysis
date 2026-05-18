@@ -177,10 +177,19 @@ class SystemConfigService:
         for key in all_keys:
             raw_value = config_map.get(key, "")
             field_schema = schema_by_key[key]
+            raw_value_exists = key in config_map
+            effective_value = raw_value
+            default_value = field_schema.get("default_value")
+            if (
+                not raw_value_exists
+                and default_value is not None
+                and not field_schema.get("is_sensitive", False)
+            ):
+                effective_value = str(default_value)
             item: Dict[str, Any] = {
                 "key": key,
-                "value": raw_value,
-                "raw_value_exists": bool(raw_value),
+                "value": effective_value,
+                "raw_value_exists": raw_value_exists,
                 "is_masked": False,
             }
             if include_schema:
