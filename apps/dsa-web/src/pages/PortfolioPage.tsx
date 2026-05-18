@@ -350,30 +350,34 @@ function getChinaPnlColorClass(value: number | undefined | null, hasValue: boole
   return getChangeToneClass(value);
 }
 
+function labelWithDate(label: string, date?: string | null): string {
+  return date ? `${label} · ${date}` : label;
+}
+
 function getPositionPriceLabel(row: PortfolioPositionItem): string {
   if (row.priceSource === 'manual_price') {
-    if (row.market === 'bank') return row.priceDate ? `价值更新 · ${row.priceDate}` : '价值更新';
-    if (row.market === 'advisory') return row.priceDate ? `价值更新 · ${row.priceDate}` : '价值更新';
-    return row.market === 'fund' ? '手工净值' : '手工价格';
+    if (row.market === 'bank' || row.market === 'advisory') return labelWithDate('价值更新', row.priceDate);
+    return labelWithDate(row.market === 'fund' ? '手工净值' : '手工价格', row.priceDate);
   }
-  if (row.priceSource === 'advisory_value_update') return row.priceDate ? `价值更新 · ${row.priceDate}` : '价值更新';
-  if (row.priceSource === 'advisory_net_invested_estimate') return '流水金额';
-  if (row.priceSource === 'bank_value_update') return row.priceDate ? `价值更新 · ${row.priceDate}` : '价值更新';
-  if (row.priceSource === 'bank_net_invested_estimate') return '流水金额';
-  if (row.priceSource === 'bank_cost_nav') return row.priceDate ? `成本净值 · ${row.priceDate}` : '成本净值';
-  if (row.priceSource === 'bank_wealth_nav') return row.priceDate ? `理财净值 · ${row.priceDate}` : '理财净值';
-  if (row.priceSource === 'insurance_value_update') return row.priceDate ? `保单价值 · ${row.priceDate}` : '保单价值';
+  if (row.priceSource === 'advisory_value_update') return labelWithDate('价值更新', row.priceDate);
+  if (row.priceSource === 'advisory_net_invested_estimate') return '净投入暂估';
+  if (row.priceSource === 'advisory_nav') return labelWithDate('投顾净值', row.priceDate);
+  if (row.priceSource === 'bank_value_update') return labelWithDate('价值更新', row.priceDate);
+  if (row.priceSource === 'bank_net_invested_estimate') return '净投入暂估';
+  if (row.priceSource === 'bank_cost_nav') return labelWithDate('成本净值', row.priceDate);
+  if (row.priceSource === 'bank_wealth_nav') return labelWithDate('理财净值', row.priceDate);
+  if (row.priceSource === 'insurance_value_update') return labelWithDate('保单价值', row.priceDate);
   if (row.priceSource === 'insurance_no_value') return '待录入价值';
   if (row.priceSource === 'insurance_net_invested') return '净投入暂估';
-  if (row.priceSource === 'fund_nav') return row.priceDate ? `基金净值 · ${row.priceDate}` : '基金净值';
-  if (row.priceSource === 'crypto_price') return row.priceProvider ? `数字货币价格 · ${row.priceProvider}` : '数字货币价格';
+  if (row.priceSource === 'fund_nav') return labelWithDate('基金净值', row.priceDate);
+  if (row.priceSource === 'crypto_price') return labelWithDate('实时价', row.priceDate);
   if (row.priceSource === 'manual_amount') return '手工金额';
   if (!hasPositionPrice(row)) return '缺价';
   if (row.priceSource === 'realtime_quote') {
-    return row.priceProvider ? `实时价 · ${row.priceProvider}` : '实时价';
+    return labelWithDate('实时价', row.priceDate);
   }
   if (row.priceSource === 'history_close') {
-    return row.priceStale && row.priceDate ? `收盘价 · ${row.priceDate}` : '收盘价';
+    return labelWithDate('收盘价', row.priceDate);
   }
   return row.priceSource || '未知来源';
 }

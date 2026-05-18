@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 > For user-friendly release highlights, see the [GitHub Releases](https://github.com/ZhuLinsen/daily_stock_analysis/releases) page.
 
 ## [Unreleased]
+- [改进] Web 持仓页统一价格与估值标签展示，优先显示价格日期并隐藏数据源名称，补齐投顾净值、手工价格等场景的日期口径。
 - [修复] 持仓在线刷新当日股票价格时优先请求实时行情，失败后才退回历史收盘价，避免刷新后仍显示上一交易日价格。
 - [修复] 系统设置页对未写入 `.env` 的非敏感配置显示 schema 默认值，避免“启用大盘复盘”等默认开启项被误显示为未启用。
 - [修复] 问股分析统一日线缓存股票代码并优先使用目标交易日收盘价，目标日收盘价尚不可用时允许退到上一交易日，并在报告价格区展示收盘价对应日期，避免过期缓存价格误导分析。
