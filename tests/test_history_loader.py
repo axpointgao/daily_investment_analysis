@@ -2,11 +2,17 @@
 """Unit tests for src.services.history_loader (Issue #1066)."""
 from __future__ import annotations
 
+import sys
 import unittest
 from datetime import date
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 class HistoryLoaderTestCase(unittest.TestCase):
@@ -131,7 +137,7 @@ class HistoryLoaderTestCase(unittest.TestCase):
         df, source = load_history_df("SH600519", days=30, target_date=date(2026, 4, 18))
 
         self.assertEqual(source, "db_cache")
-        self.assertEqual(mock_db.get_data_range.call_count, 2)
+        self.assertEqual(mock_db.get_data_range.call_count, 1)
 
     # ------------------------------------------------------------------
     # Both paths fail gracefully
@@ -153,6 +159,30 @@ class HistoryLoaderTestCase(unittest.TestCase):
 
         self.assertIsNone(df)
         self.assertEqual(source, "none")
+
+    @patch("src.services.market_history_store.load_market_history_df")
+    @patch("src.storage.get_db")
+    def test_uses_market_history_store_before_network_fallback(self, mock_get_db, mock_load_market_history_df):
+        from src.services.history_loader import load_history_df
+
+        mock_db = MagicMock()
+        mock_db.get_data_range.return_value = []
+        mock_get_db.return_value = mock_db
+
+        df = pd.DataFrame(
+            [
+                {"date": date(2026, 4, 1 + idx), "close": 10 + idx * 0.1}
+                for idx in range(30)
+            ]
+        )
+        mock_load_market_history_df.return_value = (df, "market_history_qfq")
+
+        result_df, source = load_history_df("600519", days=30, target_date=date(2026, 4, 18))
+
+        self.assertIsNotNone(result_df)
+        self.assertEqual(source, "market_history_qfq")
+        mock_load_market_history_df.assert_called_once()
+        self.assertEqual(mock_db.get_data_range.call_count, 1)
 
 
 if __name__ == "__main__":

@@ -895,6 +895,43 @@ PUSHOVER_API_TOKEN=your_api_token
 2. 将 `MAX_WORKERS=1` 降低并发
 3. 若已配置 Tushare，可优先使用 Tushare 数据源
 
+### 大历史行情库
+
+如果你已经准备了本地或云端的全量历史 CSV，可以把它们导入独立的 DuckDB 历史库，用于策略选股、低频量化分析和回测。它不会替代现有 SQLite 业务库，也不会影响不配置时的默认运行。
+
+| 变量 | 默认值 | 说明 |
+|------|-------|------|
+| `MARKET_HISTORY_ENABLED` | `false` | 是否启用 DuckDB 历史行情库 |
+| `MARKET_HISTORY_ROOT` | `./data/market_history` | 历史行情根目录 |
+| `MARKET_HISTORY_DUCKDB_PATH` | `./data/market_history/market_history.duckdb` | DuckDB 文件路径 |
+| `MARKET_HISTORY_DEFAULT_ADJUSTMENT` | `qfq` | 默认日线口径，`qfq` 适合回测/技术分析，`raw` 适合真实价格展示 |
+
+推荐目录结构：
+
+- `data/market_history/_archives/raw/`：每天一表，不复权压缩包
+- `data/market_history/_archives/qfq/`：每天一表，前复权压缩包
+- `data/market_history/_archives/by_stock/`：每股一表，前复权压缩包
+- `data/market_history/daily/raw/`：解包后的不复权 CSV
+- `data/market_history/daily/qfq/`：解包后的前复权 CSV
+- `data/market_history/by_stock/qfq/`：解包后的每股一表 CSV
+
+导入脚本：
+
+```bash
+python scripts/import_market_history.py --root ./data/market_history status
+python scripts/import_market_history.py --root ./data/market_history extract --dataset all
+python scripts/import_market_history.py --root ./data/market_history import-daily --adjustment all
+```
+
+当前实现会优先把 `qfq` 历史库用于低频分析和回测，再根据需要保留 `raw` 口径做真实价格展示；`每股一表` 只作为单股长历史补充，不会和 `每天一表` 混用。
+
+策略选股页的初筛只保留两条路径：
+
+- 本地选股：系统先解析策略语句，能由 DuckDB 历史库完整执行时直接输出候选股。
+- 导入候选：遇到买入信号、卖出信号、技术形态等问财专有语义时，页面会列出本地不支持的条件，提示先在问财客户端运行策略并导出 Excel，再导入候选股。
+
+初筛阶段不会自动调用问财在线选股，也不会自动做增强分析或回测。候选股导入后会进入同一候选列表，后续由用户手动选择候选股，再执行增强分析或本地回测。
+
 ---
 
 ## 高级功能

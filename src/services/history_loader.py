@@ -159,7 +159,24 @@ def load_history_df(
     except Exception as e:
         logger.debug("load_history_df(%s): DB read failed: %s", stock_code, e)
 
-    # --- 2. Network fallback via singleton DataFetcherManager -------------
+    # --- 2. Large local history store (optional DuckDB full-history layer) -
+    try:
+        from src.services.market_history_store import load_market_history_df
+
+        df, source = load_market_history_df(stock_code, start=start, end=end)
+        if df is not None and not df.empty:
+            required_records = max(min(days, _CACHE_MIN_RECORDS), 1)
+            latest_date = max((_coerce_bar_date(value) for value in df.get("date", [])), default=date.min)
+            if latest_date >= end and len(df) >= required_records:
+                logger.debug(
+                    "load_history_df(%s): %d bars from market history (requested %d)",
+                    stock_code, len(df), days,
+                )
+                return df, source
+    except Exception as e:
+        logger.debug("load_history_df(%s): market history read failed: %s", stock_code, e)
+
+    # --- 3. Network fallback via singleton DataFetcherManager -------------
     try:
         manager = _get_fetcher_manager()
         df, source = manager.get_daily_data(stock_code, days=days)

@@ -834,6 +834,12 @@ class Config:
     sqlite_write_retry_max: int = 3
     sqlite_write_retry_base_delay: float = 0.1
 
+    # === 大历史行情库配置 ===
+    market_history_enabled: bool = False
+    market_history_root: str = "./data/market_history"
+    market_history_duckdb_path: str = "./data/market_history/market_history.duckdb"
+    market_history_default_adjustment: str = "qfq"
+
     # 是否保存分析上下文快照（用于历史回溯）
     save_context_snapshot: bool = True
 
@@ -1596,6 +1602,15 @@ class Config:
                 0.1,
                 field_name='SQLITE_WRITE_RETRY_BASE_DELAY',
                 minimum=0.0,
+            ),
+            market_history_enabled=parse_env_bool(os.getenv('MARKET_HISTORY_ENABLED'), default=False),
+            market_history_root=os.getenv('MARKET_HISTORY_ROOT', './data/market_history'),
+            market_history_duckdb_path=os.getenv(
+                'MARKET_HISTORY_DUCKDB_PATH',
+                './data/market_history/market_history.duckdb',
+            ),
+            market_history_default_adjustment=(
+                os.getenv('MARKET_HISTORY_DEFAULT_ADJUSTMENT', 'qfq').strip().lower() or 'qfq'
             ),
             save_context_snapshot=os.getenv('SAVE_CONTEXT_SNAPSHOT', 'true').lower() == 'true',
             backtest_enabled=os.getenv('BACKTEST_ENABLED', 'true').lower() == 'true',

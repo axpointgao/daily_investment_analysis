@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BarChart3, BriefcaseBusiness, FileSearch, Home, LogOut, MessageSquareQuote, Settings2 } from 'lucide-react';
+import { BarChart3, BriefcaseBusiness, FileSearch, Home, LogOut, MessageSquareQuote, SearchCheck, Settings2 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAgentChatStore } from '../../stores/agentChatStore';
@@ -25,6 +25,7 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { key: 'home', label: '首页', to: '/', icon: Home, exact: true },
   { key: 'chat', label: '问股', to: '/chat', icon: MessageSquareQuote, badge: 'stock-completion' },
+  { key: 'screener', label: '选股', to: '/screener', icon: SearchCheck },
   { key: 'fund-chat', label: '诊基', to: '/fund-chat', icon: FileSearch, badge: 'fund-completion' },
   { key: 'portfolio', label: '持仓', to: '/portfolio', icon: BriefcaseBusiness },
   { key: 'backtest', label: '回测', to: '/backtest', icon: BarChart3 },
