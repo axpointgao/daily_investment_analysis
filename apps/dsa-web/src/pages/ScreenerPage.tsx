@@ -104,10 +104,27 @@ const CandidateTable: React.FC<{
 }> = ({ candidates, selectedCodes, onToggle, onToggleAll, allSelected }) => (
   <div className="overflow-hidden rounded-xl border bg-card">
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[1180px] text-sm">
+      <table className="w-full min-w-[1240px] table-fixed text-sm">
+        <colgroup>
+          <col className="w-11" />
+          <col className="w-[168px]" />
+          <col className="w-[88px]" />
+          <col className="w-[88px]" />
+          <col className="w-[78px]" />
+          <col className="w-[78px]" />
+          <col className="w-[88px]" />
+          <col className="w-[78px]" />
+          <col className="w-[70px]" />
+          <col className="w-[70px]" />
+          <col className="w-[92px]" />
+          <col className="w-[82px]" />
+          <col className="w-[92px]" />
+          <col className="w-[280px]" />
+          <col className="w-[76px]" />
+        </colgroup>
         <thead className="bg-muted/40 text-xs text-muted-foreground">
           <tr className="border-b">
-            <th className="w-12 px-3 py-2 text-left">
+            <th className="sticky left-0 z-30 w-11 bg-muted/40 px-2.5 py-2 text-left backdrop-blur-[1px]">
               <input
                 type="checkbox"
                 checked={allSelected}
@@ -116,20 +133,20 @@ const CandidateTable: React.FC<{
                 className="h-4 w-4 rounded border-border"
               />
             </th>
-            <th className="px-3 py-2 text-left font-medium">股票</th>
-            <th className="px-3 py-2 text-left font-medium">日期</th>
-            <th className="px-3 py-2 text-left font-medium">状态</th>
-            <th className="px-3 py-2 text-right font-medium">收盘价</th>
-            <th className="px-3 py-2 text-right font-medium">涨跌幅</th>
-            <th className="px-3 py-2 text-right font-medium">25日涨幅</th>
-            <th className="px-3 py-2 text-right font-medium">MA60</th>
-            <th className="px-3 py-2 text-right font-medium">PE</th>
-            <th className="px-3 py-2 text-right font-medium">PB</th>
-            <th className="px-3 py-2 text-right font-medium">成交额</th>
-            <th className="px-3 py-2 text-right font-medium">换手率</th>
-            <th className="px-3 py-2 text-right font-medium">总市值</th>
+            <th className="sticky left-11 z-30 whitespace-nowrap bg-muted/40 px-3 py-2 text-left font-medium backdrop-blur-[1px]">股票</th>
+            <th className="whitespace-nowrap px-3 py-2 text-left font-medium">日期</th>
+            <th className="whitespace-nowrap px-3 py-2 text-left font-medium">状态</th>
+            <th className="whitespace-nowrap px-3 py-2 text-right font-medium">收盘价</th>
+            <th className="whitespace-nowrap px-3 py-2 text-right font-medium">涨跌幅</th>
+            <th className="whitespace-nowrap px-3 py-2 text-right font-medium">25日涨幅</th>
+            <th className="whitespace-nowrap px-3 py-2 text-right font-medium">MA60</th>
+            <th className="whitespace-nowrap px-3 py-2 text-right font-medium">PE</th>
+            <th className="whitespace-nowrap px-3 py-2 text-right font-medium">PB</th>
+            <th className="whitespace-nowrap px-3 py-2 text-right font-medium">成交额</th>
+            <th className="whitespace-nowrap px-3 py-2 text-right font-medium">换手率</th>
+            <th className="whitespace-nowrap px-3 py-2 text-right font-medium">总市值</th>
             <th className="px-3 py-2 text-left font-medium">命中要点</th>
-            <th className="px-3 py-2 text-right font-medium">操作</th>
+            <th className="whitespace-nowrap px-3 py-2 text-right font-medium">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -137,8 +154,8 @@ const CandidateTable: React.FC<{
             const chatUrl = `/chat?stock=${encodeURIComponent(candidate.code)}&name=${encodeURIComponent(candidate.name || '')}`;
             const importedFields = Object.entries(candidate.iwencaiFields).slice(0, 3);
             return (
-              <tr key={candidate.code} className="border-b last:border-b-0 hover:bg-muted/25">
-                <td className="px-3 py-2 align-top">
+              <tr key={candidate.code} className="group border-b last:border-b-0 hover:bg-muted/25">
+                <td className="sticky left-0 z-20 bg-card px-2.5 py-2 align-top group-hover:bg-muted/25">
                   <input
                     type="checkbox"
                     checked={selectedCodes.has(candidate.code)}
@@ -147,40 +164,40 @@ const CandidateTable: React.FC<{
                     className="h-4 w-4 rounded border-border"
                   />
                 </td>
-                <td className="px-3 py-2 align-top">
+                <td className="sticky left-11 z-20 bg-card px-3 py-2 align-top group-hover:bg-muted/25">
                   <div className="font-medium text-foreground">{candidate.name || candidate.code}</div>
                   <div className="font-mono text-xs text-muted-foreground">{candidate.code}</div>
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 align-top text-xs text-muted-foreground">{candidate.latestDate || '--'}</td>
-                <td className="px-3 py-2 align-top">
+                <td className="whitespace-nowrap px-3 py-2 align-top">
                   <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800">
                     初筛命中
                   </span>
                 </td>
-                <td className="px-3 py-2 text-right align-top font-mono">{formatMetric('price', candidate.metrics.price)}</td>
-                <td className="px-3 py-2 text-right align-top font-mono">{formatMetric('change_pct', candidate.metrics.change_pct)}</td>
-                <td className="px-3 py-2 text-right align-top font-mono">{formatMetric('pct_chg_25d', candidate.metrics.pct_chg_25d)}</td>
-                <td className="px-3 py-2 text-right align-top font-mono">{formatMetric('ma60', candidate.metrics.ma60)}</td>
-                <td className="px-3 py-2 text-right align-top font-mono">{formatMetric('pe_ratio', candidate.metrics.pe_ratio)}</td>
-                <td className="px-3 py-2 text-right align-top font-mono">{formatMetric('pb_ratio', candidate.metrics.pb_ratio)}</td>
-                <td className="px-3 py-2 text-right align-top font-mono">{formatMetric('amount', candidate.metrics.amount)}</td>
-                <td className="px-3 py-2 text-right align-top font-mono">{formatMetric('turnover_rate', candidate.metrics.turnover_rate)}</td>
-                <td className="px-3 py-2 text-right align-top font-mono">{formatMetric('total_mv', candidate.metrics.total_mv)}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right align-top font-mono">{formatMetric('price', candidate.metrics.price)}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right align-top font-mono">{formatMetric('change_pct', candidate.metrics.change_pct)}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right align-top font-mono">{formatMetric('pct_chg_25d', candidate.metrics.pct_chg_25d)}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right align-top font-mono">{formatMetric('ma60', candidate.metrics.ma60)}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right align-top font-mono">{formatMetric('pe_ratio', candidate.metrics.pe_ratio)}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right align-top font-mono">{formatMetric('pb_ratio', candidate.metrics.pb_ratio)}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right align-top font-mono">{formatMetric('amount', candidate.metrics.amount)}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right align-top font-mono">{formatMetric('turnover_rate', candidate.metrics.turnover_rate)}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-right align-top font-mono">{formatMetric('total_mv', candidate.metrics.total_mv)}</td>
                 <td className="max-w-[280px] px-3 py-2 align-top">
                   <div className="flex flex-wrap gap-1">
                     {candidate.reasons.slice(0, 3).map((reason) => (
-                      <span key={reason} className="rounded border bg-muted/30 px-1.5 py-0.5 text-xs text-muted-foreground">
+                      <span key={reason} className="max-w-full whitespace-normal break-words rounded border bg-muted/30 px-1.5 py-0.5 text-xs leading-4 text-muted-foreground">
                         {reason}
                       </span>
                     ))}
                     {importedFields.map(([key, value]) => (
-                      <span key={key} className="rounded border border-purple-200 bg-purple-50 px-1.5 py-0.5 text-xs text-purple-900">
+                      <span key={key} className="max-w-full whitespace-normal break-words rounded border border-purple-200 bg-purple-50 px-1.5 py-0.5 text-xs leading-4 text-purple-900">
                         {key}: {value}
                       </span>
                     ))}
                   </div>
                 </td>
-                <td className="px-3 py-2 text-right align-top">
+                <td className="whitespace-nowrap px-3 py-2 text-right align-top">
                   <Button asChild variant="outline" size="sm" className="gap-1.5">
                     <Link to={chatUrl}>
                       问股
