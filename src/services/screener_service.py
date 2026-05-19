@@ -290,11 +290,17 @@ def _build_local_query_plan(query: str) -> LocalQueryPlan:
         elif "pe" in normalized and number is not None:
             supported.append(term)
             operator = "<=" if any(mark in term for mark in ["小于", "<"]) else ">="
-            clauses.append(f"h.pe_ttm IS NOT NULL AND h.pe_ttm {operator} {number}")
+            if operator == "<=":
+                clauses.append(f"h.pe_ttm IS NOT NULL AND h.pe_ttm > 0 AND h.pe_ttm {operator} {number}")
+            else:
+                clauses.append(f"h.pe_ttm IS NOT NULL AND h.pe_ttm {operator} {number}")
         elif "pb" in normalized and number is not None:
             supported.append(term)
             operator = "<=" if any(mark in term for mark in ["小于", "<"]) else ">="
-            clauses.append(f"h.pb IS NOT NULL AND h.pb {operator} {number}")
+            if operator == "<=":
+                clauses.append(f"h.pb IS NOT NULL AND h.pb > 0 AND h.pb {operator} {number}")
+            else:
+                clauses.append(f"h.pb IS NOT NULL AND h.pb {operator} {number}")
         else:
             unsupported.append(term)
 
@@ -313,20 +319,50 @@ def _candidate_from_snapshot_row(row: Dict[str, Any], *, source: str) -> Dict[st
     metrics = {
         "price": _pct(_parse_float(row.get("close"))),
         "change_pct": _pct(_parse_float(row.get("pct_chg"))),
+        "amplitude": _pct(_parse_float(row.get("amplitude"))),
+        "amount": _pct(_parse_float(row.get("amount"))),
+        "turnover_rate": _pct(_parse_float(row.get("turnover_rate"))),
+        "volume": _pct(_parse_float(row.get("volume"))),
         "ma5": _pct(_parse_float(row.get("ma5"))),
+        "ma10": _pct(_parse_float(row.get("ma10"))),
         "ma20": _pct(_parse_float(row.get("ma20"))),
+        "ma30": _pct(_parse_float(row.get("ma30"))),
         "ma60": _pct(_parse_float(row.get("ma60"))),
+        "ma120": _pct(_parse_float(row.get("ma120"))),
+        "ma250": _pct(_parse_float(row.get("ma250"))),
         "volume_ratio_20d": _pct(_parse_float(row.get("volume_ratio"))),
+        "pct_chg_3d": _pct(_parse_float(row.get("pct_chg_3d"))),
+        "pct_chg_6d": _pct(_parse_float(row.get("pct_chg_6d"))),
+        "pct_chg_10d": _pct(_parse_float(row.get("pct_chg_10d"))),
+        "pct_chg_25d": _pct(_parse_float(row.get("pct_chg_25d"))),
         "pe_ratio": _pct(_parse_float(row.get("pe_ttm"))),
         "pb_ratio": _pct(_parse_float(row.get("pb"))),
+        "ps_ttm": _pct(_parse_float(row.get("ps_ttm"))),
+        "total_mv": _pct(_parse_float(row.get("total_mv"))),
+        "float_mv": _pct(_parse_float(row.get("float_mv"))),
     }
+    reasons = []
+    if metrics.get("pe_ratio") is not None:
+        reasons.append(f"PE(TTM) {metrics['pe_ratio']}")
+    if metrics.get("pb_ratio") is not None:
+        reasons.append(f"PB {metrics['pb_ratio']}")
+    if metrics.get("price") is not None and metrics.get("ma60") is not None:
+        relation = ">" if float(metrics["price"]) > float(metrics["ma60"]) else "<="
+        reasons.append(f"收盘价 {metrics['price']} {relation} 60日线 {metrics['ma60']}")
+    if metrics.get("pct_chg_25d") is not None:
+        reasons.append(f"25日涨幅 {metrics['pct_chg_25d']}%")
+    if metrics.get("amount") is not None:
+        reasons.append(f"成交额 {float(metrics['amount']) / 100000000:.2f}亿")
+    if row.get("is_st") is False or str(row.get("is_st")).lower() in {"false", "0"}:
+        reasons.append("非ST")
+
     return {
         "code": code,
         "name": name,
         "score": 1.0,
         "matched_strategies": ["local_query"],
-        "reasons": ["本地历史库按策略语句筛选命中。"],
-        "risks": ["仅完成本地初筛，仍需手动选择候选股做增强分析或回测。"],
+        "reasons": reasons or ["满足本地策略筛选条件。"],
+        "risks": [],
         "metrics": {key: value for key, value in metrics.items() if value is not None},
         "iwencai_fields": {},
         "latest_date": latest_date,
@@ -608,6 +644,15 @@ class ScreenerService:
             order_by=plan.order_by,
             limit=limit,
         )
+        if source in {"market_history_unavailable", "market_history_missing_duckdb", "market_history_error"}:
+            reason = {
+                "market_history_unavailable": "本地历史库文件不可用，不能执行策略筛选。",
+                "market_history_missing_duckdb": "当前运行环境缺少 DuckDB，不能执行本地历史库筛选。",
+                "market_history_error": "本地历史库查询失败，不能确认这条策略是否命中。",
+            }.get(source, "本地历史库不可用，不能执行策略筛选。")
+            notes.append(f"{reason} 请检查历史库配置，或先用问财客户端运行并导出 Excel 后导入候选股。")
+            return self._local_query_unavailable_payload(query_text, plan, notes, source)
+
         candidates = []
         if df is not None and not df.empty:
             candidates = [
@@ -634,6 +679,34 @@ class ScreenerService:
             "import_required": False,
             "iwencai_status": "disabled",
             "iwencai_query": query_text,
+            "iwencai_code_count": None,
+            "iwencai_returned_count": None,
+            "iwencai_has_more": False,
+            "iwencai_chunks_info": {},
+            "notes": notes,
+        }
+
+    def _local_query_unavailable_payload(
+        self,
+        query: str,
+        plan: LocalQueryPlan,
+        notes: List[str],
+        source: str,
+    ) -> Dict[str, Any]:
+        return {
+            "strategies": self.list_strategies(),
+            "candidates": [],
+            "total_input": 0,
+            "evaluated": 0,
+            "skipped": 0,
+            "data_mode": source,
+            "execution_mode": "local_query",
+            "local_executable": False,
+            "supported_terms": plan.supported_terms,
+            "unsupported_terms": plan.unsupported_terms,
+            "import_required": True,
+            "iwencai_status": "disabled",
+            "iwencai_query": query,
             "iwencai_code_count": None,
             "iwencai_returned_count": None,
             "iwencai_has_more": False,

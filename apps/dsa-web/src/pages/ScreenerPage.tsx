@@ -19,7 +19,6 @@ import type {
   ScreenerCandidate,
   ScreenerRunResponse,
   ScreenerStrategyId,
-  ScreenerStrategyInfo,
   ScreenerStrategyLibraryItem,
   ScreenerStrategyLibraryUpsert,
 } from '../api/screener';
@@ -53,46 +52,32 @@ const emptyForm: StrategyFormState = {
   query: '',
 };
 
-const metricLabels: Record<string, string> = {
-  price: '价格',
-  change_pct: '涨跌幅',
-  ma20: 'MA20',
-  ma60: 'MA60',
-  bias_ma20_pct: '偏离MA20',
-  volume_ratio_20d: '量比',
-  pe_ratio: 'PE',
-  pb_ratio: 'PB',
-  roe: 'ROE',
-  revenue_yoy: '营收同比',
-  net_profit_yoy: '净利同比',
-};
+const CNY_AMOUNT_KEYS = new Set(['amount', 'total_mv', 'float_mv']);
+const PERCENT_KEYS = new Set([
+  'change_pct',
+  'amplitude',
+  'turnover_rate',
+  'bias_ma20_pct',
+  'pct_chg_3d',
+  'pct_chg_6d',
+  'pct_chg_10d',
+  'pct_chg_25d',
+  'roe',
+  'revenue_yoy',
+  'net_profit_yoy',
+]);
 
 function formatMetric(key: string, value: number | null | undefined): string {
   if (value == null) return '--';
-  if (key.includes('pct') || key.includes('yoy') || key === 'roe') return `${value.toFixed(1)}%`;
+  if (CNY_AMOUNT_KEYS.has(key)) {
+    if (Math.abs(value) >= 100000000) return `${(value / 100000000).toFixed(2)}亿`;
+    if (Math.abs(value) >= 10000) return `${(value / 10000).toFixed(2)}万`;
+    return value.toFixed(0);
+  }
+  if (PERCENT_KEYS.has(key)) return `${value.toFixed(1)}%`;
+  if (key === 'volume') return value.toLocaleString('zh-CN', { maximumFractionDigits: 0 });
   if (key.includes('ratio') && key !== 'pe_ratio' && key !== 'pb_ratio') return `${value.toFixed(2)}x`;
   return Number(value).toFixed(value >= 100 ? 1 : 2);
-}
-
-function strategyTone(id: string): string {
-  switch (id) {
-    case 'iwencai_import':
-      return 'border-purple-200 bg-purple-50 text-purple-800';
-    case 'local_query':
-      return 'border-slate-200 bg-slate-50 text-slate-800';
-    case 'quality_value':
-      return 'border-emerald-200 bg-emerald-50 text-emerald-800';
-    case 'multi_factor':
-      return 'border-sky-200 bg-sky-50 text-sky-800';
-    case 'trend_follow':
-      return 'border-blue-200 bg-blue-50 text-blue-800';
-    case 'pullback':
-      return 'border-amber-200 bg-amber-50 text-amber-800';
-    case 'breakout':
-      return 'border-rose-200 bg-rose-50 text-rose-800';
-    default:
-      return '';
-  }
 }
 
 function buildRunSummary(result: ScreenerRunResponse): string {
@@ -110,93 +95,111 @@ function toUpsertPayload(item: StrategyFormState, previous?: ScreenerStrategyLib
   };
 }
 
-const CandidateRow: React.FC<{
-  candidate: ScreenerCandidate;
-  strategyNames: Map<string, string>;
-}> = ({ candidate, strategyNames }) => {
-  const visibleMetrics = ['price', 'change_pct', 'bias_ma20_pct', 'volume_ratio_20d', 'pe_ratio', 'roe']
-    .filter((key) => candidate.metrics[key] != null);
-  const iwencaiFields = Object.entries(candidate.iwencaiFields).slice(0, 8);
-
-  const chatUrl = `/chat?stock=${encodeURIComponent(candidate.code)}&name=${encodeURIComponent(candidate.name || '')}`;
-
-  return (
-    <div className="rounded-lg border bg-card p-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-base font-semibold text-foreground">{candidate.name || candidate.code}</span>
-            <span className="font-mono text-sm text-muted-foreground">{candidate.code}</span>
-            {candidate.latestDate ? <Badge variant="history">{candidate.latestDate}</Badge> : null}
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {candidate.matchedStrategies.map((id) => (
-              <span key={id} className={cn('rounded-full border px-2 py-0.5 text-xs', strategyTone(id))}>
-                {strategyNames.get(id) || id}
-              </span>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="text-right">
-            <p className="text-xs text-muted-foreground">综合分</p>
-            <p className="text-2xl font-semibold tabular-nums text-foreground">{candidate.score.toFixed(1)}</p>
-          </div>
-          <Button asChild variant="outline" size="sm" className="gap-2">
-            <Link to={chatUrl}>
-              问股
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          </Button>
-        </div>
-      </div>
-
-      {visibleMetrics.length > 0 ? (
-        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-          {visibleMetrics.map((key) => (
-            <div key={key} className="rounded-md border bg-muted/30 px-2.5 py-2">
-              <p className="truncate text-xs text-muted-foreground">{metricLabels[key] || key}</p>
-              <p className="mt-1 font-mono text-sm text-foreground">{formatMetric(key, candidate.metrics[key])}</p>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {iwencaiFields.length > 0 ? (
-        <div className="mt-4 rounded-lg border bg-purple-50/40 p-3">
-          <p className="mb-2 text-xs font-medium text-purple-900">问财字段</p>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            {iwencaiFields.map(([key, value]) => (
-              <div key={key} className="min-w-0">
-                <p className="truncate text-xs text-purple-700/80">{key}</p>
-                <p className="mt-0.5 truncate text-sm text-purple-950">{value}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        <div>
-          <p className="mb-2 text-xs font-medium text-muted-foreground">命中理由</p>
-          <ul className="space-y-1.5 text-sm leading-6 text-foreground">
-            {candidate.reasons.slice(0, 4).map((reason) => <li key={reason}>• {reason}</li>)}
-          </ul>
-        </div>
-        <div>
-          <p className="mb-2 text-xs font-medium text-muted-foreground">风险提示</p>
-          {candidate.risks.length > 0 ? (
-            <ul className="space-y-1.5 text-sm leading-6 text-muted-foreground">
-              {candidate.risks.slice(0, 4).map((risk) => <li key={risk}>• {risk}</li>)}
-            </ul>
-          ) : (
-            <p className="text-sm text-muted-foreground">本地规则未发现明显硬伤，仍需结合公告、研报和持仓仓位确认。</p>
-          )}
-        </div>
-      </div>
+const CandidateTable: React.FC<{
+  candidates: ScreenerCandidate[];
+  selectedCodes: Set<string>;
+  onToggle: (code: string) => void;
+  onToggleAll: () => void;
+  allSelected: boolean;
+}> = ({ candidates, selectedCodes, onToggle, onToggleAll, allSelected }) => (
+  <div className="overflow-hidden rounded-xl border bg-card">
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[1180px] text-sm">
+        <thead className="bg-muted/40 text-xs text-muted-foreground">
+          <tr className="border-b">
+            <th className="w-12 px-3 py-2 text-left">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={onToggleAll}
+                aria-label="全选候选股"
+                className="h-4 w-4 rounded border-border"
+              />
+            </th>
+            <th className="px-3 py-2 text-left font-medium">股票</th>
+            <th className="px-3 py-2 text-left font-medium">日期</th>
+            <th className="px-3 py-2 text-left font-medium">状态</th>
+            <th className="px-3 py-2 text-right font-medium">收盘价</th>
+            <th className="px-3 py-2 text-right font-medium">涨跌幅</th>
+            <th className="px-3 py-2 text-right font-medium">25日涨幅</th>
+            <th className="px-3 py-2 text-right font-medium">MA60</th>
+            <th className="px-3 py-2 text-right font-medium">PE</th>
+            <th className="px-3 py-2 text-right font-medium">PB</th>
+            <th className="px-3 py-2 text-right font-medium">成交额</th>
+            <th className="px-3 py-2 text-right font-medium">换手率</th>
+            <th className="px-3 py-2 text-right font-medium">总市值</th>
+            <th className="px-3 py-2 text-left font-medium">命中要点</th>
+            <th className="px-3 py-2 text-right font-medium">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {candidates.map((candidate) => {
+            const chatUrl = `/chat?stock=${encodeURIComponent(candidate.code)}&name=${encodeURIComponent(candidate.name || '')}`;
+            const importedFields = Object.entries(candidate.iwencaiFields).slice(0, 3);
+            return (
+              <tr key={candidate.code} className="border-b last:border-b-0 hover:bg-muted/25">
+                <td className="px-3 py-2 align-top">
+                  <input
+                    type="checkbox"
+                    checked={selectedCodes.has(candidate.code)}
+                    onChange={() => onToggle(candidate.code)}
+                    aria-label={`选择 ${candidate.name || candidate.code}`}
+                    className="h-4 w-4 rounded border-border"
+                  />
+                </td>
+                <td className="px-3 py-2 align-top">
+                  <div className="font-medium text-foreground">{candidate.name || candidate.code}</div>
+                  <div className="font-mono text-xs text-muted-foreground">{candidate.code}</div>
+                </td>
+                <td className="whitespace-nowrap px-3 py-2 align-top text-xs text-muted-foreground">{candidate.latestDate || '--'}</td>
+                <td className="px-3 py-2 align-top">
+                  <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800">
+                    初筛命中
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-right align-top font-mono">{formatMetric('price', candidate.metrics.price)}</td>
+                <td className="px-3 py-2 text-right align-top font-mono">{formatMetric('change_pct', candidate.metrics.change_pct)}</td>
+                <td className="px-3 py-2 text-right align-top font-mono">{formatMetric('pct_chg_25d', candidate.metrics.pct_chg_25d)}</td>
+                <td className="px-3 py-2 text-right align-top font-mono">{formatMetric('ma60', candidate.metrics.ma60)}</td>
+                <td className="px-3 py-2 text-right align-top font-mono">{formatMetric('pe_ratio', candidate.metrics.pe_ratio)}</td>
+                <td className="px-3 py-2 text-right align-top font-mono">{formatMetric('pb_ratio', candidate.metrics.pb_ratio)}</td>
+                <td className="px-3 py-2 text-right align-top font-mono">{formatMetric('amount', candidate.metrics.amount)}</td>
+                <td className="px-3 py-2 text-right align-top font-mono">{formatMetric('turnover_rate', candidate.metrics.turnover_rate)}</td>
+                <td className="px-3 py-2 text-right align-top font-mono">{formatMetric('total_mv', candidate.metrics.total_mv)}</td>
+                <td className="max-w-[280px] px-3 py-2 align-top">
+                  <div className="flex flex-wrap gap-1">
+                    {candidate.reasons.slice(0, 3).map((reason) => (
+                      <span key={reason} className="rounded border bg-muted/30 px-1.5 py-0.5 text-xs text-muted-foreground">
+                        {reason}
+                      </span>
+                    ))}
+                    {importedFields.map(([key, value]) => (
+                      <span key={key} className="rounded border border-purple-200 bg-purple-50 px-1.5 py-0.5 text-xs text-purple-900">
+                        {key}: {value}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                <td className="px-3 py-2 text-right align-top">
+                  <Button asChild variant="outline" size="sm" className="gap-1.5">
+                    <Link to={chatUrl}>
+                      问股
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </Link>
+                  </Button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
-  );
-};
+  </div>
+);
+
+const selectAllCandidateCodes = (candidates: ScreenerCandidate[]): Set<string> => (
+  new Set(candidates.map((candidate) => candidate.code))
+);
 
 const StrategyForm: React.FC<{
   form: StrategyFormState;
@@ -236,7 +239,6 @@ const StrategyForm: React.FC<{
 );
 
 const ScreenerPage: React.FC = () => {
-  const [strategies, setStrategies] = useState<ScreenerStrategyInfo[]>([]);
   const [library, setLibrary] = useState<ScreenerStrategyLibraryItem[]>([]);
   const [selectedLibraryId, setSelectedLibraryId] = useState<string | null>(null);
   const [iwencaiQuery, setIwencaiQuery] = useState(DEFAULT_QUERY);
@@ -252,6 +254,7 @@ const ScreenerPage: React.FC = () => {
   const [form, setForm] = useState<StrategyFormState>(emptyForm);
   const [activeTab, setActiveTab] = useState<ScreenerWorkspaceTab>('candidates');
   const [selectedBacktestCode, setSelectedBacktestCode] = useState('');
+  const [selectedCandidateCodes, setSelectedCandidateCodes] = useState<Set<string>>(new Set());
   const [enhanceOptions, setEnhanceOptions] = useState({
     announcements: true,
     reports: true,
@@ -261,9 +264,8 @@ const ScreenerPage: React.FC = () => {
 
   useEffect(() => {
     document.title = '策略选股 - DSA';
-    Promise.all([screenerApi.getStrategies(), screenerApi.getLibrary()])
-      .then(([strategyItems, libraryItems]) => {
-        setStrategies(strategyItems);
+    screenerApi.getLibrary()
+      .then((libraryItems) => {
         setLibrary(libraryItems);
         if (libraryItems.length > 0) {
           setSelectedLibraryId(libraryItems[0].id);
@@ -273,7 +275,6 @@ const ScreenerPage: React.FC = () => {
       .catch((error) => setPageError(getParsedApiError(error)));
   }, []);
 
-  const strategyNames = useMemo(() => new Map(strategies.map((item) => [item.id, item.name])), [strategies]);
   const selectedStrategy = useMemo(
     () => library.find((item) => item.id === selectedLibraryId) ?? library[0] ?? null,
     [library, selectedLibraryId],
@@ -281,7 +282,24 @@ const ScreenerPage: React.FC = () => {
 
   const queryDirty = selectedStrategy ? iwencaiQuery.trim() !== selectedStrategy.query.trim() : Boolean(iwencaiQuery.trim());
   const candidateRecords = result?.candidates ?? [];
+  const selectedCandidateCount = selectedCandidateCodes.size;
+  const allCandidatesSelected = candidateRecords.length > 0 && selectedCandidateCount === candidateRecords.length;
   const selectedBacktestCandidate = candidateRecords.find((item) => item.code === selectedBacktestCode) ?? candidateRecords[0] ?? null;
+
+  const toggleCandidate = (code: string) => {
+    setSelectedCandidateCodes((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  };
+
+  const toggleAllCandidates = () => {
+    setSelectedCandidateCodes((prev) => (
+      prev.size === candidateRecords.length ? new Set() : selectAllCandidateCodes(candidateRecords)
+    ));
+  };
 
   const openNewStrategy = (initialQuery = iwencaiQuery) => {
     setEditingItem(null);
@@ -307,6 +325,7 @@ const ScreenerPage: React.FC = () => {
     setSelectedLibraryId(item.id);
     setIwencaiQuery(item.query);
     setResult(null);
+    setSelectedCandidateCodes(new Set());
     setPickerOpen(false);
   };
 
@@ -386,6 +405,7 @@ const ScreenerPage: React.FC = () => {
         strategyLibraryId: selectedStrategy?.id,
       });
       setResult(response);
+      setSelectedCandidateCodes(selectAllCandidateCodes(response.candidates));
       setSelectedBacktestCode(response.candidates[0]?.code ?? '');
       setActiveTab('candidates');
       if (selectedStrategy) {
@@ -417,6 +437,7 @@ const ScreenerPage: React.FC = () => {
         limit: 100,
       });
       setResult(response);
+      setSelectedCandidateCodes(selectAllCandidateCodes(response.candidates));
       setSelectedBacktestCode(response.candidates[0]?.code ?? '');
       setActiveTab('candidates');
       if (selectedStrategy) {
@@ -684,7 +705,9 @@ const ScreenerPage: React.FC = () => {
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                       <h3 className="text-sm font-semibold text-foreground">候选增强</h3>
-                      <p className="mt-1 text-xs text-muted-foreground">先勾选能力，再对少量候选股做精选分析；这里不会在初筛时自动调用。</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        已选择 {selectedCandidateCount} / {candidateRecords.length} 只；先勾选能力，再对少量候选股做精选分析。
+                      </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {([
@@ -703,9 +726,9 @@ const ScreenerPage: React.FC = () => {
                           {label}
                         </label>
                       ))}
-                      <Button variant="outline" size="sm" disabled className="gap-2">
+                      <Button variant="outline" size="sm" disabled={selectedCandidateCount === 0} className="gap-2">
                         <Sparkles className="h-4 w-4" />
-                        增强分析
+                        增强分析（待接入）
                       </Button>
                     </div>
                   </div>
@@ -713,11 +736,13 @@ const ScreenerPage: React.FC = () => {
               ) : null}
 
               {result.candidates.length > 0 ? (
-                <div className="space-y-3">
-                  {result.candidates.map((candidate) => (
-                    <CandidateRow key={candidate.code} candidate={candidate} strategyNames={strategyNames} />
-                  ))}
-                </div>
+                <CandidateTable
+                  candidates={result.candidates}
+                  selectedCodes={selectedCandidateCodes}
+                  onToggle={toggleCandidate}
+                  onToggleAll={toggleAllCandidates}
+                  allSelected={allCandidatesSelected}
+                />
               ) : (
                 <EmptyState
                   title={result.importRequired ? '等待导入候选股' : '没有命中候选'}
@@ -771,8 +796,8 @@ const ScreenerPage: React.FC = () => {
                         <p className="mt-1 truncate text-sm font-medium">{selectedStrategy?.name || '临时策略'}</p>
                       </div>
                       <div className="rounded-md border bg-background px-3 py-2">
-                        <p className="text-xs text-muted-foreground">综合分</p>
-                        <p className="mt-1 font-mono text-sm font-medium">{selectedBacktestCandidate.score.toFixed(1)}</p>
+                        <p className="text-xs text-muted-foreground">初筛状态</p>
+                        <p className="mt-1 text-sm font-medium">已命中</p>
                       </div>
                       <div className="rounded-md border bg-background px-3 py-2">
                         <p className="text-xs text-muted-foreground">行情日期</p>

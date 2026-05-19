@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 > For user-friendly release highlights, see the [GitHub Releases](https://github.com/ZhuLinsen/daily_stock_analysis/releases) page.
 
 ## [Unreleased]
+- [改进] Web 策略选股候选结果改为表格展示，支持全选/部分选择候选股，并隐藏无实际排序含义的综合分。
+- [修复] 本地策略选股在历史库不可用或查询失败时明确提示配置问题，并让 PE/PB 小于阈值条件排除非正估值，避免把无法执行误判为 0 命中。
 - [改进] Web 策略选股初筛收敛为本地选股与问财 Excel 导入两种模式，本地不支持的策略条件会明确提示原因并引导导入候选股，不再默认在线调用问财召回。
 - [改进] Web 策略选股页扩展为策略沉淀、候选增强、候选回测和持仓验证工作区，先提供候选记录与持仓验证入口壳子，交易仍由用户手动执行。
 - [新功能] 新增独立的 DuckDB 大历史行情库导入与查询链路，支持把“每天一表”不复权/前复权 CSV 解包建库，用于策略选股、低频量化分析和回测。

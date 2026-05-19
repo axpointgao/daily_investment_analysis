@@ -14,6 +14,7 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.services.screener_service import ScreenerService
+from src.services.screener_service import _build_local_query_plan
 from src.services.screener_strategy_library_service import ScreenerStrategyLibraryService
 
 
@@ -77,6 +78,30 @@ class TestScreenerService(unittest.TestCase):
         self.assertTrue(result["import_required"])
         self.assertIn("卖出信号", result["unsupported_terms"])
         self.assertEqual(result["iwencai_status"], "disabled")
+
+    def test_pe_pb_less_than_filters_exclude_non_positive_values(self) -> None:
+        plan = _build_local_query_plan("PE小于25，PB小于3")
+
+        self.assertIn("h.pe_ttm > 0", plan.where_clauses[0])
+        self.assertIn("h.pb > 0", plan.where_clauses[1])
+
+    @patch("src.services.screener_service.MarketHistoryStore.is_enabled", return_value=True)
+    @patch("src.services.screener_service.MarketHistoryStore.run_latest_snapshot_query")
+    def test_run_query_reports_history_store_unavailable(self, query_mock, _enabled) -> None:
+        query_mock.return_value = (None, "market_history_unavailable")
+
+        result = ScreenerService().run(
+            strategy_ids=["trend_follow"],
+            stock_codes=None,
+            include_fundamentals=False,
+            use_iwencai=False,
+            iwencai_query="PE小于25，PB小于3，非ST",
+        )
+
+        self.assertFalse(result["local_executable"])
+        self.assertTrue(result["import_required"])
+        self.assertEqual(result["data_mode"], "market_history_unavailable")
+        self.assertIn("本地历史库文件不可用", result["notes"][0])
 
     def test_import_iwencai_excel_converts_rows_to_candidates(self) -> None:
         buffer = BytesIO()
